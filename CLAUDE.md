@@ -317,53 +317,6 @@ Critical deployment sequence (dependencies must be deployed first):
 
 **Note**: Exact deployment order depends on contract dependencies defined in each submodule. Review contract constructors and initialization requirements.
 
-## Dependency Management
-
-### Types of Dependencies
-
-1. **Immutable Dependencies** (lib/immutable/)
-   - External libraries and contracts that don't change based on sibling requirements
-   - Full source code is available
-   - Examples: OpenZeppelin, standard libraries
-
-2. **Mutable Dependencies** (lib/mutable/)
-   - Dependencies from sibling submodules
-   - ONLY interfaces and abstract contracts are exposed
-   - NO implementation details are available
-   - Changes to these dependencies must go through the change request process
-
-### Important Rules
-
-- **NEVER** access implementation details of mutable dependencies
-- Mutable dependencies only expose interfaces and abstract contracts
-- If a feature requires changes to a mutable dependency, add it to the change request queue
-- All development must follow Test-Driven Development (TDD) principles using Foundry
-
-### Change Request Process
-
-When a feature requires changes to a mutable dependency:
-
-1. Add the request to `MutableChangeRequests.json` with format:
-   ```json
-   {
-     "requests": [
-       {
-         "dependency": "dependency-name",
-         "changes": [
-           {
-             "fileName": "ISomeInterface.sol",
-             "description": "Plain language description of what needs to change"
-           }
-         ]
-       }
-     ]
-   }
-   ```
-
-2. **STOP WORK** immediately after adding the change request
-3. Inform the user that dependency changes are needed
-4. Wait for the dependency to be updated before continuing
-
 ## API Endpoint Structure
 
 The local server should expose deployment data at `http://localhost:3001/contracts`:
