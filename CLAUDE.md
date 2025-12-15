@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Purpose
 
-The phStaging2 project provides **Phase 2 deployment staging infrastructure** for the Phoenix ecosystem. This is a sibling project to deployment-staging-RM (Phase 1) and serves as the orchestration layer for deploying Phase 2 contracts (stable yield accumulator, phlimbo emergency action, phUSD minter) to multiple networks.
+The phStaging2 project provides **Phase 2 deployment staging infrastructure** for the Phoenix ecosystem. This is a sibling project to deployment-staging-RM (Phase 1) and serves as the orchestration layer for deploying Phase 2 contracts (stable yield accumulator, phlimbo, phUSD minter) to multiple networks.
 
 **Key Role**: This project:
 - Deploys Phase 2 contracts to Anvil (local), Sepolia (testnet), and Mainnet
@@ -16,7 +16,7 @@ The phStaging2 project provides **Phase 2 deployment staging infrastructure** fo
 
 **Sibling Relationship**:
 - **deployment-staging-RM**: Phase 1 contracts (vault-RM, reflax-mint bonding, etc.)
-- **phStaging2**: Phase 2 contracts (stable-yield-accumulator, phlimbo-ea, phUSD-stable-minter)
+- **phStaging2**: Phase 2 contracts (stable-yield-accumulator, phlimbo, phUSD-stable-minter)
 - Both projects share similar architecture patterns but manage different contract sets
 
 ## Architecture Overview
@@ -51,10 +51,10 @@ The following contracts are deployed as part of Phase 2:
 **Purpose**: Accumulates yield from stablecoins and distributes to stakeholders
 **Git Submodule**: https://github.com/Behodler/stable-yield-accumulator
 
-### Phlimbo Emergency Action
-**Location**: `lib/phlimbo-ea/`
-**Purpose**: Emergency action mechanisms for the Phlimbo (Phoenix Limbo) system
-**Git Submodule**: https://github.com/Behodler/phlimbo-ea
+### Phlimbo
+**Location**: `lib/phlimbo/`
+**Purpose**: Yield farm for staking phUSD and earning mixed yield in phUSD and a stablecoin such as USDC
+**Git Submodule**: https://github.com/Behodler/phlimbo
 
 ### phUSD Stable Minter
 **Location**: `lib/phUSD-stable-minter/`
@@ -70,7 +70,7 @@ phStaging2/
 ├── lib/                          # Git submodules
 │   ├── forge-std/               # Foundry standard library
 │   ├── stable-yield-accumulator/ # Phase 2: Yield accumulation
-│   ├── phlimbo-ea/              # Phase 2: Emergency actions
+│   ├── phlimbo/                 # Phase 2: Yield farm for phUSD staking
 │   ├── phUSD-stable-minter/     # Phase 2: phUSD minting
 │   ├── mutable/                 # Mutable dependencies (interfaces only)
 │   └── immutable/               # Immutable dependencies (full source)
@@ -120,7 +120,7 @@ git submodule update --remote
 ```
 lib/forge-std              - Foundry testing framework (excluded from deployment)
 lib/stable-yield-accumulator - Phase 2: Yield accumulation contracts
-lib/phlimbo-ea            - Phase 2: Emergency action contracts
+lib/phlimbo               - Phase 2: Yield farm for phUSD staking
 lib/phUSD-stable-minter   - Phase 2: phUSD minting contracts
 ```
 
@@ -134,7 +134,7 @@ libs = ["lib"]
 
 remappings = [
     "@stable-yield-accumulator/=lib/stable-yield-accumulator/src/",
-    "@phlimbo-ea/=lib/phlimbo-ea/src/",
+    "@phlimbo/=lib/phlimbo/src/",
     "@phUSD-stable-minter/=lib/phUSD-stable-minter/src/",
     "@openzeppelin/=lib/openzeppelin-contracts/contracts/",
     "@forge-std/=lib/forge-std/src/"
@@ -162,8 +162,8 @@ Each network maintains a `progress.<chainId>.json` file that tracks deployment s
       "txHash": "0x..."
     },
     {
-      "step": "deploy_phlimbo_ea",
-      "contract": "PhlimboEmergencyAction",
+      "step": "deploy_phlimbo",
+      "contract": "Phlimbo",
       "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
       "timestamp": "2025-12-14T10:20:00Z",
       "txHash": "0x..."
@@ -307,7 +307,7 @@ Critical deployment sequence (dependencies must be deployed first):
 
 2. **Core Phase 2 Contracts**
    - StableYieldAccumulator (yield aggregation)
-   - PhlimboEmergencyAction (emergency controls)
+   - Phlimbo (yield farm for phUSD staking)
    - phUSDStableMinter (minting logic)
 
 3. **Initialization**
@@ -382,10 +382,10 @@ The local server should expose deployment data at `http://localhost:3001/contrac
           "abi": [...],
           "name": "Stable Yield Accumulator"
         },
-        "phlimboEmergencyAction": {
+        "phlimbo": {
           "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
           "abi": [...],
-          "name": "Phlimbo Emergency Action"
+          "name": "Phlimbo"
         },
         "phUSDStableMinter": {
           "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
@@ -445,7 +445,7 @@ export default defineConfig({
       project: '.',
       deployments: {
         StableYieldAccumulator: deployments.contracts.stableYieldAccumulator.address,
-        PhlimboEmergencyAction: deployments.contracts.phlimboEmergencyAction.address,
+        Phlimbo: deployments.contracts.phlimbo.address,
         PhUSDStableMinter: deployments.contracts.phUSDStableMinter.address
       }
     })
@@ -912,7 +912,7 @@ This sibling project demonstrates the same architecture patterns for Phase 1 con
 - TDD testing approach
 
 **Key Differences from Sibling**:
-- phStaging2 deploys Phase 2 contracts (stable-yield-accumulator, phlimbo-ea, phUSD-stable-minter)
+- phStaging2 deploys Phase 2 contracts (stable-yield-accumulator, phlimbo, phUSD-stable-minter)
 - deployment-staging-RM deploys Phase 1 contracts (vault-RM, behodler3-tokenlaunch, flax-token)
 - phStaging2 uses `progress.<chainId>.json` for multi-network resilience
 - Both share similar npm scripts and server infrastructure patterns
@@ -920,7 +920,7 @@ This sibling project demonstrates the same architecture patterns for Phase 1 con
 ## Important Constraints
 
 - This repo contains **no production contract code** - only deployment orchestration
-- All contract logic lives in submodule repos (stable-yield-accumulator, phlimbo-ea, phUSD-stable-minter)
+- All contract logic lives in submodule repos (stable-yield-accumulator, phlimbo, phUSD-stable-minter)
 - Changes to contract code must be made in respective repos and pulled via submodule updates
 - This is a **multi-network deployment tool** - supports Anvil, Sepolia, and Mainnet
 - Follow Solidity best practices and naming conventions
