@@ -9,7 +9,8 @@ remappings = [
     "@phUSD-stable-minter/=lib/phUSD-stable-minter/src/",
     "@stable-yield-accumulator/=lib/stable-yield-accumulator/src/",
     "@openzeppelin/contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/contracts/",
-    "@forge-std/=lib/forge-std/src/"
+    "@forge-std/=lib/forge-std/src/",
+    "@vault-interfaces/=lib/phUSD-stable-minter/lib/mutable/vault/src/interfaces/"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

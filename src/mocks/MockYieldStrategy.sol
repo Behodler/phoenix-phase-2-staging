@@ -4,13 +4,14 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@vault-interfaces/IYieldStrategy.sol";
 
 /**
  * @title MockYieldStrategy
  * @notice Mock ERC4626-style vault for yield strategy testing
- * @dev Simplified implementation for local testing
+ * @dev Simplified implementation for local testing that conforms to IYieldStrategy interface
  */
-contract MockYieldStrategy is Ownable {
+contract MockYieldStrategy is Ownable, IYieldStrategy {
     using SafeERC20 for IERC20;
 
     // Track principal deposits per client
