@@ -1,12 +1,12 @@
 [submodule "lib/forge-std"]
 	path = lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-[submodule "lib/stable-yield-accumulator"]
-	path = lib/stable-yield-accumulator
-	url = https://github.com/Behodler/stable-yield-accumulator
 [submodule "lib/phlimbo-ea"]
 	path = lib/phlimbo-ea
 	url = https://github.com/Behodler/phlimbo-ea
 [submodule "lib/phUSD-stable-minter"]
 	path = lib/phUSD-stable-minter
 	url = https://github.com/Behodler/phUSD-stable-minter
+[submodule "lib/stable-yield-accumulator"]
+	path = lib/stable-yield-accumulator
+	url = https://github.com/Behodler/stable-yield-accumulator
