@@ -418,6 +418,20 @@ Generated hooks are published as `@behodler/wagmi-hooks` package:
 
 ## Environment Configuration
 
+### CRITICAL: Files That Must NEVER Be Committed
+
+**The following files contain sensitive credentials and must NEVER be added to source control:**
+
+- **`.envrc`** - Contains environment variables including private keys and API tokens
+- **`.npmrc`** - Contains authentication tokens for package registries
+
+These files are listed in `.gitignore` and must remain there. If you ever see these files tracked in git, immediately run:
+```bash
+git rm --cached .envrc .npmrc
+```
+
+**Use example files instead**: Create `.envrc.example` and `.npmrc.example` with placeholder values for documentation purposes.
+
 ### Required Variables in `.env`
 
 ```bash
@@ -456,10 +470,10 @@ export FOUNDRY_OPTIMIZER=true
 export FOUNDRY_OPTIMIZER_RUNS=200
 ```
 
-### .npmrc Requirements
+### .npmrc Requirements (DO NOT COMMIT - use .npmrc.example)
 ```
-@behodler:registry=https://registry.npmjs.org/
-//registry.npmjs.org/:_authToken=${NPM_TOKEN}
+@behodler:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
 ```
 
 ## Development Guidelines
