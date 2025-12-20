@@ -1,0 +1,46 @@
+{
+  "name": "@behodler/phase2-wagmi-hooks",
+  "version": "0.1.0",
+  "description": "Type-safe Wagmi hooks for Phoenix Phase 2 protocol contracts (MockPhUSD, MockRewardToken, MockYieldStrategy, PhusdStableMinter, PhlimboEA)",
+  "main": "generated.ts",
+  "types": "generated.ts",
+  "type": "module",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "@behodler:registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Behodler/phStaging2.git",
+    "directory": "hooks"
+  },
+  "keywords": [
+    "wagmi",
+    "ethereum",
+    "react",
+    "hooks",
+    "phoenix",
+    "behodler",
+    "phusd",
+    "phlimbo",
+    "yield-strategy",
+    "stable-minter",
+    "typescript",
+    "phase2"
+  ],
+  "author": "Behodler",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Behodler/phStaging2/issues"
+  },
+  "homepage": "https://github.com/Behodler/phStaging2#readme",
+  "peerDependencies": {
+    "viem": "^2.0.0",
+    "wagmi": "^2.0.0"
+  },
+  "files": [
+    "generated.ts",
+    "README.md",
+    "CHANGELOG.md"
+  ]
+}

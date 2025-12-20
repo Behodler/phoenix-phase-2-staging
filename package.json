@@ -7,14 +7,26 @@
     "deploy:local": "forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow",
     "extract:addresses": "node server/extract-addresses.js",
     "serve": "node server/index.js",
-    "dev": "npm run start:anvil & sleep 3 && npm run deploy:local && npm run extract:addresses && npm run serve"
+    "dev": "npm run start:anvil & sleep 3 && npm run deploy:local && npm run extract:addresses && npm run serve",
+    "generate:hooks": "wagmi generate",
+    "publish:hooks": "cd hooks && npm publish",
+    "version:hooks": "cd hooks && npm version",
+    "update:hooks": "npm run generate:hooks && npm run version:hooks patch && npm run publish:hooks"
   },
-  "keywords": ["phoenix", "deployment", "foundry", "local", "development"],
+  "keywords": [
+    "phoenix",
+    "deployment",
+    "foundry",
+    "local",
+    "development"
+  ],
   "author": "Behodler",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@wagmi/cli": "^2.8.0"
+  }
 }
