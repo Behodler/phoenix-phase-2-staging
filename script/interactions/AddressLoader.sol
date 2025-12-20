@@ -6,52 +6,115 @@ import "@forge-std/console.sol";
 
 /**
  * @title AddressLoader
- * @notice Helper library to load deployed contract addresses from local.json
- * @dev Reads addresses from server/deployments/local.json for interaction scripts
+ * @notice Helper library to load deployed contract addresses
+ * @dev Addresses are deterministic in Anvil based on deployer nonce
+ *
+ * Deployment Order (nonce):
+ *   0: MockPhUSD
+ *   1: MockUSDC (RewardToken)
+ *   2: MockUSDT
+ *   3: MockDAI
+ *   4: YieldStrategyUSDT
+ *   5: YieldStrategyDAI
+ *   6: PhusdStableMinter
+ *   7: StableYieldAccumulator
+ *   8: PhlimboEA
  */
 library AddressLoader {
+    // ========== Token Addresses ==========
+
     /**
-     * @notice Load MockPhUSD address from local.json
-     * @dev Reads from server/deployments/local.json
+     * @notice Load MockPhUSD address (nonce 0)
      * @return Address of deployed MockPhUSD contract
      */
-    function getPhUSD() internal view returns (address) {
-        // For Anvil, contracts are deployed deterministically
-        // These addresses match what's in local.json
+    function getPhUSD() internal pure returns (address) {
         return 0x5FbDB2315678afecb367f032d93F642f64180aa3;
     }
 
     /**
-     * @notice Load MockRewardToken address from local.json
-     * @return Address of deployed MockRewardToken contract
+     * @notice Load MockUSDC (RewardToken) address (nonce 1)
+     * @dev This is the consolidated reward token for Phlimbo
+     * @return Address of deployed MockUSDC contract
      */
-    function getRewardToken() internal view returns (address) {
+    function getUSDC() internal pure returns (address) {
         return 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512;
     }
 
     /**
-     * @notice Load MockYieldStrategy address from local.json
-     * @return Address of deployed MockYieldStrategy contract
+     * @notice Alias for getUSDC for backwards compatibility
      */
-    function getYieldStrategy() internal view returns (address) {
+    function getRewardToken() internal pure returns (address) {
+        return getUSDC();
+    }
+
+    /**
+     * @notice Load MockUSDT address (nonce 2)
+     * @return Address of deployed MockUSDT contract
+     */
+    function getUSDT() internal pure returns (address) {
         return 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0;
     }
 
     /**
-     * @notice Load PhusdStableMinter address from local.json
-     * @return Address of deployed PhusdStableMinter contract
+     * @notice Load MockDAI address (nonce 3)
+     * @return Address of deployed MockDAI contract
      */
-    function getMinter() internal view returns (address) {
+    function getDAI() internal pure returns (address) {
         return 0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9;
     }
 
+    // ========== Yield Strategy Addresses ==========
+
     /**
-     * @notice Load PhlimboEA address from local.json
-     * @return Address of deployed PhlimboEA contract
+     * @notice Load YieldStrategyUSDT address (nonce 4)
+     * @return Address of deployed YieldStrategyUSDT contract
      */
-    function getPhlimbo() internal view returns (address) {
+    function getYieldStrategyUSDT() internal pure returns (address) {
         return 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9;
     }
+
+    /**
+     * @notice Load YieldStrategyDAI address (nonce 5)
+     * @return Address of deployed YieldStrategyDAI contract
+     */
+    function getYieldStrategyDAI() internal pure returns (address) {
+        return 0x5FC8d32690cc91D4c39d9d3abcBD16989F875707;
+    }
+
+    /**
+     * @notice Alias for backwards compatibility - returns USDT strategy
+     */
+    function getYieldStrategy() internal pure returns (address) {
+        return getYieldStrategyUSDT();
+    }
+
+    // ========== Core Contract Addresses ==========
+
+    /**
+     * @notice Load PhusdStableMinter address (nonce 6)
+     * @return Address of deployed PhusdStableMinter contract
+     */
+    function getMinter() internal pure returns (address) {
+        return 0x0165878A594ca255338adfa4d48449f69242Eb8F;
+    }
+
+    /**
+     * @notice Load StableYieldAccumulator address (nonce 7)
+     * @return Address of deployed StableYieldAccumulator contract
+     */
+    function getAccumulator() internal pure returns (address) {
+        return 0xa513E6E4b8f2a923D98304ec87F64353C4D5C853;
+    }
+
+    /**
+     * @notice Load PhlimboEA address (nonce 8)
+     * @return Address of deployed PhlimboEA contract
+     */
+    function getPhlimbo() internal pure returns (address) {
+        return 0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6;
+    }
+
+    // ========== Test Helpers ==========
 
     /**
      * @notice Get default test user address (Anvil account #0)
@@ -73,14 +136,25 @@ library AddressLoader {
     /**
      * @notice Log all deployed addresses for reference
      */
-    function logAddresses() internal view {
+    function logAddresses() internal pure {
         console.log("=== Deployed Contract Addresses ===");
-        console.log("MockPhUSD:", getPhUSD());
-        console.log("MockRewardToken:", getRewardToken());
-        console.log("MockYieldStrategy:", getYieldStrategy());
-        console.log("PhusdStableMinter:", getMinter());
-        console.log("PhlimboEA:", getPhlimbo());
-        console.log("Default User:", getDefaultUser());
+        console.log("");
+        console.log("Tokens:");
+        console.log("  MockPhUSD:", getPhUSD());
+        console.log("  MockUSDC:", getUSDC());
+        console.log("  MockUSDT:", getUSDT());
+        console.log("  MockDAI:", getDAI());
+        console.log("");
+        console.log("Yield Strategies:");
+        console.log("  YieldStrategyUSDT:", getYieldStrategyUSDT());
+        console.log("  YieldStrategyDAI:", getYieldStrategyDAI());
+        console.log("");
+        console.log("Core Contracts:");
+        console.log("  PhusdStableMinter:", getMinter());
+        console.log("  StableYieldAccumulator:", getAccumulator());
+        console.log("  PhlimboEA:", getPhlimbo());
+        console.log("");
+        console.log("Test User:", getDefaultUser());
         console.log("===================================");
     }
 }

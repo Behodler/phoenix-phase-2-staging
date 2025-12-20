@@ -16,7 +16,7 @@
     "interact:stake": "forge script script/interactions/StakeOnPhlimbo.s.sol:StakeOnPhlimbo --rpc-url http://localhost:8545 --broadcast",
     "interact:claim-rewards": "forge script script/interactions/ClaimPhlimboRewards.s.sol:ClaimPhlimboRewards --rpc-url http://localhost:8545 --broadcast",
     "interact:withdraw": "forge script script/interactions/WithdrawFromPhlimbo.s.sol:WithdrawFromPhlimbo --rpc-url http://localhost:8545 --broadcast",
-    "interact:claim-accumulator": "forge script script/interactions/ClaimYieldAccumulator.s.sol:ClaimYieldAccumulator --rpc-url http://localhost:8545 --broadcast",
+    "interact:claim-accumulator": "forge script script/interactions/ClaimAccumulatorYield.s.sol:ClaimAccumulatorYield --rpc-url http://localhost:8545 --broadcast",
     "view:pending-rewards": "forge script script/interactions/ViewPendingRewards.s.sol:ViewPendingRewards --rpc-url http://localhost:8545",
     "view:pool": "forge script script/interactions/ViewPoolInfo.s.sol:ViewPoolInfo --rpc-url http://localhost:8545",
     "view:yield-strategies": "forge script script/interactions/ViewYieldStrategies.s.sol:ViewYieldStrategies --rpc-url http://localhost:8545",
