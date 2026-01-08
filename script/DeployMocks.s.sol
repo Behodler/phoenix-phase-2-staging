@@ -8,9 +8,11 @@ import "../src/mocks/MockRewardToken.sol";
 import "../src/mocks/MockUSDT.sol";
 import "../src/mocks/MockDAI.sol";
 import "../src/mocks/MockYieldStrategy.sol";
+import "../src/mocks/MockEYE.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
+import "@pauser/Pauser.sol";
 
 /**
  * @title DeployMocks
@@ -35,6 +37,8 @@ contract DeployMocks is Script {
     StableYieldAccumulator public accumulator;
     PhusdStableMinter public minter;
     PhlimboEA public phlimbo;
+    MockEYE public eyeToken;
+    Pauser public pauser;
 
     // Progress tracking structure
     struct ContractDeployment {
@@ -82,6 +86,19 @@ contract DeployMocks is Script {
         dai = new MockDAI();
         _trackDeployment("MockDAI", address(dai), gasBefore - gasleft());
         console.log("MockDAI deployed at:", address(dai));
+
+        // ====== PHASE 1.5: EYE Token and Pauser Deployment ======
+        console.log("\n=== Phase 1.5: Deploying EYE Token and Pauser ===");
+
+        gasBefore = gasleft();
+        eyeToken = new MockEYE();
+        _trackDeployment("MockEYE", address(eyeToken), gasBefore - gasleft());
+        console.log("MockEYE deployed at:", address(eyeToken));
+
+        gasBefore = gasleft();
+        pauser = new Pauser(address(eyeToken));
+        _trackDeployment("Pauser", address(pauser), gasBefore - gasleft());
+        console.log("Pauser deployed at:", address(pauser));
 
         // ====== PHASE 2: Yield Strategy Deployment ======
         console.log("\n=== Phase 2: Deploying Yield Strategies ===");
@@ -230,16 +247,51 @@ contract DeployMocks is Script {
         console.log("Set desired APY (commit): 500 bps");
         uint256 phlimboConfigGas = gasBefore - gasleft();
 
+        // ====== PHASE 9: Pauser Registration ======
+        console.log("\n=== Phase 9: Pauser Registration ===");
+        console.log("CRITICAL: setPauser() must be called BEFORE register()");
+
+        gasBefore = gasleft();
+
+        // Register PhusdStableMinter with Pauser
+        // Step 1: Set pauser address on contract FIRST
+        minter.setPauser(address(pauser));
+        console.log("PhusdStableMinter.setPauser() called");
+        // Step 2: Register with pauser (validates that pauser() == address(this))
+        pauser.register(address(minter));
+        console.log("Pauser.register(PhusdStableMinter) completed");
+
+        // Register StableYieldAccumulator with Pauser
+        // Step 1: Set pauser address on contract FIRST
+        accumulator.setPauser(address(pauser));
+        console.log("StableYieldAccumulator.setPauser() called");
+        // Step 2: Register with pauser
+        pauser.register(address(accumulator));
+        console.log("Pauser.register(StableYieldAccumulator) completed");
+
+        // Register PhlimboEA with Pauser
+        // Step 1: Set pauser address on contract FIRST
+        phlimbo.setPauser(address(pauser));
+        console.log("PhlimboEA.setPauser() called");
+        // Step 2: Register with pauser
+        pauser.register(address(phlimbo));
+        console.log("Pauser.register(PhlimboEA) completed");
+
+        uint256 pauserConfigGas = gasBefore - gasleft();
+        console.log("All 3 protocol contracts registered with Pauser");
+
         // Mark configurations as complete
         _markConfigured("MockPhUSD", authGas / 2);
         _markConfigured("MockUSDC", 0);
         _markConfigured("MockUSDT", 0);
         _markConfigured("MockDAI", 0);
+        _markConfigured("MockEYE", 0);
         _markConfigured("YieldStrategyUSDT", ysConfigGas / 2);
         _markConfigured("YieldStrategyDAI", ysConfigGas / 2);
         _markConfigured("PhusdStableMinter", minterConfigGas);
         _markConfigured("StableYieldAccumulator", accumulatorConfigGas);
         _markConfigured("PhlimboEA", phlimboConfigGas + authGas / 2);
+        _markConfigured("Pauser", pauserConfigGas);
 
         vm.stopBroadcast();
 
@@ -255,6 +307,13 @@ contract DeployMocks is Script {
         console.log("  - DAI  -> YieldStrategyDAI  -> StableYieldAccumulator");
         console.log("  - StableYieldAccumulator.claim() accepts USDC at 2% discount");
         console.log("  - USDC payment goes to Phlimbo for staker rewards");
+        console.log("");
+        console.log("Global Pauser System:");
+        console.log("  - Pauser contract deployed with MockEYE token");
+        console.log("  - PhusdStableMinter registered with Pauser");
+        console.log("  - StableYieldAccumulator registered with Pauser");
+        console.log("  - PhlimboEA registered with Pauser");
+        console.log("  - Burn 1000 EYE to trigger global pause");
     }
 
     /**
