@@ -87,7 +87,7 @@ app.get('/health', (req, res) => {
 });
 
 /**
- * GET /contracts - Get all deployed contract addresses
+ * GET /contracts - Get all deployed contract addresses as flat object
  */
 app.get('/contracts', (req, res) => {
     const extracted = loadExtractedAddresses();
@@ -99,7 +99,15 @@ app.get('/contracts', (req, res) => {
         });
     }
 
-    res.json(extracted);
+    // Return flat object: { "ContractName": "0xaddress", ... }
+    const flatAddresses = {};
+    if (extracted.contracts) {
+        for (const [name, data] of Object.entries(extracted.contracts)) {
+            flatAddresses[name] = data.address;
+        }
+    }
+
+    res.json(flatAddresses);
 });
 
 /**
