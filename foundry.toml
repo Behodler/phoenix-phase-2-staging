@@ -4,6 +4,7 @@ out = "out"
 libs = ["lib"]
 fs_permissions = [{ access = "read-write", path = "./server/deployments" }]
 
+auto_detect_remappings = false
 remappings = [
     "@phlimbo-ea/=lib/phlimbo-ea/src/",
     "@phUSD-stable-minter/=lib/phUSD-stable-minter/src/",
@@ -11,9 +12,21 @@ remappings = [
     "@openzeppelin/contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/contracts/",
     "@forge-std/=lib/forge-std/src/",
     "@vault-interfaces/=lib/phUSD-stable-minter/lib/mutable/vault/src/interfaces/",
-    "pauser/=lib/stable-yield-accumulator/lib/mutable/pauser/src/",
+    "@pauser/=lib/pauser/src/",
+    "pauser/=lib/pauser/src/",
+    "forge-std/=lib/forge-std/src/",
+    "lib/mutable/pauser/=lib/pauser/",
     "vault/interfaces/=lib/phUSD-stable-minter/lib/mutable/vault/src/interfaces/",
-    "phlimbo-ea/=lib/phlimbo-ea/src/"
+    "phlimbo-ea/=lib/phlimbo-ea/src/",
+    "lib/phUSD-stable-minter/lib/mutable/pauser/=lib/pauser/",
+    "lib/stable-yield-accumulator/lib/mutable/pauser/=lib/pauser/",
+    "lib/phlimbo-ea/lib/mutable/pauser/=lib/pauser/",
+    "openzeppelin-contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/",
+    "erc4626-tests/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/erc4626-tests/",
+    "halmos-cheatcodes/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/halmos-cheatcodes/src/"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+[lint]
+lint_on_build = false

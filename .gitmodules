@@ -10,3 +10,6 @@
 [submodule "lib/stable-yield-accumulator"]
 	path = lib/stable-yield-accumulator
 	url = https://github.com/Behodler/stable-yield-accumulator
+[submodule "lib/pauser"]
+	path = lib/pauser
+	url = git@github.com:Behodler/pauser.git
