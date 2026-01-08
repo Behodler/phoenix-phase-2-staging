@@ -29,7 +29,9 @@ function extractAddresses() {
 
     // Process each contract
     for (const [name, data] of Object.entries(progressData.contracts || {})) {
-        extracted.contracts[name] = {
+        // Strip "Mock" prefix for UI compatibility (e.g., MockPhUSD -> PhUSD, MockUSDS -> USDS)
+        const displayName = name.startsWith('Mock') ? name.slice(4) : name;
+        extracted.contracts[displayName] = {
             address: data.address,
             deployed: data.deployed,
             configured: data.configured,
@@ -48,9 +50,9 @@ function extractAddresses() {
     console.log(`Output: ${outputPath}`);
     console.log(`\nExtracted ${Object.keys(extracted.contracts).length} contracts:`);
 
-    for (const [name, data] of Object.entries(extracted.contracts)) {
+    for (const [displayName, data] of Object.entries(extracted.contracts)) {
         const status = data.configured ? '✓ configured' : '⚠ not configured';
-        console.log(`  - ${name.padEnd(25)} ${data.address} (${status})`);
+        console.log(`  - ${displayName.padEnd(25)} ${data.address} (${status})`);
     }
 
     console.log('==============================================\n');

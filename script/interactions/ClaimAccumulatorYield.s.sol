@@ -22,7 +22,7 @@ contract ClaimAccumulatorYield is Script {
         address accumulator = AddressLoader.getAccumulator();
         address usdc = AddressLoader.getUSDC();
         address usdt = AddressLoader.getUSDT();
-        address dai = AddressLoader.getDAI();
+        address usds = AddressLoader.getUSDS();
         address phlimbo = AddressLoader.getPhlimbo();
         address user = AddressLoader.getDefaultUser();
         uint256 userKey = AddressLoader.getDefaultPrivateKey();
@@ -45,7 +45,7 @@ contract ClaimAccumulatorYield is Script {
 
         // Log balances before
         console.log("\n--- Balances Before ---");
-        _logBalances(user, phlimbo, usdc, usdt, dai);
+        _logBalances(user, phlimbo, usdc, usdt, usds);
 
         vm.startBroadcast(userKey);
 
@@ -58,7 +58,7 @@ contract ClaimAccumulatorYield is Script {
 
         // Log balances after
         console.log("\n--- Balances After ---");
-        _logBalances(user, phlimbo, usdc, usdt, dai);
+        _logBalances(user, phlimbo, usdc, usdt, usds);
 
         console.log("\n=== Claim Complete ===\n");
     }
@@ -68,11 +68,11 @@ contract ClaimAccumulatorYield is Script {
         address phlimbo,
         address usdc,
         address usdt,
-        address dai
+        address usds
     ) internal view {
         console.log("User USDC:", IERC20(usdc).balanceOf(user));
         console.log("User USDT:", IERC20(usdt).balanceOf(user));
-        console.log("User DAI:", IERC20(dai).balanceOf(user));
+        console.log("User USDS:", IERC20(usds).balanceOf(user));
         console.log("Phlimbo USDC:", IERC20(usdc).balanceOf(phlimbo));
     }
 }
