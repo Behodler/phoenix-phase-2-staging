@@ -6,7 +6,7 @@ import "@forge-std/console.sol";
 import "../src/mocks/MockPhUSD.sol";
 import "../src/mocks/MockRewardToken.sol";
 import "../src/mocks/MockUSDT.sol";
-import "../src/mocks/MockDAI.sol";
+import "../src/mocks/MockUSDS.sol";
 import "../src/mocks/MockYieldStrategy.sol";
 import "../src/mocks/MockEYE.sol";
 import "@phlimbo-ea/Phlimbo.sol";
@@ -24,16 +24,16 @@ import "@pauser/Pauser.sol";
  * - StableYieldAccumulator aggregates yield from all strategies
  * - External users call claim() on accumulator, paying USDC at a discount
  * - The USDC payment goes to Phlimbo for distribution to stakers
- * - Claimer receives the yield tokens (USDT, DAI, etc.) at a discount
+ * - Claimer receives the yield tokens (USDT, USDS, etc.) at a discount
  */
 contract DeployMocks is Script {
     // Deployment addresses
     MockPhUSD public phUSD;
     MockRewardToken public rewardToken; // USDC - the consolidated reward token
     MockUSDT public usdt;
-    MockDAI public dai;
+    MockUSDS public usds;
     MockYieldStrategy public yieldStrategyUSDT;
-    MockYieldStrategy public yieldStrategyDAI;
+    MockYieldStrategy public yieldStrategyUSDS;
     StableYieldAccumulator public accumulator;
     PhusdStableMinter public minter;
     PhlimboEA public phlimbo;
@@ -83,9 +83,9 @@ contract DeployMocks is Script {
         console.log("MockUSDT deployed at:", address(usdt));
 
         gasBefore = gasleft();
-        dai = new MockDAI();
-        _trackDeployment("MockDAI", address(dai), gasBefore - gasleft());
-        console.log("MockDAI deployed at:", address(dai));
+        usds = new MockUSDS();
+        _trackDeployment("MockUSDS", address(usds), gasBefore - gasleft());
+        console.log("MockUSDS deployed at:", address(usds));
 
         // ====== PHASE 1.5: EYE Token and Pauser Deployment ======
         console.log("\n=== Phase 1.5: Deploying EYE Token and Pauser ===");
@@ -109,9 +109,9 @@ contract DeployMocks is Script {
         console.log("YieldStrategyUSDT deployed at:", address(yieldStrategyUSDT));
 
         gasBefore = gasleft();
-        yieldStrategyDAI = new MockYieldStrategy();
-        _trackDeployment("YieldStrategyDAI", address(yieldStrategyDAI), gasBefore - gasleft());
-        console.log("YieldStrategyDAI deployed at:", address(yieldStrategyDAI));
+        yieldStrategyUSDS = new MockYieldStrategy();
+        _trackDeployment("YieldStrategyUSDS", address(yieldStrategyUSDS), gasBefore - gasleft());
+        console.log("YieldStrategyUSDS deployed at:", address(yieldStrategyUSDS));
 
         // ====== PHASE 3: Core Contract Deployment ======
         console.log("\n=== Phase 3: Deploying Core Contracts ===");
@@ -158,12 +158,12 @@ contract DeployMocks is Script {
         gasBefore = gasleft();
         // Authorize minter as client on both yield strategies
         yieldStrategyUSDT.setClient(address(minter), true);
-        yieldStrategyDAI.setClient(address(minter), true);
+        yieldStrategyUSDS.setClient(address(minter), true);
         console.log("Authorized minter as yield strategy client (both strategies)");
 
         // Authorize accumulator as withdrawer on both yield strategies
         yieldStrategyUSDT.setWithdrawer(address(accumulator), true);
-        yieldStrategyDAI.setWithdrawer(address(accumulator), true);
+        yieldStrategyUSDS.setWithdrawer(address(accumulator), true);
         console.log("Authorized accumulator as yield strategy withdrawer (both strategies)");
         uint256 ysConfigGas = gasBefore - gasleft();
 
@@ -173,7 +173,7 @@ contract DeployMocks is Script {
         gasBefore = gasleft();
         // Approve yield strategies for their respective tokens
         minter.approveYS(address(usdt), address(yieldStrategyUSDT));
-        minter.approveYS(address(dai), address(yieldStrategyDAI));
+        minter.approveYS(address(usds), address(yieldStrategyUSDS));
         console.log("Approved yield strategies for their tokens");
 
         // Register USDT as stablecoin (6 decimals)
@@ -185,14 +185,14 @@ contract DeployMocks is Script {
         );
         console.log("Registered USDT as stablecoin");
 
-        // Register DAI as stablecoin (18 decimals)
+        // Register USDS as stablecoin (18 decimals)
         minter.registerStablecoin(
-            address(dai),               // stablecoin
-            address(yieldStrategyDAI),  // yieldStrategy
-            1e18,                       // exchangeRate (1:1)
-            18                          // decimals
+            address(usds),               // stablecoin
+            address(yieldStrategyUSDS),  // yieldStrategy
+            1e18,                        // exchangeRate (1:1)
+            18                           // decimals
         );
-        console.log("Registered DAI as stablecoin");
+        console.log("Registered USDS as stablecoin");
         uint256 minterConfigGas = gasBefore - gasleft();
 
         // ====== PHASE 7: StableYieldAccumulator Configuration ======
@@ -213,12 +213,12 @@ contract DeployMocks is Script {
 
         // Add yield strategies with their underlying tokens
         accumulator.addYieldStrategy(address(yieldStrategyUSDT), address(usdt));
-        accumulator.addYieldStrategy(address(yieldStrategyDAI), address(dai));
+        accumulator.addYieldStrategy(address(yieldStrategyUSDS), address(usds));
         console.log("Added yield strategies");
 
         // Configure token decimals and exchange rates
         accumulator.setTokenConfig(address(usdt), 6, 1e18);   // USDT: 6 decimals, 1:1 rate
-        accumulator.setTokenConfig(address(dai), 18, 1e18);   // DAI: 18 decimals, 1:1 rate
+        accumulator.setTokenConfig(address(usds), 18, 1e18);   // USDS: 18 decimals, 1:1 rate
         accumulator.setTokenConfig(address(rewardToken), 6, 1e18); // USDC: 6 decimals, 1:1 rate
         console.log("Configured token decimals and exchange rates");
 
@@ -284,10 +284,10 @@ contract DeployMocks is Script {
         _markConfigured("MockPhUSD", authGas / 2);
         _markConfigured("MockUSDC", 0);
         _markConfigured("MockUSDT", 0);
-        _markConfigured("MockDAI", 0);
+        _markConfigured("MockUSDS", 0);
         _markConfigured("MockEYE", 0);
         _markConfigured("YieldStrategyUSDT", ysConfigGas / 2);
-        _markConfigured("YieldStrategyDAI", ysConfigGas / 2);
+        _markConfigured("YieldStrategyUSDS", ysConfigGas / 2);
         _markConfigured("PhusdStableMinter", minterConfigGas);
         _markConfigured("StableYieldAccumulator", accumulatorConfigGas);
         _markConfigured("PhlimboEA", phlimboConfigGas + authGas / 2);
@@ -304,7 +304,7 @@ contract DeployMocks is Script {
         console.log("");
         console.log("Architecture Summary:");
         console.log("  - USDT -> YieldStrategyUSDT -> StableYieldAccumulator");
-        console.log("  - DAI  -> YieldStrategyDAI  -> StableYieldAccumulator");
+        console.log("  - USDS -> YieldStrategyUSDS -> StableYieldAccumulator");
         console.log("  - StableYieldAccumulator.claim() accepts USDC at 2% discount");
         console.log("  - USDC payment goes to Phlimbo for staker rewards");
         console.log("");

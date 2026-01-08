@@ -18,15 +18,15 @@ contract SimulateYield is Script {
     function run() external {
         // Load addresses
         address yieldStrategyUSDT = AddressLoader.getYieldStrategyUSDT();
-        address yieldStrategyDAI = AddressLoader.getYieldStrategyDAI();
+        address yieldStrategyUSDS = AddressLoader.getYieldStrategyUSDS();
         address usdt = AddressLoader.getUSDT();
-        address dai = AddressLoader.getDAI();
+        address usds = AddressLoader.getUSDS();
         address minter = AddressLoader.getMinter();
         uint256 deployerKey = AddressLoader.getDefaultPrivateKey();
 
         // Yield amounts to add
         uint256 usdtYield = 500 * 10**6;    // 500 USDT (6 decimals)
-        uint256 daiYield = 500 * 10**18;    // 500 DAI (18 decimals)
+        uint256 usdsYield = 500 * 10**18;    // 500 USDS (18 decimals)
 
         console.log("\n=== Simulating Yield Generation ===");
 
@@ -41,16 +41,16 @@ contract SimulateYield is Script {
         console.log("Principal before:", usdtPrincipalBefore);
         console.log("Yield before:", usdtTotalBefore - usdtPrincipalBefore);
 
-        // ====== DAI Strategy ======
-        console.log("\n--- DAI Strategy ---");
-        console.log("Strategy:", yieldStrategyDAI);
-        console.log("Yield to add:", daiYield);
+        // ====== USDS Strategy ======
+        console.log("\n--- USDS Strategy ---");
+        console.log("Strategy:", yieldStrategyUSDS);
+        console.log("Yield to add:", usdsYield);
 
-        uint256 daiTotalBefore = MockYieldStrategy(yieldStrategyDAI).totalBalanceOf(dai, minter);
-        uint256 daiPrincipalBefore = MockYieldStrategy(yieldStrategyDAI).principalOf(dai, minter);
-        console.log("Total balance before:", daiTotalBefore);
-        console.log("Principal before:", daiPrincipalBefore);
-        console.log("Yield before:", daiTotalBefore - daiPrincipalBefore);
+        uint256 usdsTotalBefore = MockYieldStrategy(yieldStrategyUSDS).totalBalanceOf(usds, minter);
+        uint256 usdsPrincipalBefore = MockYieldStrategy(yieldStrategyUSDS).principalOf(usds, minter);
+        console.log("Total balance before:", usdsTotalBefore);
+        console.log("Principal before:", usdsPrincipalBefore);
+        console.log("Yield before:", usdsTotalBefore - usdsPrincipalBefore);
 
         vm.startBroadcast(deployerKey);
 
@@ -58,8 +58,8 @@ contract SimulateYield is Script {
         MockYieldStrategy(yieldStrategyUSDT).addYield(usdt, minter, usdtYield);
         console.log("\nUSDT yield added");
 
-        MockYieldStrategy(yieldStrategyDAI).addYield(dai, minter, daiYield);
-        console.log("DAI yield added");
+        MockYieldStrategy(yieldStrategyUSDS).addYield(usds, minter, usdsYield);
+        console.log("USDS yield added");
 
         vm.stopBroadcast();
 
@@ -70,12 +70,12 @@ contract SimulateYield is Script {
         uint256 usdtYieldAfter = usdtTotalAfter - usdtPrincipalBefore;
         console.log("USDT yield after:", usdtYieldAfter);
 
-        uint256 daiTotalAfter = MockYieldStrategy(yieldStrategyDAI).totalBalanceOf(dai, minter);
-        uint256 daiYieldAfter = daiTotalAfter - daiPrincipalBefore;
-        console.log("DAI yield after:", daiYieldAfter);
+        uint256 usdsTotalAfter = MockYieldStrategy(yieldStrategyUSDS).totalBalanceOf(usds, minter);
+        uint256 usdsYieldAfter = usdsTotalAfter - usdsPrincipalBefore;
+        console.log("USDS yield after:", usdsYieldAfter);
 
-        // Total in USD equivalent (convert DAI to 6 decimals for display)
-        uint256 totalYieldUsd = usdtYieldAfter + (daiYieldAfter / 1e12);
+        // Total in USD equivalent (convert USDS to 6 decimals for display)
+        uint256 totalYieldUsd = usdtYieldAfter + (usdsYieldAfter / 1e12);
         console.log("\nTotal yield (USD equiv, 6 decimals):", totalYieldUsd);
 
         console.log("\n=== Yield Simulation Complete ===\n");

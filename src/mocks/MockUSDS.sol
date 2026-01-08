@@ -4,18 +4,18 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
- * @title MockDAI
- * @notice Simple ERC20 for testing yield strategy with DAI
- * @dev Simulates DAI with 18 decimals
+ * @title MockUSDS
+ * @notice Simple ERC20 for testing yield strategy with USDS
+ * @dev Simulates USDS with 18 decimals
  */
-contract MockDAI is ERC20 {
-    constructor() ERC20("Mock DAI", "mDAI") {
-        // Mint 1 million DAI (18 decimals) to deployer for testing
+contract MockUSDS is ERC20 {
+    constructor() ERC20("Mock USDS", "mUSDS") {
+        // Mint 1 million USDS (18 decimals) to deployer for testing
         _mint(msg.sender, 1_000_000 * 10**18);
     }
 
     /**
-     * @notice Override decimals to match DAI (18 decimals)
+     * @notice Override decimals to match USDS (18 decimals)
      */
     function decimals() public pure override returns (uint8) {
         return 18;

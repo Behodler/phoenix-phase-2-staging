@@ -28,7 +28,7 @@ library AddressLoader {
         return 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0;
     }
 
-    function getDAI() internal pure returns (address) {
+    function getUSDS() internal pure returns (address) {
         return 0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9;
     }
 
@@ -38,7 +38,7 @@ library AddressLoader {
         return 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9;
     }
 
-    function getYieldStrategyDAI() internal pure returns (address) {
+    function getYieldStrategyUSDS() internal pure returns (address) {
         return 0x5FC8d32690cc91D4c39d9d3abcBD16989F875707;
     }
 
@@ -85,9 +85,9 @@ library AddressLoader {
         console.log("MockPhUSD:", getPhUSD());
         console.log("MockUSDC:", getUSDC());
         console.log("MockUSDT:", getUSDT());
-        console.log("MockDAI:", getDAI());
+        console.log("MockUSDS:", getUSDS());
         console.log("YieldStrategyUSDT:", getYieldStrategyUSDT());
-        console.log("YieldStrategyDAI:", getYieldStrategyDAI());
+        console.log("YieldStrategyUSDS:", getYieldStrategyUSDS());
         console.log("PhusdStableMinter:", getMinter());
         console.log("StableYieldAccumulator:", getAccumulator());
         console.log("PhlimboEA:", getPhlimbo());

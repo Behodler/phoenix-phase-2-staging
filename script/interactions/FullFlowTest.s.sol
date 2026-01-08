@@ -7,7 +7,7 @@ import "./AddressLoader.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../../src/mocks/MockPhUSD.sol";
 import "../../src/mocks/MockUSDT.sol";
-import "../../src/mocks/MockDAI.sol";
+import "../../src/mocks/MockUSDS.sol";
 import "../../src/mocks/MockRewardToken.sol";
 import "../../src/mocks/MockYieldStrategy.sol";
 import "@phlimbo-ea/Phlimbo.sol";
@@ -32,9 +32,9 @@ contract FullFlowTest is Script {
     MockPhUSD phUSD;
     MockRewardToken usdc;
     MockUSDT usdt;
-    MockDAI dai;
+    MockUSDS usds;
     MockYieldStrategy ysUSDT;
-    MockYieldStrategy ysDAI;
+    MockYieldStrategy ysUSDS;
     PhusdStableMinter minter;
     StableYieldAccumulator accumulator;
     PhlimboEA phlimbo;
@@ -80,9 +80,9 @@ contract FullFlowTest is Script {
         phUSD = MockPhUSD(AddressLoader.getPhUSD());
         usdc = MockRewardToken(AddressLoader.getUSDC());
         usdt = MockUSDT(AddressLoader.getUSDT());
-        dai = MockDAI(AddressLoader.getDAI());
+        usds = MockUSDS(AddressLoader.getUSDS());
         ysUSDT = MockYieldStrategy(AddressLoader.getYieldStrategyUSDT());
-        ysDAI = MockYieldStrategy(AddressLoader.getYieldStrategyDAI());
+        ysUSDS = MockYieldStrategy(AddressLoader.getYieldStrategyUSDS());
         minter = PhusdStableMinter(AddressLoader.getMinter());
         accumulator = StableYieldAccumulator(AddressLoader.getAccumulator());
         phlimbo = PhlimboEA(AddressLoader.getPhlimbo());
@@ -163,24 +163,24 @@ contract FullFlowTest is Script {
 
         // Add 500 USDT yield
         uint256 usdtYield = 500 * 10**6;
-        // Add 500 DAI yield
-        uint256 daiYield = 500 * 10**18;
+        // Add 500 USDS yield
+        uint256 usdsYield = 500 * 10**18;
 
         vm.startBroadcast(user1Key);
 
         // First, transfer actual tokens to the strategies so they can be withdrawn
         // The strategies need actual tokens, not just accounting entries
         usdt.transfer(address(ysUSDT), usdtYield);
-        dai.transfer(address(ysDAI), daiYield);
+        usds.transfer(address(ysUSDS), usdsYield);
 
         // Then add the yield to the internal accounting
         ysUSDT.addYield(address(usdt), address(minter), usdtYield);
-        ysDAI.addYield(address(dai), address(minter), daiYield);
+        ysUSDS.addYield(address(usds), address(minter), usdsYield);
 
         vm.stopBroadcast();
 
         console.log("Added 500 USDT yield to YieldStrategyUSDT");
-        console.log("Added 500 DAI yield to YieldStrategyDAI");
+        console.log("Added 500 USDS yield to YieldStrategyUSDS");
         console.log("Total yield: ~1000 USD equivalent");
     }
 
@@ -205,7 +205,7 @@ contract FullFlowTest is Script {
         console.log("\n--- After Claim ---");
         console.log("User1 USDC after:", usdc.balanceOf(user1));
         console.log("User1 USDT received:", usdt.balanceOf(user1));
-        console.log("User1 DAI received:", dai.balanceOf(user1));
+        console.log("User1 USDS received:", usds.balanceOf(user1));
         console.log("Phlimbo USDC received:", usdc.balanceOf(address(phlimbo)));
     }
 
