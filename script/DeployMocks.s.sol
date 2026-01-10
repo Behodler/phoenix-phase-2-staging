@@ -8,12 +8,16 @@ import "../src/mocks/MockRewardToken.sol";
 import "../src/mocks/MockUSDT.sol";
 import "../src/mocks/MockUSDS.sol";
 import "../src/mocks/MockDola.sol";
+import "../src/mocks/MockToke.sol";
+import "../src/mocks/MockAutoDOLA.sol";
+import "../src/mocks/MockMainRewarder.sol";
 import "../src/mocks/MockYieldStrategy.sol";
 import "../src/mocks/MockEYE.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "@pauser/Pauser.sol";
+import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
 
 /**
  * @title DeployMocks
@@ -34,9 +38,12 @@ contract DeployMocks is Script {
     MockUSDT public usdt;
     MockUSDS public usds;
     MockDola public dola;
+    MockToke public toke;
+    MockAutoDOLA public mockAutoDola;
+    MockMainRewarder public mockMainRewarder;
     MockYieldStrategy public yieldStrategyUSDT;
     MockYieldStrategy public yieldStrategyUSDS;
-    MockYieldStrategy public yieldStrategyDola;
+    AutoDolaYieldStrategy public yieldStrategyDola;
     StableYieldAccumulator public accumulator;
     PhusdStableMinter public minter;
     PhlimboEA public phlimbo;
@@ -95,6 +102,11 @@ contract DeployMocks is Script {
         _trackDeployment("MockDola", address(dola), gasBefore - gasleft());
         console.log("MockDola deployed at:", address(dola));
 
+        gasBefore = gasleft();
+        toke = new MockToke();
+        _trackDeployment("MockToke", address(toke), gasBefore - gasleft());
+        console.log("MockToke deployed at:", address(toke));
+
         // ====== PHASE 1.5: EYE Token and Pauser Deployment ======
         console.log("\n=== Phase 1.5: Deploying EYE Token and Pauser ===");
 
@@ -121,10 +133,36 @@ contract DeployMocks is Script {
         _trackDeployment("YieldStrategyUSDS", address(yieldStrategyUSDS), gasBefore - gasleft());
         console.log("YieldStrategyUSDS deployed at:", address(yieldStrategyUSDS));
 
+        // ====== PHASE 2.5: AutoDola Infrastructure for DOLA YieldStrategy ======
+        console.log("\n=== Phase 2.5: Deploying AutoDola Infrastructure ===");
+
+        // Deploy MockAutoDOLA (ERC4626 vault wrapper)
         gasBefore = gasleft();
-        yieldStrategyDola = new MockYieldStrategy();
+        mockAutoDola = new MockAutoDOLA(address(dola));
+        _trackDeployment("MockAutoDOLA", address(mockAutoDola), gasBefore - gasleft());
+        console.log("MockAutoDOLA deployed at:", address(mockAutoDola));
+
+        // Deploy MockMainRewarder (staking/rewards contract)
+        gasBefore = gasleft();
+        mockMainRewarder = new MockMainRewarder(address(mockAutoDola), address(toke));
+        _trackDeployment("MockMainRewarder", address(mockMainRewarder), gasBefore - gasleft());
+        console.log("MockMainRewarder deployed at:", address(mockMainRewarder));
+
+        // Wire MockAutoDOLA to use MockMainRewarder
+        mockAutoDola.setRewarder(address(mockMainRewarder));
+        console.log("Wired MockAutoDOLA to use MockMainRewarder");
+
+        // Deploy real AutoDolaYieldStrategy with mocked dependencies
+        gasBefore = gasleft();
+        yieldStrategyDola = new AutoDolaYieldStrategy(
+            deployer,                    // owner
+            address(dola),               // dolaToken
+            address(toke),               // tokeToken
+            address(mockAutoDola),       // autoDolaVault
+            address(mockMainRewarder)    // mainRewarder
+        );
         _trackDeployment("YieldStrategyDola", address(yieldStrategyDola), gasBefore - gasleft());
-        console.log("YieldStrategyDola deployed at:", address(yieldStrategyDola));
+        console.log("YieldStrategyDola (AutoDolaYieldStrategy) deployed at:", address(yieldStrategyDola));
 
         // ====== PHASE 3: Core Contract Deployment ======
         console.log("\n=== Phase 3: Deploying Core Contracts ===");
@@ -178,6 +216,7 @@ contract DeployMocks is Script {
         // Authorize accumulator as withdrawer on all yield strategies
         yieldStrategyUSDT.setWithdrawer(address(accumulator), true);
         yieldStrategyUSDS.setWithdrawer(address(accumulator), true);
+        // AutoDolaYieldStrategy inherits setWithdrawer from AYieldStrategy
         yieldStrategyDola.setWithdrawer(address(accumulator), true);
         console.log("Authorized accumulator as yield strategy withdrawer (all strategies)");
         uint256 ysConfigGas = gasBefore - gasleft();
@@ -313,7 +352,10 @@ contract DeployMocks is Script {
         _markConfigured("MockUSDT", 0);
         _markConfigured("MockUSDS", 0);
         _markConfigured("MockDola", 0);
+        _markConfigured("MockToke", 0);
         _markConfigured("MockEYE", 0);
+        _markConfigured("MockAutoDOLA", 0);
+        _markConfigured("MockMainRewarder", 0);
         _markConfigured("YieldStrategyUSDT", ysConfigGas / 3);
         _markConfigured("YieldStrategyUSDS", ysConfigGas / 3);
         _markConfigured("YieldStrategyDola", ysConfigGas / 3);
@@ -332,9 +374,13 @@ contract DeployMocks is Script {
         console.log("All contracts deployed and configured successfully!");
         console.log("");
         console.log("Architecture Summary:");
-        console.log("  - USDT -> YieldStrategyUSDT -> StableYieldAccumulator");
-        console.log("  - USDS -> YieldStrategyUSDS -> StableYieldAccumulator");
-        console.log("  - DOLA -> YieldStrategyDola -> StableYieldAccumulator");
+        console.log("  - USDT -> YieldStrategyUSDT (MockYieldStrategy) -> StableYieldAccumulator");
+        console.log("  - USDS -> YieldStrategyUSDS (MockYieldStrategy) -> StableYieldAccumulator");
+        console.log("  - DOLA -> YieldStrategyDola (AutoDolaYieldStrategy) -> StableYieldAccumulator");
+        console.log("    \\-> AutoDolaYieldStrategy uses real contract with mocked dependencies:");
+        console.log("        - MockAutoDOLA (ERC4626 vault)");
+        console.log("        - MockMainRewarder (TOKE rewards)");
+        console.log("        - MockToke (reward token)");
         console.log("  - StableYieldAccumulator.claim() accepts USDC at 2% discount");
         console.log("  - USDC payment goes to Phlimbo for staker rewards");
         console.log("");
