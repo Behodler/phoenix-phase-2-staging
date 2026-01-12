@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Local deployment orchestration for Phoenix Phase 2 contracts",
   "scripts": {
-    "start:anvil": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-time 7",
+    "start:anvil": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-time 1",
     "clean:local": "rm -rf broadcast/*/31337 server/deployments/progress.31337.json server/deployments/local.json",
-    "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast",
+    "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow",
     "extract:addresses": "node server/extract-addresses.js",
     "serve": "node server/index.js",
     "dev": "npm run clean:local && npm run start:anvil & sleep 3 && npm run deploy:local && npm run extract:addresses && npm run serve",

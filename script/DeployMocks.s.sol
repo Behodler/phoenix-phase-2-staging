@@ -346,6 +346,26 @@ contract DeployMocks is Script {
         uint256 pauserConfigGas = gasBefore - gasleft();
         console.log("All 3 protocol contracts registered with Pauser");
 
+        // ====== PHASE 10: Seed YieldStrategyDola with PhUSD Minting ======
+        console.log("\n=== Phase 10: Seed YieldStrategyDola with PhUSD Minting ===");
+
+        gasBefore = gasleft();
+        uint256 dolaAmount = 5000 * 10**18; // 5000 DOLA
+
+        // Deployer already has DOLA from MockDola constructor mint
+        // Approve minter to spend deployer's DOLA
+        dola.approve(address(minter), dolaAmount);
+        console.log("Approved minter to spend 5000 DOLA");
+
+        // Mint PhUSD by depositing DOLA through the minter
+        // This will: 1) Transfer DOLA to minter, 2) Deposit DOLA into YieldStrategyDola, 3) Mint PhUSD to deployer
+        minter.mint(address(dola), dolaAmount);
+        console.log("Minted PhUSD with 5000 DOLA");
+        console.log("  - DOLA deposited to YieldStrategyDola");
+        console.log("  - PhUSD minted to deployer:", deployer);
+
+        uint256 seedingGas = gasBefore - gasleft();
+
         // Mark configurations as complete
         _markConfigured("MockPhUSD", authGas / 2);
         _markConfigured("MockUSDC", 0);
@@ -390,6 +410,11 @@ contract DeployMocks is Script {
         console.log("  - StableYieldAccumulator registered with Pauser");
         console.log("  - PhlimboEA registered with Pauser");
         console.log("  - Burn 1000 EYE to trigger global pause");
+        console.log("");
+        console.log("Initial Seeding:");
+        console.log("  - 5000 DOLA deposited to YieldStrategyDola via minter.mint()");
+        console.log("  - Deployer received 5000 PhUSD");
+        console.log("  - YieldStrategyDola now has positive balance");
     }
 
     /**
