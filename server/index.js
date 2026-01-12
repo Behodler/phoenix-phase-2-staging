@@ -60,10 +60,21 @@ app.get('/', (req, res) => {
             '/progress': 'Get deployment progress status'
         },
         availableContracts: [
-            'MockPhUSD',
-            'MockRewardToken',
-            'MockYieldStrategy',
+            'PhUSD',
+            'USDC',
+            'USDT',
+            'USDS',
+            'Dola',
+            'Toke',
+            'EYE',
+            'Pauser',
+            'YieldStrategyUSDT',
+            'YieldStrategyUSDS',
+            'AutoDOLA',
+            'MainRewarder',
+            'YieldStrategyDola',
             'PhusdStableMinter',
+            'StableYieldAccumulator',
             'PhlimboEA'
         ]
     });
