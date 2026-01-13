@@ -8,7 +8,7 @@
     "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow",
     "extract:addresses": "node server/extract-addresses.js",
     "serve": "node server/index.js",
-    "dev": "npm run clean:local && npm run start:anvil & sleep 3 && npm run deploy:local && npm run extract:addresses && npm run serve",
+    "dev": "npm run clean:local && npm run start:anvil & sleep 3 && npm run deploy:local && ./simulate-yield.sh && npm run extract:addresses && npm run serve",
     "test:full-flow": "forge script script/interactions/FullFlowTest.s.sol:FullFlowTest --rpc-url http://localhost:8545 --broadcast",
     "generate:hooks": "wagmi generate",
     "publish:hooks": "cd hooks && npm publish",
