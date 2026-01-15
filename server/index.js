@@ -75,7 +75,8 @@ app.get('/', (req, res) => {
             'YieldStrategyDola',
             'PhusdStableMinter',
             'StableYieldAccumulator',
-            'PhlimboEA'
+            'PhlimboEA',
+            'DepositView'
         ]
     });
 });

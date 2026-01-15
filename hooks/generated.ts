@@ -1,4 +1,75 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// DepositView
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const depositViewAbi = [
+  {
+    type: 'constructor',
+    inputs: [
+      { name: '_phlimbo', internalType: 'contract IPhlimbo', type: 'address' },
+      { name: '_phUSD', internalType: 'contract IERC20', type: 'address' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'user', internalType: 'address', type: 'address' }],
+    name: 'getDepositData',
+    outputs: [
+      {
+        name: 'data',
+        internalType: 'struct DepositView.DepositData',
+        type: 'tuple',
+        components: [
+          {
+            name: 'userPhUSDBalance',
+            internalType: 'uint256',
+            type: 'uint256',
+          },
+          {
+            name: 'phUSDRewardsPerSecond',
+            internalType: 'uint256',
+            type: 'uint256',
+          },
+          {
+            name: 'stableRewardsPerSecond',
+            internalType: 'uint256',
+            type: 'uint256',
+          },
+          {
+            name: 'pendingPhUSDRewards',
+            internalType: 'uint256',
+            type: 'uint256',
+          },
+          {
+            name: 'pendingStableRewards',
+            internalType: 'uint256',
+            type: 'uint256',
+          },
+          { name: 'stakedBalance', internalType: 'uint256', type: 'uint256' },
+          { name: 'userAllowance', internalType: 'uint256', type: 'uint256' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'phUSD',
+    outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'phlimbo',
+    outputs: [{ name: '', internalType: 'contract IPhlimbo', type: 'address' }],
+    stateMutability: 'view',
+  },
+] as const
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // IFlax
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
