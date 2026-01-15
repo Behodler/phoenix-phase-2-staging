@@ -14,10 +14,12 @@ import "../src/mocks/MockMainRewarder.sol";
 import "../src/mocks/MockYieldStrategy.sol";
 import "../src/mocks/MockEYE.sol";
 import "@phlimbo-ea/Phlimbo.sol";
+import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "@pauser/Pauser.sol";
 import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/views/DepositView.sol";
 
 /**
  * @title DeployMocks
@@ -49,6 +51,7 @@ contract DeployMocks is Script {
     PhlimboEA public phlimbo;
     MockEYE public eyeToken;
     Pauser public pauser;
+    DepositView public depositView;
 
     // Progress tracking structure
     struct ContractDeployment {
@@ -369,6 +372,17 @@ contract DeployMocks is Script {
 
         uint256 seedingGas = gasBefore - gasleft();
 
+        // ====== PHASE 11: Deploy DepositView for UI Polling ======
+        console.log("\n=== Phase 11: Deploy DepositView for UI Polling ===");
+
+        gasBefore = gasleft();
+        depositView = new DepositView(
+            IPhlimbo(address(phlimbo)),
+            IERC20(address(phUSD))
+        );
+        _trackDeployment("DepositView", address(depositView), gasBefore - gasleft());
+        console.log("DepositView deployed at:", address(depositView));
+
         // Mark configurations as complete
         _markConfigured("MockPhUSD", authGas / 2);
         _markConfigured("MockUSDC", 0);
@@ -386,6 +400,7 @@ contract DeployMocks is Script {
         _markConfigured("StableYieldAccumulator", accumulatorConfigGas);
         _markConfigured("PhlimboEA", phlimboConfigGas + authGas / 2);
         _markConfigured("Pauser", pauserConfigGas);
+        _markConfigured("DepositView", 0);
 
         vm.stopBroadcast();
 

@@ -23,6 +23,9 @@ export default defineConfig({
         'IPhlimbo.sol/IPhlimbo.json',
         'interfaces/IYieldStrategy.sol/IYieldStrategy.json',
         'IStableYieldAccumulator.sol/IStableYieldAccumulator.json',
+
+        // View contracts for UI polling
+        'DepositView.sol/DepositView.json',
       ],
     }),
   ],
