@@ -180,15 +180,18 @@ contract DeployMocks is Script {
         console.log("StableYieldAccumulator deployed at:", address(accumulator));
 
         // 3. Deploy PhlimboEA with accumulator as yieldAccumulator
+        // Using Linear Depletion model: depletion window = 1 week (604800 seconds)
+        uint256 oneWeekInSeconds = 604800;
         gasBefore = gasleft();
         phlimbo = new PhlimboEA(
             address(phUSD),           // _phUSD
             address(rewardToken),     // _rewardToken (USDC)
             address(accumulator),     // _yieldAccumulator (the real accumulator!)
-            0.1e18                    // _alpha (10% EMA smoothing)
+            oneWeekInSeconds          // _depletionDuration (1 week for linear depletion)
         );
         _trackDeployment("PhlimboEA", address(phlimbo), gasBefore - gasleft());
         console.log("PhlimboEA deployed at:", address(phlimbo));
+        console.log("  - Depletion window:", oneWeekInSeconds, "seconds (1 week)");
 
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
