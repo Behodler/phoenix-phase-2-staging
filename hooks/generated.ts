@@ -187,13 +187,6 @@ export const iPhlimboAbi = [
   {
     type: 'function',
     inputs: [],
-    name: 'alpha',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
     name: 'claim',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -204,6 +197,13 @@ export const iPhlimboAbi = [
     name: 'collectReward',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'depletionDuration',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -230,13 +230,6 @@ export const iPhlimboAbi = [
       { name: '_phUSDPerSecond', internalType: 'uint256', type: 'uint256' },
       { name: '_lastRewardTime', internalType: 'uint256', type: 'uint256' },
     ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'lastClaimTimestamp',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
   },
   {
@@ -284,14 +277,28 @@ export const iPhlimboAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'rewardBalance',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'rewardPerSecond',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'rewardToken',
     outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
     stateMutability: 'view',
   },
   {
     type: 'function',
-    inputs: [{ name: '_alpha', internalType: 'uint256', type: 'uint256' }],
-    name: 'setAlpha',
+    inputs: [{ name: '_duration', internalType: 'uint256', type: 'uint256' }],
+    name: 'setDepletionDuration',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -317,13 +324,6 @@ export const iPhlimboAbi = [
     name: 'setYieldAccumulator',
     outputs: [],
     stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'smoothedStablePerSecond',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
-    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -1214,6 +1214,13 @@ export const mockRewardTokenAbi = [
   },
   {
     type: 'function',
+    inputs: [{ name: 'interfaceId', internalType: 'bytes4', type: 'bytes4' }],
+    name: 'supportsInterface',
+    outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
+    stateMutability: 'pure',
+  },
+  {
+    type: 'function',
     inputs: [],
     name: 'symbol',
     outputs: [{ name: '', internalType: 'string', type: 'string' }],
@@ -1641,7 +1648,7 @@ export const phlimboEaAbi = [
       { name: '_phUSD', internalType: 'address', type: 'address' },
       { name: '_rewardToken', internalType: 'address', type: 'address' },
       { name: '_yieldAccumulator', internalType: 'address', type: 'address' },
-      { name: '_alpha', internalType: 'uint256', type: 'uint256' },
+      { name: '_depletionDuration', internalType: 'uint256', type: 'uint256' },
     ],
     stateMutability: 'nonpayable',
   },
@@ -1683,13 +1690,6 @@ export const phlimboEaAbi = [
   {
     type: 'function',
     inputs: [],
-    name: 'alpha',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
     name: 'apySetInProgress',
     outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
     stateMutability: 'view',
@@ -1707,6 +1707,13 @@ export const phlimboEaAbi = [
     name: 'collectReward',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'depletionDuration',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -1748,13 +1755,6 @@ export const phlimboEaAbi = [
       { name: '_phUSDPerSecond', internalType: 'uint256', type: 'uint256' },
       { name: '_lastRewardTime', internalType: 'uint256', type: 'uint256' },
     ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'lastClaimTimestamp',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
   },
   {
@@ -1851,14 +1851,28 @@ export const phlimboEaAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'rewardBalance',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'rewardPerSecond',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'rewardToken',
     outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
     stateMutability: 'view',
   },
   {
     type: 'function',
-    inputs: [{ name: '_alpha', internalType: 'uint256', type: 'uint256' }],
-    name: 'setAlpha',
+    inputs: [{ name: '_duration', internalType: 'uint256', type: 'uint256' }],
+    name: 'setDepletionDuration',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -1884,13 +1898,6 @@ export const phlimboEaAbi = [
     name: 'setYieldAccumulator',
     outputs: [],
     stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'smoothedStablePerSecond',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
-    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -1953,19 +1960,19 @@ export const phlimboEaAbi = [
     anonymous: false,
     inputs: [
       {
-        name: 'oldAlpha',
+        name: 'oldDuration',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
       },
       {
-        name: 'newAlpha',
+        name: 'newDuration',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
       },
     ],
-    name: 'AlphaUpdated',
+    name: 'DepletionDurationUpdated',
   },
   {
     type: 'event',
@@ -2062,19 +2069,38 @@ export const phlimboEaAbi = [
     anonymous: false,
     inputs: [
       {
+        name: 'newRate',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'newBalance',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'RateUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
         name: 'amount',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
       },
       {
-        name: 'instantRate',
+        name: 'newRewardBalance',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
       },
       {
-        name: 'newSmoothedRate',
+        name: 'newRate',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
