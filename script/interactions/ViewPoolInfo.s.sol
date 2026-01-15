@@ -29,15 +29,21 @@ contract ViewPoolInfo is Script {
         console.log("Desired APY (bps):", desiredAPY);
         console.log("Desired APY (%): ", desiredAPY / 100);
 
-        // Current emission rates
+        // Current emission rates (Linear Depletion Model)
         uint256 phUSDPerSecond = PhlimboEA(phlimbo).phUSDPerSecond();
-        uint256 smoothedStablePerSecond = PhlimboEA(phlimbo).smoothedStablePerSecond();
+        uint256 rewardPerSecond = PhlimboEA(phlimbo).rewardPerSecond();
         console.log("phUSD emission per second:", phUSDPerSecond);
-        console.log("Stablecoin emission per second (smoothed):", smoothedStablePerSecond);
+        console.log("Stablecoin reward per second:", rewardPerSecond);
+
+        // Linear depletion state
+        uint256 rewardBalance = PhlimboEA(phlimbo).rewardBalance();
+        uint256 depletionDuration = PhlimboEA(phlimbo).depletionDuration();
+        console.log("Reward balance remaining:", rewardBalance);
+        console.log("Depletion duration (seconds):", depletionDuration);
 
         // Calculate daily emissions
         uint256 phUSDPerDay = phUSDPerSecond * 86400;
-        uint256 stablePerDay = (smoothedStablePerSecond * 86400) / 1e18; // Unscale from PRECISION
+        uint256 stablePerDay = (rewardPerSecond * 86400) / 1e18; // Unscale from PRECISION
         console.log("Estimated phUSD per day:", phUSDPerDay);
         console.log("Estimated stablecoin per day:", stablePerDay);
 
