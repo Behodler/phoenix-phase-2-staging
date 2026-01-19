@@ -722,12 +722,14 @@ contract DeployMocksSepolia is Script {
         PhlimboEA p = PhlimboEA(phlimbo);
 
         // Set desired APY (5% = 500 basis points) - two-step process
+        // Step 1: Preview the APY change
         p.setDesiredAPY(500);
         console.log("Set desired APY (preview): 500 bps");
 
-        // Note: On a real network, we'd need to wait for next block
-        // For Sepolia, the transaction confirmation naturally provides this
-        // If needed, we can call setDesiredAPY again in a second tx
+        // Step 2: Commit the APY change
+        // On real networks, each transaction is in a separate block
+        p.setDesiredAPY(500);
+        console.log("Set desired APY (commit): 500 bps");
 
         uint256 gasUsed = gasBefore - gasleft();
         _markConfigured("PhlimboEA", gasUsed);

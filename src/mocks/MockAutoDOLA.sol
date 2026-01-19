@@ -100,6 +100,25 @@ contract MockAutoDOLA is ERC4626, IAutoDOLA {
     // ============ Yield Simulation ============
 
     /**
+     * @notice Public function to manually trigger yield accrual for testing
+     * @dev Allows simulating yield generation without requiring a deposit/withdraw
+     *      Call this after time has passed to accumulate yield in the vault
+     */
+    function accrueYield() external {
+        _updateYield();
+    }
+
+    /**
+     * @notice Manually add yield to the vault for testing (mints DOLA directly)
+     * @param amount The amount of DOLA to mint as yield
+     * @dev Useful for immediately testing yield without waiting for time to pass
+     */
+    function addYield(uint256 amount) external {
+        require(amount > 0, "MockAutoDOLA: amount must be greater than zero");
+        MockDola(asset()).mint(address(this), amount);
+    }
+
+    /**
      * @notice Internal function to update yield simulation
      * @dev Mints new DOLA tokens based on elapsed time since last yield update
      *      - First deposit: records timestamp, no yield minted

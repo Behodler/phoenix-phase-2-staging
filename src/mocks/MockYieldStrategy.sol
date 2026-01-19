@@ -6,6 +6,10 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@vault-interfaces/IYieldStrategy.sol";
 
+interface IMockMintable {
+    function mint(address to, uint256 amount) external;
+}
+
 /**
  * @title MockYieldStrategy
  * @notice Mock ERC4626-style vault for yield strategy testing
@@ -210,9 +214,12 @@ contract MockYieldStrategy is Ownable, IYieldStrategy {
      * @param token The token address
      * @param account The account address
      * @param amount The yield amount to add
+     * @dev Mints actual tokens to the strategy so withdrawals can succeed
      */
     function addYield(address token, address account, uint256 amount) external onlyOwner {
         _yields[token][account] += amount;
+        // Mint actual tokens to this contract so withdrawals have tokens to transfer
+        IMockMintable(token).mint(address(this), amount);
     }
 
     /**
