@@ -9,6 +9,8 @@
     "deploy:sepolia": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --private-key $DEPLOYER_SEPOLIA_pk",
     "extract:addresses": "node server/extract-addresses.js 31337",
     "extract:sepolia": "node server/extract-addresses.js 11155111",
+    "generate:ts-addresses": "node server/generate-ts-addresses.js 31337",
+    "generate:ts-sepolia": "node server/generate-ts-addresses.js 11155111",
     "serve": "node server/index.js",
     "dev": "npm run clean:local && npm run start:anvil & sleep 3 && npm run deploy:local && ./simulate-yield.sh && npm run extract:addresses && npm run serve",
     "test:full-flow": "forge script script/interactions/FullFlowTest.s.sol:FullFlowTest --rpc-url http://localhost:8545 --broadcast",
