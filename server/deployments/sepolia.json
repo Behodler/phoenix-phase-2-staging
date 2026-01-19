@@ -2,7 +2,7 @@
   "chainId": 11155111,
   "networkName": "sepolia",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-01-19T11:54:19.406Z",
+  "extractedAt": "2026-01-19T12:10:25.313Z",
   "contracts": {
     "PhUSD": {
       "address": "0x2f1A0152809186d5f8Fd7C0655eB0fb83eC5ABee",
