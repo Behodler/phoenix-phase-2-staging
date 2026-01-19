@@ -15,7 +15,7 @@ import "../src/mocks/MockYieldStrategy.sol";
 import "../src/mocks/MockEYE.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
-import "@phUSD-stable-minter/PhusdStableMinter.sol";
+import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "@pauser/Pauser.sol";
 import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
