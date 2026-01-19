@@ -6,7 +6,7 @@
     "start:anvil": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-time 2",
     "clean:local": "rm -rf broadcast/*/31337 server/deployments/progress.31337.json server/deployments/local.json",
     "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow",
-    "deploy:sepolia": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --private-key $DEPLOYER_SEPOLIA_pk",
+    "deploy:sepolia": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
     "extract:addresses": "node server/extract-addresses.js 31337",
     "extract:sepolia": "node server/extract-addresses.js 11155111",
     "generate:ts-addresses": "node server/generate-ts-addresses.js 31337",
