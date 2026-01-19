@@ -1,0 +1,127 @@
+{
+  "chainId": 11155111,
+  "networkName": "sepolia",
+  "deploymentStatus": "completed",
+  "extractedAt": "2026-01-19T11:54:19.406Z",
+  "contracts": {
+    "PhUSD": {
+      "address": "0x2f1A0152809186d5f8Fd7C0655eB0fb83eC5ABee",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1353317,
+      "configGas": 98665
+    },
+    "USDC": {
+      "address": "0x1D713dC06a25f3Fe7F8f9150FC57d28eB4dC0145",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 953899,
+      "configGas": 0
+    },
+    "USDT": {
+      "address": "0x8F12B98D0D8604F12de6B63D817b6d3f85010973",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 895884,
+      "configGas": 0
+    },
+    "USDS": {
+      "address": "0x095483ae0295C8E906d86659fCBA6BB8b35a7362",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 896183,
+      "configGas": 0
+    },
+    "Dola": {
+      "address": "0xF1660962980b697F6980F0Ec5C6fF7D4E80bf3eC",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 896567,
+      "configGas": 0
+    },
+    "Toke": {
+      "address": "0x3CBb899e4FC2101c175F000E855a93d5Ca2Dd1Af",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 897076,
+      "configGas": 0
+    },
+    "EYE": {
+      "address": "0x5f48438c053e575C932783A137A3F900a0Dd2A46",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 942495,
+      "configGas": 0
+    },
+    "Pauser": {
+      "address": "0xAe69fFfeD9802953eb5FcA4AB56BDd6675B13644",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1459345,
+      "configGas": 295595
+    },
+    "YieldStrategyUSDT": {
+      "address": "0x42C0A759404282D5Ca23fD1E07FCeB7912234503",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1801727,
+      "configGas": 51894
+    },
+    "YieldStrategyUSDS": {
+      "address": "0x9860B4aDa9fc5436DBf320ffF1FCA64a98573ba7",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1803430,
+      "configGas": 51894
+    },
+    "AutoDOLA": {
+      "address": "0x0a67f2E03B0fb48abFBA29Ff902E72fF44316214",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1967423,
+      "configGas": 23681
+    },
+    "MainRewarder": {
+      "address": "0xb57B9C13244Aac63Af314E0fa7F4B16A8De55645",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 906528,
+      "configGas": 0
+    },
+    "YieldStrategyDola": {
+      "address": "0xe2ADBF6f9CE0bb2Bc879bCddCC1d14EDBd519A79",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 4619590,
+      "configGas": 51894
+    },
+    "PhusdStableMinter": {
+      "address": "0xAeC2c1AbC690154455B94625f6705f2491BDE857",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2131656,
+      "configGas": 373850
+    },
+    "StableYieldAccumulator": {
+      "address": "0xaD7abE28f1adBF01e43145063B6f47CE0F829e07",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 3136744,
+      "configGas": 561302
+    },
+    "PhlimboEA": {
+      "address": "0x347168aCbf5d5d6E2e49e7Ca6298e77123758C0F",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2392556,
+      "configGas": 70850
+    },
+    "DepositView": {
+      "address": "0xcF66ea2704E405073ec4A8f0799ED397f86990CA",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 520173,
+      "configGas": 0
+    }
+  }
+}
