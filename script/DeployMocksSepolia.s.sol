@@ -158,6 +158,10 @@ contract DeployMocksSepolia is Script {
         console.log("\n=== Phase 10: Seed YieldStrategyDola with PhUSD Minting ===");
         _seedYieldStrategyDola(deployer);
 
+        // ====== PHASE 10.5: Add DOLA Yield to MockAutoDOLA Vault ======
+        console.log("\n=== Phase 10.5: Add DOLA Yield to MockAutoDOLA Vault ===");
+        _addDolaYield();
+
         // ====== PHASE 11: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 11: Deploy DepositView for UI Polling ===");
         _deployDepositView();
@@ -497,14 +501,14 @@ contract DeployMocksSepolia is Script {
         require(rewardToken != address(0), "MockUSDC must be deployed");
         require(accumulator != address(0), "StableYieldAccumulator must be deployed");
 
-        uint256 oneWeekInSeconds = 604800;
+        uint256 oneMonthInSeconds = 2629746; // 30.44 days
 
         uint256 gasBefore = gasleft();
         PhlimboEA p = new PhlimboEA(
             phUSD,              // _phUSD
             rewardToken,        // _rewardToken (USDC)
             accumulator,        // _yieldAccumulator
-            oneWeekInSeconds    // _depletionDuration (1 week)
+            oneMonthInSeconds   // _depletionDuration (1 month)
         );
         phlimbo = address(p);
         uint256 gasUsed = gasBefore - gasleft();
@@ -512,7 +516,7 @@ contract DeployMocksSepolia is Script {
         _trackDeployment("PhlimboEA", phlimbo, gasUsed);
         _writeProgressFile();
         console.log("PhlimboEA deployed at:", phlimbo);
-        console.log("  - Depletion window:", oneWeekInSeconds, "seconds (1 week)");
+        console.log("  - Depletion window:", oneMonthInSeconds, "seconds (1 month / 30.44 days)");
     }
 
     // ========================================
@@ -818,6 +822,47 @@ contract DeployMocksSepolia is Script {
     }
 
     // ========================================
+    // PHASE 10.5: Add DOLA Yield to MockAutoDOLA
+    // ========================================
+
+    function _addDolaYield() internal {
+        // Use a special tracking key for yield addition
+        if (_isConfigured("DolaYield")) {
+            console.log("DOLA yield already added to MockAutoDOLA vault");
+            return;
+        }
+
+        require(dola != address(0), "MockDola must be deployed");
+        require(mockAutoDola != address(0), "MockAutoDOLA must be deployed");
+
+        uint256 yieldAmount = 1000 * 10**18; // 1000 DOLA
+
+        uint256 gasBefore = gasleft();
+
+        // Step 1: Mint 1000 DOLA to this contract (deployer)
+        MockDola(dola).mint(address(this), yieldAmount);
+        console.log("Minted 1000 DOLA to deployer for yield seeding");
+
+        // Step 2: Approve MockAutoDOLA vault to spend the DOLA
+        MockDola(dola).approve(mockAutoDola, yieldAmount);
+        console.log("Approved MockAutoDOLA vault to spend 1000 DOLA");
+
+        // Step 3: Deposit DOLA into the vault to increase share value for all depositors
+        // This creates real yield that can be claimed (increases share price)
+        MockAutoDOLA(mockAutoDola).deposit(yieldAmount, address(this));
+        console.log("Deposited 1000 DOLA into MockAutoDOLA vault as yield");
+        console.log("  - This increases share value for existing depositors (YieldStrategyDola)");
+        console.log("  - AutoDolaYieldStrategy can now claim this yield");
+
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Track yield addition completion
+        _trackDeployment("DolaYield", address(0), 0);
+        _markConfigured("DolaYield", gasUsed);
+        _writeProgressFile();
+    }
+
+    // ========================================
     // PHASE 11: Deploy DepositView
     // ========================================
 
@@ -1051,6 +1096,10 @@ contract DeployMocksSepolia is Script {
         console.log("  - StableYieldAccumulator.claim() accepts USDC at 2% discount");
         console.log("  - USDC payment goes to Phlimbo for staker rewards");
         console.log("");
+        console.log("PhlimboEA Configuration:");
+        console.log("  - Depletion window: 2629746 seconds (1 month / 30.44 days)");
+        console.log("  - Rewards drip linearly over the depletion period");
+        console.log("");
         console.log("Global Pauser System:");
         console.log("  - Pauser contract deployed with MockEYE token");
         console.log("  - PhusdStableMinter registered with Pauser");
@@ -1062,5 +1111,10 @@ contract DeployMocksSepolia is Script {
         console.log("  - 5000 DOLA deposited to YieldStrategyDola via minter.mint()");
         console.log("  - Deployer received 5000 PhUSD");
         console.log("  - YieldStrategyDola now has positive balance");
+        console.log("");
+        console.log("DOLA Yield Seeding:");
+        console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
+        console.log("  - This increases share value for YieldStrategyDola");
+        console.log("  - AutoDolaYieldStrategy can claim this yield via StableYieldAccumulator");
     }
 }
