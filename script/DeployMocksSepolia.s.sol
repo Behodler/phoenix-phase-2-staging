@@ -160,7 +160,7 @@ contract DeployMocksSepolia is Script {
 
         // ====== PHASE 10.5: Add DOLA Yield to MockAutoDOLA Vault ======
         console.log("\n=== Phase 10.5: Add DOLA Yield to MockAutoDOLA Vault ===");
-        _addDolaYield();
+        _addDolaYield(deployer);
 
         // ====== PHASE 11: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 11: Deploy DepositView for UI Polling ===");
@@ -825,7 +825,7 @@ contract DeployMocksSepolia is Script {
     // PHASE 10.5: Add DOLA Yield to MockAutoDOLA
     // ========================================
 
-    function _addDolaYield() internal {
+    function _addDolaYield(address deployer) internal {
         // Use a special tracking key for yield addition
         if (_isConfigured("DolaYield")) {
             console.log("DOLA yield already added to MockAutoDOLA vault");
@@ -839,8 +839,8 @@ contract DeployMocksSepolia is Script {
 
         uint256 gasBefore = gasleft();
 
-        // Step 1: Mint 1000 DOLA to this contract (deployer)
-        MockDola(dola).mint(address(this), yieldAmount);
+        // Step 1: Mint 1000 DOLA to the deployer
+        MockDola(dola).mint(deployer, yieldAmount);
         console.log("Minted 1000 DOLA to deployer for yield seeding");
 
         // Step 2: Approve MockAutoDOLA vault to spend the DOLA
@@ -849,7 +849,7 @@ contract DeployMocksSepolia is Script {
 
         // Step 3: Deposit DOLA into the vault to increase share value for all depositors
         // This creates real yield that can be claimed (increases share price)
-        MockAutoDOLA(mockAutoDola).deposit(yieldAmount, address(this));
+        MockAutoDOLA(mockAutoDola).deposit(yieldAmount, deployer);
         console.log("Deposited 1000 DOLA into MockAutoDOLA vault as yield");
         console.log("  - This increases share value for existing depositors (YieldStrategyDola)");
         console.log("  - AutoDolaYieldStrategy can now claim this yield");
