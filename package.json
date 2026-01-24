@@ -7,7 +7,7 @@
     "clean:local": "rm -rf broadcast/*/31337 server/deployments/progress.31337.json server/deployments/local.json",
     "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow",
     "deploy:sepolia": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
-    "deploy:mainnet-preview": "forge script script/DeployMainnet.s.sol:DeployMainnet --rpc-url $RPC_MAINNET --slow -vvv",
+    "deploy:mainnet-preview": "PREVIEW_MODE=true forge script script/DeployMainnet.s.sol:DeployMainnet --rpc-url $RPC_MAINNET --slow -vvv",
     "deploy:mainnet-fresh": "node scripts/check-dry-run.js && rm -f server/deployments/progress.1.json && forge script script/DeployMainnet.s.sol:DeployMainnet --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "deploy:mainnet-recover": "forge script script/DeployMainnet.s.sol:DeployMainnet --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "extract:addresses": "node server/extract-addresses.js 31337",
