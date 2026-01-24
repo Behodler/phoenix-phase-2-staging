@@ -106,6 +106,7 @@ contract DeployMainnet is Script {
     mapping(string => ContractDeployment) public deployments;
     string[] public contractNames;
     bool progressFileExists;
+    bool isPreview;
 
     function run() external {
         console.log("=========================================");
@@ -131,7 +132,17 @@ contract DeployMainnet is Script {
         // Load existing progress file if it exists
         _loadProgressFile();
 
-        vm.startBroadcast();
+        // Check if we're in preview mode (dry run without signing)
+        isPreview = vm.envOr("PREVIEW_MODE", false);
+
+        if (isPreview) {
+            console.log("");
+            console.log("*** PREVIEW MODE - Impersonating owner (no signing required) ***");
+            console.log("");
+            vm.startPrank(OWNER_ADDRESS);
+        } else {
+            vm.startBroadcast();
+        }
 
         // ====== PHASE 1: Deploy New Pauser ======
         console.log("\n=== Phase 1: Deploy New Pauser ===");
@@ -172,7 +183,11 @@ contract DeployMainnet is Script {
         console.log("\n=== Phase 9: Deploy DepositView ===");
         _deployDepositView();
 
-        vm.stopBroadcast();
+        if (isPreview) {
+            vm.stopPrank();
+        } else {
+            vm.stopBroadcast();
+        }
 
         // ====== Final Progress Update ======
         _markDeploymentComplete();
@@ -346,8 +361,8 @@ contract DeployMainnet is Script {
     // ========================================
 
     function _configureYieldStrategy() internal {
-        if (_isConfigured("YieldStrategyConfig")) {
-            console.log("YieldStrategy already configured");
+        if (_isConfigured("AutoDolaYieldStrategy")) {
+            console.log("AutoDolaYieldStrategy already configured");
             return;
         }
 
@@ -367,8 +382,7 @@ contract DeployMainnet is Script {
         console.log("Authorized minter as AutoDolaYieldStrategy client");
 
         uint256 gasUsed = gasBefore - gasleft();
-        _trackDeployment("YieldStrategyConfig", address(0), 0);
-        _markConfigured("YieldStrategyConfig", gasUsed);
+        _markConfigured("AutoDolaYieldStrategy", gasUsed);
         _writeProgressFile();
     }
 
@@ -592,17 +606,16 @@ contract DeployMainnet is Script {
     }
 
     function _parseProgressJson(string memory json) internal {
-        string[] memory names = new string[](10);
+        string[] memory names = new string[](9);
         names[0] = "NewPauser";
         names[1] = "AutoDolaYieldStrategy";
         names[2] = "PhusdStableMinter";
         names[3] = "PhlimboEA";
         names[4] = "StableYieldAccumulator";
         names[5] = "TokenAuth";
-        names[6] = "YieldStrategyConfig";
-        names[7] = "DepositView";
-        names[8] = "Seeding";
-        names[9] = "DolaYield";
+        names[6] = "DepositView";
+        names[7] = "Seeding";
+        names[8] = "DolaYield";
 
         for (uint256 i = 0; i < names.length; i++) {
             string memory name = names[i];
