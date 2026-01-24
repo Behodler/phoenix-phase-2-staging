@@ -16,7 +16,6 @@ import "../src/mocks/MockEYE.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
-import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "@pauser/Pauser.sol";
 import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
 import "../src/views/DepositView.sol";
@@ -31,12 +30,11 @@ import "../src/views/DepositView.sol";
  *      - Updates progress.11155111.json after EACH successful deployment/configuration step
  *      - Uses Sepolia chain ID (11155111) in progress file path
  *
- * Architecture Overview:
+ * Architecture Overview (simplified after StableYieldAccumulator removal):
  * - Multiple YieldStrategies (vaults) accumulate yield from different stablecoins
- * - StableYieldAccumulator aggregates yield from all strategies
- * - External users call claim() on accumulator, paying USDC at a discount
- * - The USDC payment goes to Phlimbo for distribution to stakers
- * - Claimer receives the yield tokens (USDT, USDS, etc.) at a discount
+ * - PhusdStableMinter manages stablecoin deposits and phUSD minting
+ * - Phlimbo handles staking and reward distribution via collectReward()
+ * - Rewards are injected directly into Phlimbo through collectReward
  */
 contract DeployMocksSepolia is Script {
     // Deployment addresses - loaded from progress file or set during deployment
@@ -51,7 +49,6 @@ contract DeployMocksSepolia is Script {
     address public yieldStrategyUSDT;
     address public yieldStrategyUSDS;
     address public yieldStrategyDola;
-    address public accumulator;
     address public minter;
     address public phlimbo;
     address public eyeToken;
@@ -127,7 +124,6 @@ contract DeployMocksSepolia is Script {
         console.log("\n=== Phase 3: Deploying Core Contracts ===");
 
         _deployPhusdStableMinter();
-        _deployStableYieldAccumulator();
         _deployPhlimboEA();
 
         // ====== PHASE 4: Token Authorization ======
@@ -142,28 +138,24 @@ contract DeployMocksSepolia is Script {
         console.log("\n=== Phase 6: PhusdStableMinter Configuration ===");
         _configurePhusdStableMinter();
 
-        // ====== PHASE 7: StableYieldAccumulator Configuration ======
-        console.log("\n=== Phase 7: StableYieldAccumulator Configuration ===");
-        _configureStableYieldAccumulator();
-
-        // ====== PHASE 8: Phlimbo Configuration ======
-        console.log("\n=== Phase 8: Phlimbo Configuration ===");
+        // ====== PHASE 7: Phlimbo Configuration ======
+        console.log("\n=== Phase 7: Phlimbo Configuration ===");
         _configurePhlimbo();
 
-        // ====== PHASE 9: Pauser Registration ======
-        console.log("\n=== Phase 9: Pauser Registration ===");
+        // ====== PHASE 8: Pauser Registration ======
+        console.log("\n=== Phase 8: Pauser Registration ===");
         _configurePauser();
 
-        // ====== PHASE 10: Seed YieldStrategyDola with PhUSD Minting ======
-        console.log("\n=== Phase 10: Seed YieldStrategyDola with PhUSD Minting ===");
+        // ====== PHASE 9: Seed YieldStrategyDola with PhUSD Minting ======
+        console.log("\n=== Phase 9: Seed YieldStrategyDola with PhUSD Minting ===");
         _seedYieldStrategyDola(deployer);
 
-        // ====== PHASE 10.5: Add DOLA Yield to MockAutoDOLA Vault ======
-        console.log("\n=== Phase 10.5: Add DOLA Yield to MockAutoDOLA Vault ===");
+        // ====== PHASE 9.5: Add DOLA Yield to MockAutoDOLA Vault ======
+        console.log("\n=== Phase 9.5: Add DOLA Yield to MockAutoDOLA Vault ===");
         _addDolaYield(deployer);
 
-        // ====== PHASE 11: Deploy DepositView for UI Polling ======
-        console.log("\n=== Phase 11: Deploy DepositView for UI Polling ===");
+        // ====== PHASE 10: Deploy DepositView for UI Polling ======
+        console.log("\n=== Phase 10: Deploy DepositView for UI Polling ===");
         _deployDepositView();
 
         vm.stopBroadcast();
@@ -473,23 +465,6 @@ contract DeployMocksSepolia is Script {
         console.log("PhusdStableMinter deployed at:", minter);
     }
 
-    function _deployStableYieldAccumulator() internal {
-        if (_isDeployed("StableYieldAccumulator")) {
-            accumulator = deployments["StableYieldAccumulator"].addr;
-            console.log("StableYieldAccumulator already deployed at:", accumulator);
-            return;
-        }
-
-        uint256 gasBefore = gasleft();
-        StableYieldAccumulator acc = new StableYieldAccumulator();
-        accumulator = address(acc);
-        uint256 gasUsed = gasBefore - gasleft();
-
-        _trackDeployment("StableYieldAccumulator", accumulator, gasUsed);
-        _writeProgressFile();
-        console.log("StableYieldAccumulator deployed at:", accumulator);
-    }
-
     function _deployPhlimboEA() internal {
         if (_isDeployed("PhlimboEA")) {
             phlimbo = deployments["PhlimboEA"].addr;
@@ -499,7 +474,6 @@ contract DeployMocksSepolia is Script {
 
         require(phUSD != address(0), "MockPhUSD must be deployed");
         require(rewardToken != address(0), "MockUSDC must be deployed");
-        require(accumulator != address(0), "StableYieldAccumulator must be deployed");
 
         uint256 oneMonthInSeconds = 2629746; // 30.44 days
 
@@ -507,7 +481,6 @@ contract DeployMocksSepolia is Script {
         PhlimboEA p = new PhlimboEA(
             phUSD,              // _phUSD
             rewardToken,        // _rewardToken (USDC)
-            accumulator,        // _yieldAccumulator
             oneMonthInSeconds   // _depletionDuration (1 month)
         );
         phlimbo = address(p);
@@ -562,7 +535,6 @@ contract DeployMocksSepolia is Script {
         require(yieldStrategyUSDS != address(0), "YieldStrategyUSDS must be deployed");
         require(yieldStrategyDola != address(0), "YieldStrategyDola must be deployed");
         require(minter != address(0), "PhusdStableMinter must be deployed");
-        require(accumulator != address(0), "StableYieldAccumulator must be deployed");
 
         uint256 gasBefore = gasleft();
 
@@ -571,12 +543,6 @@ contract DeployMocksSepolia is Script {
         MockYieldStrategy(yieldStrategyUSDS).setClient(minter, true);
         AutoDolaYieldStrategy(yieldStrategyDola).setClient(minter, true);
         console.log("Authorized minter as yield strategy client (all strategies)");
-
-        // Authorize accumulator as withdrawer on all yield strategies
-        MockYieldStrategy(yieldStrategyUSDT).setWithdrawer(accumulator, true);
-        MockYieldStrategy(yieldStrategyUSDS).setWithdrawer(accumulator, true);
-        AutoDolaYieldStrategy(yieldStrategyDola).setWithdrawer(accumulator, true);
-        console.log("Authorized accumulator as yield strategy withdrawer (all strategies)");
 
         uint256 gasUsed = gasBefore - gasleft();
         uint256 gasPerStrategy = gasUsed / 3;
@@ -647,70 +613,7 @@ contract DeployMocksSepolia is Script {
     }
 
     // ========================================
-    // PHASE 7: StableYieldAccumulator Configuration
-    // ========================================
-
-    function _configureStableYieldAccumulator() internal {
-        if (_isConfigured("StableYieldAccumulator")) {
-            console.log("StableYieldAccumulator already configured");
-            return;
-        }
-
-        require(accumulator != address(0), "StableYieldAccumulator must be deployed");
-        require(rewardToken != address(0), "MockUSDC must be deployed");
-        require(phlimbo != address(0), "PhlimboEA must be deployed");
-        require(minter != address(0), "PhusdStableMinter must be deployed");
-        require(yieldStrategyUSDT != address(0), "YieldStrategyUSDT must be deployed");
-        require(yieldStrategyUSDS != address(0), "YieldStrategyUSDS must be deployed");
-        require(yieldStrategyDola != address(0), "YieldStrategyDola must be deployed");
-        require(usdt != address(0), "MockUSDT must be deployed");
-        require(usds != address(0), "MockUSDS must be deployed");
-        require(dola != address(0), "MockDola must be deployed");
-
-        uint256 gasBefore = gasleft();
-
-        StableYieldAccumulator acc = StableYieldAccumulator(accumulator);
-
-        // Set reward token (USDC) - the token claimers pay with
-        acc.setRewardToken(rewardToken);
-        console.log("Set reward token (USDC)");
-
-        // Set Phlimbo as recipient
-        acc.setPhlimbo(phlimbo);
-        console.log("Set Phlimbo as recipient");
-
-        // Set minter address (for querying yield from strategies)
-        acc.setMinter(minter);
-        console.log("Set minter address");
-
-        // Add yield strategies with their underlying tokens
-        acc.addYieldStrategy(yieldStrategyUSDT, usdt);
-        acc.addYieldStrategy(yieldStrategyUSDS, usds);
-        acc.addYieldStrategy(yieldStrategyDola, dola);
-        console.log("Added yield strategies");
-
-        // Configure token decimals and exchange rates
-        acc.setTokenConfig(usdt, 6, 1e18);           // USDT: 6 decimals, 1:1 rate
-        acc.setTokenConfig(usds, 18, 1e18);          // USDS: 18 decimals, 1:1 rate
-        acc.setTokenConfig(dola, 18, 1e18);          // DOLA: 18 decimals, 1:1 rate
-        acc.setTokenConfig(rewardToken, 6, 1e18);    // USDC: 6 decimals, 1:1 rate
-        console.log("Configured token decimals and exchange rates");
-
-        // Set discount rate (2% = 200 basis points)
-        acc.setDiscountRate(200);
-        console.log("Set discount rate: 200 bps (2%)");
-
-        // Approve Phlimbo to pull reward tokens from accumulator
-        acc.approvePhlimbo(type(uint256).max);
-        console.log("Approved Phlimbo for reward token spending");
-
-        uint256 gasUsed = gasBefore - gasleft();
-        _markConfigured("StableYieldAccumulator", gasUsed);
-        _writeProgressFile();
-    }
-
-    // ========================================
-    // PHASE 8: Phlimbo Configuration
+    // PHASE 7: Phlimbo Configuration
     // ========================================
 
     function _configurePhlimbo() internal {
@@ -741,7 +644,7 @@ contract DeployMocksSepolia is Script {
     }
 
     // ========================================
-    // PHASE 9: Pauser Registration
+    // PHASE 8: Pauser Registration
     // ========================================
 
     function _configurePauser() internal {
@@ -752,7 +655,6 @@ contract DeployMocksSepolia is Script {
 
         require(pauser != address(0), "Pauser must be deployed");
         require(minter != address(0), "PhusdStableMinter must be deployed");
-        require(accumulator != address(0), "StableYieldAccumulator must be deployed");
         require(phlimbo != address(0), "PhlimboEA must be deployed");
 
         console.log("CRITICAL: setPauser() must be called BEFORE register()");
@@ -767,12 +669,6 @@ contract DeployMocksSepolia is Script {
         p.register(minter);
         console.log("Pauser.register(PhusdStableMinter) completed");
 
-        // Register StableYieldAccumulator with Pauser
-        StableYieldAccumulator(accumulator).setPauser(pauser);
-        console.log("StableYieldAccumulator.setPauser() called");
-        p.register(accumulator);
-        console.log("Pauser.register(StableYieldAccumulator) completed");
-
         // Register PhlimboEA with Pauser
         PhlimboEA(phlimbo).setPauser(pauser);
         console.log("PhlimboEA.setPauser() called");
@@ -782,11 +678,11 @@ contract DeployMocksSepolia is Script {
         uint256 gasUsed = gasBefore - gasleft();
         _markConfigured("Pauser", gasUsed);
         _writeProgressFile();
-        console.log("All 3 protocol contracts registered with Pauser");
+        console.log("Both protocol contracts registered with Pauser");
     }
 
     // ========================================
-    // PHASE 10: Seed YieldStrategyDola
+    // PHASE 9: Seed YieldStrategyDola
     // ========================================
 
     function _seedYieldStrategyDola(address deployer) internal {
@@ -822,7 +718,7 @@ contract DeployMocksSepolia is Script {
     }
 
     // ========================================
-    // PHASE 10.5: Add DOLA Yield to MockAutoDOLA
+    // PHASE 9.5: Add DOLA Yield to MockAutoDOLA
     // ========================================
 
     function _addDolaYield(address /* deployer */) internal {
@@ -914,7 +810,7 @@ contract DeployMocksSepolia is Script {
         // We need to extract contract addresses from the JSON
         // Format: "ContractName": {"address": "0x...", "deployed": true, ...}
 
-        string[] memory names = new string[](18);
+        string[] memory names = new string[](17);
         names[0] = "MockPhUSD";
         names[1] = "MockUSDC";
         names[2] = "MockUSDT";
@@ -929,10 +825,9 @@ contract DeployMocksSepolia is Script {
         names[11] = "MockMainRewarder";
         names[12] = "YieldStrategyDola";
         names[13] = "PhusdStableMinter";
-        names[14] = "StableYieldAccumulator";
-        names[15] = "PhlimboEA";
-        names[16] = "DepositView";
-        names[17] = "Seeding";
+        names[14] = "PhlimboEA";
+        names[15] = "DepositView";
+        names[16] = "Seeding";
 
         for (uint256 i = 0; i < names.length; i++) {
             string memory name = names[i];
@@ -1082,15 +977,14 @@ contract DeployMocksSepolia is Script {
     function _printArchitectureSummary() internal pure {
         console.log("");
         console.log("Architecture Summary:");
-        console.log("  - USDT -> YieldStrategyUSDT (MockYieldStrategy) -> StableYieldAccumulator");
-        console.log("  - USDS -> YieldStrategyUSDS (MockYieldStrategy) -> StableYieldAccumulator");
-        console.log("  - DOLA -> YieldStrategyDola (AutoDolaYieldStrategy) -> StableYieldAccumulator");
+        console.log("  - USDT -> YieldStrategyUSDT (MockYieldStrategy) -> PhusdStableMinter");
+        console.log("  - USDS -> YieldStrategyUSDS (MockYieldStrategy) -> PhusdStableMinter");
+        console.log("  - DOLA -> YieldStrategyDola (AutoDolaYieldStrategy) -> PhusdStableMinter");
         console.log("    \\-> AutoDolaYieldStrategy uses real contract with mocked dependencies:");
         console.log("        - MockAutoDOLA (ERC4626 vault)");
         console.log("        - MockMainRewarder (TOKE rewards)");
         console.log("        - MockToke (reward token)");
-        console.log("  - StableYieldAccumulator.claim() accepts USDC at 2% discount");
-        console.log("  - USDC payment goes to Phlimbo for staker rewards");
+        console.log("  - Rewards injected directly into Phlimbo via collectReward()");
         console.log("");
         console.log("PhlimboEA Configuration:");
         console.log("  - Depletion window: 2629746 seconds (1 month / 30.44 days)");
@@ -1099,7 +993,6 @@ contract DeployMocksSepolia is Script {
         console.log("Global Pauser System:");
         console.log("  - Pauser contract deployed with MockEYE token");
         console.log("  - PhusdStableMinter registered with Pauser");
-        console.log("  - StableYieldAccumulator registered with Pauser");
         console.log("  - PhlimboEA registered with Pauser");
         console.log("  - Burn 1000 EYE to trigger global pause");
         console.log("");
@@ -1111,6 +1004,6 @@ contract DeployMocksSepolia is Script {
         console.log("DOLA Yield Seeding:");
         console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
         console.log("  - This increases share value for YieldStrategyDola");
-        console.log("  - AutoDolaYieldStrategy can claim this yield via StableYieldAccumulator");
+        console.log("  - AutoDolaYieldStrategy can claim this yield");
     }
 }

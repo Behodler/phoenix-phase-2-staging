@@ -5,6 +5,16 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-01-24
+
+### Removed
+- Removed StableYieldAccumulator hooks (contract deprecated from architecture)
+- Removed IStableYieldAccumulator interface hooks
+
+### Changed
+- PhlimboEA constructor now takes only 3 parameters (phUSD, rewardToken, depletionDuration)
+- Simplified architecture: rewards are now injected directly via collectReward()
+
 ## [0.1.5] - 2026-01-16
 
 ### Added

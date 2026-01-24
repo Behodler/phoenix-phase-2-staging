@@ -11,7 +11,7 @@ import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
  * @title SimulateYield
  * @notice Script to manually add simulated yield to all yield strategies
  * @dev Testing helper to simulate yield generation without waiting
- *      Adds yield to USDT, USDS, and DOLA strategies for testing the accumulator claim flow
+ *      Adds yield to USDT, USDS, and DOLA strategies for testing the reward flow
  *      Supports both Anvil and Sepolia networks
  */
 contract SimulateYield is Script {

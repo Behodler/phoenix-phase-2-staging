@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Purpose
 
-The phStaging2 project provides **Phase 2 deployment staging infrastructure** for the Phoenix ecosystem. This is a sibling project to deployment-staging-RM (Phase 1) and serves as the orchestration layer for deploying Phase 2 contracts (stable yield accumulator, phlimbo, phUSD minter) to multiple networks.
+The phStaging2 project provides **Phase 2 deployment staging infrastructure** for the Phoenix ecosystem. This is a sibling project to deployment-staging-RM (Phase 1) and serves as the orchestration layer for deploying Phase 2 contracts (phlimbo, phUSD minter) to multiple networks.
 
 **Key Role**: This project:
 - Deploys Phase 2 contracts to Anvil (local), Sepolia (testnet), and Mainnet
@@ -16,7 +16,7 @@ The phStaging2 project provides **Phase 2 deployment staging infrastructure** fo
 
 **Sibling Relationship**:
 - **deployment-staging-RM**: Phase 1 contracts (vault-RM, reflax-mint bonding, etc.)
-- **phStaging2**: Phase 2 contracts (stable-yield-accumulator, phlimbo, phUSD-stable-minter)
+- **phStaging2**: Phase 2 contracts (phlimbo, phUSD-stable-minter)
 - Both projects share similar architecture patterns but manage different contract sets
 
 ## Architecture Overview
@@ -46,11 +46,6 @@ Each network maintains its own deployment state file: `progress.31337.json`, `pr
 
 The following contracts are deployed as part of Phase 2:
 
-### Stable Yield Accumulator
-**Location**: `lib/stable-yield-accumulator/`
-**Purpose**: Accumulates yield from stablecoins and distributes to stakeholders
-**Git Submodule**: https://github.com/Behodler/stable-yield-accumulator
-
 ### Phlimbo
 **Location**: `lib/phlimbo/`
 **Purpose**: Yield farm for staking phUSD and earning mixed yield in phUSD and a stablecoin such as USDC
@@ -69,7 +64,7 @@ The following contracts are deployed as part of Phase 2:
 phStaging2/
 ├── lib/                          # Git submodules
 │   ├── forge-std/               # Foundry standard library
-│   ├── stable-yield-accumulator/ # Phase 2: Yield accumulation
+│   ├── stable-yield-accumulator/ # Phase 2: (deprecated, kept for compatibility)
 │   ├── phlimbo/                 # Phase 2: Yield farm for phUSD staking
 │   ├── phUSD-stable-minter/     # Phase 2: phUSD minting
 │   ├── mutable/                 # Mutable dependencies (interfaces only)
@@ -119,7 +114,7 @@ git submodule update --remote
 ### Current Submodules
 ```
 lib/forge-std              - Foundry testing framework (excluded from deployment)
-lib/stable-yield-accumulator - Phase 2: Yield accumulation contracts
+lib/stable-yield-accumulator - Phase 2: (deprecated, kept for compatibility)
 lib/phlimbo               - Phase 2: Yield farm for phUSD staking
 lib/phUSD-stable-minter   - Phase 2: phUSD minting contracts
 ```
@@ -154,13 +149,6 @@ Each network maintains a `progress.<chainId>.json` file that tracks deployment s
   "lastUpdated": "2025-12-14T10:30:00Z",
   "deploymentStatus": "in_progress",
   "completedSteps": [
-    {
-      "step": "deploy_stable_yield_accumulator",
-      "contract": "StableYieldAccumulator",
-      "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-      "timestamp": "2025-12-14T10:15:00Z",
-      "txHash": "0x..."
-    },
     {
       "step": "deploy_phlimbo",
       "contract": "Phlimbo",
@@ -281,13 +269,13 @@ contract DeployAnvil is Script {
         // Load progress
         string memory progress = vm.readFile(PROGRESS_FILE);
 
-        // Check if StableYieldAccumulator already deployed
-        if (!isStepComplete(progress, "deploy_stable_yield_accumulator")) {
+        // Check if Phlimbo already deployed
+        if (!isStepComplete(progress, "deploy_phlimbo")) {
             // Deploy contract
-            StableYieldAccumulator accumulator = new StableYieldAccumulator();
+            PhlimboEA phlimbo = new PhlimboEA(phUSD, rewardToken, depletionDuration);
 
             // Update progress
-            updateProgress("deploy_stable_yield_accumulator", address(accumulator));
+            updateProgress("deploy_phlimbo", address(phlimbo));
         }
 
         // Continue with other steps...
@@ -306,7 +294,6 @@ Critical deployment sequence (dependencies must be deployed first):
    - Test tokens
 
 2. **Core Phase 2 Contracts**
-   - StableYieldAccumulator (yield aggregation)
    - Phlimbo (yield farm for phUSD staking)
    - phUSDStableMinter (minting logic)
 
@@ -330,11 +317,6 @@ The local server should expose deployment data at `http://localhost:3001/contrac
       "networkName": "anvil",
       "deployedAt": "2025-12-14T10:30:00Z",
       "contracts": {
-        "stableYieldAccumulator": {
-          "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-          "abi": [...],
-          "name": "Stable Yield Accumulator"
-        },
         "phlimbo": {
           "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
           "abi": [...],
@@ -397,7 +379,6 @@ export default defineConfig({
     foundry({
       project: '.',
       deployments: {
-        StableYieldAccumulator: deployments.contracts.stableYieldAccumulator.address,
         Phlimbo: deployments.contracts.phlimbo.address,
         PhUSDStableMinter: deployments.contracts.phUSDStableMinter.address
       }
@@ -496,7 +477,7 @@ forge test
 forge test -vvv
 
 # Run specific contract tests
-forge test --match-contract StableYieldAccumulatorTest
+forge test --match-contract PhlimboTest
 
 # Run specific test
 forge test --match-test testDepositYield
@@ -579,7 +560,7 @@ AutoDolaYieldStrategy strategy = new AutoDolaYieldStrategy(autoDolaVault);
 
 The Phoenix UI should:
 1. Fetch contract data from `http://localhost:3001/contracts?network=31337`
-2. Import generated Wagmi hooks: `import { useStableYieldAccumulator } from '@behodler/wagmi-hooks'`
+2. Import generated Wagmi hooks: `import { usePhlimbo } from '@behodler/wagmi-hooks'`
 3. Use Rainbow wallet (wagmi/viem) to interact with contracts
 4. Support network switching (Anvil, Sepolia, Mainnet)
 
@@ -591,9 +572,9 @@ const { networks } = await response.json()
 const anvilContracts = networks[31337].contracts
 
 // Use generated hooks
-import { useStableYieldAccumulatorDeposit } from '@behodler/wagmi-hooks'
+import { usePhlimboStake } from '@behodler/wagmi-hooks'
 
-const { write: deposit } = useStableYieldAccumulatorDeposit()
+const { write: stake } = usePhlimboStake()
 ```
 
 ## Server Infrastructure
@@ -879,7 +860,7 @@ This sibling project demonstrates the same architecture patterns for Phase 1 con
 - TDD testing approach
 
 **Key Differences from Sibling**:
-- phStaging2 deploys Phase 2 contracts (stable-yield-accumulator, phlimbo, phUSD-stable-minter)
+- phStaging2 deploys Phase 2 contracts (phlimbo, phUSD-stable-minter)
 - deployment-staging-RM deploys Phase 1 contracts (vault-RM, behodler3-tokenlaunch, flax-token)
 - phStaging2 uses `progress.<chainId>.json` for multi-network resilience
 - Both share similar npm scripts and server infrastructure patterns
@@ -887,7 +868,7 @@ This sibling project demonstrates the same architecture patterns for Phase 1 con
 ## Important Constraints
 
 - This repo contains **no production contract code** - only deployment orchestration
-- All contract logic lives in submodule repos (stable-yield-accumulator, phlimbo, phUSD-stable-minter)
+- All contract logic lives in submodule repos (phlimbo, phUSD-stable-minter)
 - Changes to contract code must be made in respective repos and pulled via submodule updates
 - This is a **multi-network deployment tool** - supports Anvil, Sepolia, and Mainnet
 - Follow Solidity best practices and naming conventions

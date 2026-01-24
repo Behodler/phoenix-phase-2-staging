@@ -9,8 +9,10 @@ import "@phlimbo-ea/Phlimbo.sol";
 
 /**
  * @title ClaimYieldAccumulator
- * @notice Script to trigger Phlimbo to collect rewards from yield accumulator
+ * @notice Script to inject rewards into Phlimbo via collectReward
  * @dev This is typically called by an automated process, but can be manually triggered
+ *      In the simplified architecture (post StableYieldAccumulator removal),
+ *      collectReward is called directly to update Phlimbo's internal reward accounting.
  */
 contract ClaimYieldAccumulator is Script {
     using AddressLoader for *;
@@ -21,7 +23,7 @@ contract ClaimYieldAccumulator is Script {
         address phlimbo = AddressLoader.getPhlimbo();
         uint256 deployerKey = AddressLoader.getDefaultPrivateKey();
 
-        console.log("\n=== Claiming from Yield Accumulator ===");
+        console.log("\n=== Injecting Rewards via collectReward ===");
 
         // Check Phlimbo's reward token balance before
         uint256 balanceBefore = MockRewardToken(rewardToken).balanceOf(phlimbo);
@@ -29,13 +31,12 @@ contract ClaimYieldAccumulator is Script {
 
         vm.startBroadcast(deployerKey);
 
-        // Collect reward from yield accumulator
-        // Note: In the mock setup, yieldAccumulator is the MockYieldStrategy
-        // This triggers the collectReward function which withdraws accumulated yield
+        // Inject reward into Phlimbo
+        // Note: In the simplified architecture, collectReward updates internal reward accounting
         // Amount to collect (100 USDC = 100 * 10^6)
         uint256 amountToCollect = 100 * 10**6;
         PhlimboEA(phlimbo).collectReward(amountToCollect);
-        console.log("Collected rewards from yield accumulator");
+        console.log("Injected rewards via collectReward");
 
         vm.stopBroadcast();
 
