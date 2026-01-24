@@ -46,8 +46,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *
  * PREVIOUSLY DEPLOYED PHOENIX CONTRACTS:
  * - phUSD:                    0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605  (FlaxToken deployment)
- * - AutoDolaYieldStrategy:    0x6601b9A7678A00407090BD7dC0fe554bCbB7EF25  (Phase 1)
- * - OldPauser:                0x912Ce60b408CFCF735ED5c2A5AE4E9F274670d9a  (Phase 1)
  *
  * LEDGER SIGNER:
  * - Index: 46
@@ -69,8 +67,6 @@ contract DeployMainnet is Script {
 
     // Previously Deployed Phoenix Contracts
     address public constant PHUSD = 0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605;          // phUSD (FlaxToken)
-    address public constant AUTO_DOLA_YIELD_STRATEGY = 0x6601b9A7678A00407090BD7dC0fe554bCbB7EF25; // Existing AutoDolaYieldStrategy
-    address public constant OLD_PAUSER = 0x912Ce60b408CFCF735ED5c2A5AE4E9F274670d9a;     // Existing Pauser contract
 
     // Ledger Signer Configuration
     // Index 46 corresponds to owner address: 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6
@@ -86,6 +82,7 @@ contract DeployMainnet is Script {
     address public stableYieldAccumulator;
     address public newPauser;
     address public depositView;
+    address public autoDolaYieldStrategy;
 
     // Progress tracking
     string constant PROGRESS_FILE = "server/deployments/progress.1.json";
@@ -128,8 +125,6 @@ contract DeployMainnet is Script {
         console.log("AutoDOLA Vault: ", AUTO_DOLA_VAULT);
         console.log("MainRewarder:   ", MAIN_REWARDER);
         console.log("phUSD:          ", PHUSD);
-        console.log("Old YieldStrat: ", AUTO_DOLA_YIELD_STRATEGY);
-        console.log("OldPauser:      ", OLD_PAUSER);
         console.log("Owner Address:  ", OWNER_ADDRESS);
         console.log("----------------------------------------------------");
 
@@ -138,16 +133,13 @@ contract DeployMainnet is Script {
 
         vm.startBroadcast();
 
-        // ====== PHASE 0: OldPauser Handling for AutoDolaYieldStrategy ======
-        console.log("\n=== Phase 0: OldPauser Handling ===");
-        _handleOldPauser();
-
         // ====== PHASE 1: Deploy New Pauser ======
         console.log("\n=== Phase 1: Deploy New Pauser ===");
         _deployNewPauser();
 
         // ====== PHASE 2: Core Contract Deployment ======
         console.log("\n=== Phase 2: Deploying Core Contracts ===");
+        _deployAutoDolaYieldStrategy();
         _deployPhusdStableMinter();
         _deployPhlimboEA();
         _deployStableYieldAccumulator();
@@ -191,55 +183,6 @@ contract DeployMainnet is Script {
     }
 
     // ========================================
-    // PHASE 0: OldPauser Handling
-    // ========================================
-
-    function _handleOldPauser() internal {
-        if (_isConfigured("OldPauserHandling")) {
-            console.log("OldPauser handling already completed");
-            return;
-        }
-
-        Pauser oldPauser = Pauser(OLD_PAUSER);
-        AutoDolaYieldStrategy yieldStrategy = AutoDolaYieldStrategy(AUTO_DOLA_YIELD_STRATEGY);
-
-        uint256 gasBefore = gasleft();
-
-        // Check if AutoDolaYieldStrategy is registered with OldPauser
-        bool isRegistered = oldPauser.isRegistered(AUTO_DOLA_YIELD_STRATEGY);
-
-        if (isRegistered) {
-            console.log("AutoDolaYieldStrategy is registered with OldPauser");
-
-            // First, we need to clear the pauser from AutoDolaYieldStrategy so we can unregister
-            // Note: This may require the YieldStrategy to have a clearPauser() or setPauser(address(0)) function
-            // For now, we'll attempt to unregister - the OldPauser.unregister() will verify pauser is cleared
-
-            // Unregister AutoDolaYieldStrategy from OldPauser
-            // This requires that AutoDolaYieldStrategy.pauser() != address(oldPauser)
-            // The owner must first call AutoDolaYieldStrategy.setPauser(address(0)) or similar
-            console.log("Attempting to unregister AutoDolaYieldStrategy from OldPauser...");
-            console.log("NOTE: AutoDolaYieldStrategy.pauser must be cleared first by owner");
-
-            // Try to unregister (will revert if pauser not cleared on YieldStrategy)
-            try oldPauser.unregister(AUTO_DOLA_YIELD_STRATEGY) {
-                console.log("Successfully unregistered AutoDolaYieldStrategy from OldPauser");
-            } catch {
-                console.log("WARNING: Could not unregister - pauser may still be set on YieldStrategy");
-                console.log("         Owner must manually clear pauser on AutoDolaYieldStrategy first");
-            }
-        } else {
-            console.log("AutoDolaYieldStrategy is NOT registered with OldPauser - skipping");
-        }
-
-        uint256 gasUsed = gasBefore - gasleft();
-
-        _trackDeployment("OldPauserHandling", address(0), 0);
-        _markConfigured("OldPauserHandling", gasUsed);
-        _writeProgressFile();
-    }
-
-    // ========================================
     // PHASE 1: Deploy New Pauser
     // ========================================
 
@@ -264,6 +207,34 @@ contract DeployMainnet is Script {
     // ========================================
     // PHASE 2: Core Contract Deployment
     // ========================================
+
+    function _deployAutoDolaYieldStrategy() internal {
+        if (_isDeployed("AutoDolaYieldStrategy")) {
+            autoDolaYieldStrategy = deployments["AutoDolaYieldStrategy"].addr;
+            console.log("AutoDolaYieldStrategy already deployed at:", autoDolaYieldStrategy);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        AutoDolaYieldStrategy ys = new AutoDolaYieldStrategy(
+            OWNER_ADDRESS,      // owner
+            DOLA,               // dola
+            TOKE,               // toke
+            AUTO_DOLA_VAULT,    // autoDolaVault
+            MAIN_REWARDER       // mainRewarder
+        );
+        autoDolaYieldStrategy = address(ys);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("AutoDolaYieldStrategy", autoDolaYieldStrategy, gasUsed);
+        _writeProgressFile();
+        console.log("AutoDolaYieldStrategy deployed at:", autoDolaYieldStrategy);
+        console.log("  - Owner:", OWNER_ADDRESS);
+        console.log("  - DOLA:", DOLA);
+        console.log("  - TOKE:", TOKE);
+        console.log("  - AutoDOLA Vault:", AUTO_DOLA_VAULT);
+        console.log("  - MainRewarder:", MAIN_REWARDER);
+    }
 
     function _deployPhusdStableMinter() internal {
         if (_isDeployed("PhusdStableMinter")) {
@@ -381,22 +352,19 @@ contract DeployMainnet is Script {
         }
 
         require(minter != address(0), "PhusdStableMinter must be deployed");
+        require(autoDolaYieldStrategy != address(0), "AutoDolaYieldStrategy must be deployed");
 
         uint256 gasBefore = gasleft();
 
-        // The existing AutoDolaYieldStrategy needs to authorize the new minter as a client
-        // This requires the YieldStrategy owner to call setClient(minter, true)
-        console.log("NOTE: AutoDolaYieldStrategy.setClient() must be called by YieldStrategy owner for:");
-        console.log("  - PhusdStableMinter:", minter);
+        // Configure the newly deployed AutoDolaYieldStrategy to authorize the minter as a client
+        console.log("Configuring AutoDolaYieldStrategy at:", autoDolaYieldStrategy);
+        console.log("  - Setting PhusdStableMinter as client:", minter);
 
-        AutoDolaYieldStrategy yieldStrategy = AutoDolaYieldStrategy(AUTO_DOLA_YIELD_STRATEGY);
+        AutoDolaYieldStrategy yieldStrategy = AutoDolaYieldStrategy(autoDolaYieldStrategy);
 
-        // Try to authorize minter as client (will fail if not owner)
-        try yieldStrategy.setClient(minter, true) {
-            console.log("Authorized minter as AutoDolaYieldStrategy client");
-        } catch {
-            console.log("WARNING: Could not authorize minter - YieldStrategy owner must do this");
-        }
+        // Authorize minter as client
+        yieldStrategy.setClient(minter, true);
+        console.log("Authorized minter as AutoDolaYieldStrategy client");
 
         uint256 gasUsed = gasBefore - gasleft();
         _trackDeployment("YieldStrategyConfig", address(0), 0);
@@ -415,19 +383,20 @@ contract DeployMainnet is Script {
         }
 
         require(minter != address(0), "PhusdStableMinter must be deployed");
+        require(autoDolaYieldStrategy != address(0), "AutoDolaYieldStrategy must be deployed");
 
         uint256 gasBefore = gasleft();
 
         PhusdStableMinter m = PhusdStableMinter(minter);
 
         // Approve yield strategy for DOLA
-        m.approveYS(DOLA, AUTO_DOLA_YIELD_STRATEGY);
-        console.log("Approved AutoDolaYieldStrategy for DOLA");
+        m.approveYS(DOLA, autoDolaYieldStrategy);
+        console.log("Approved AutoDolaYieldStrategy for DOLA at:", autoDolaYieldStrategy);
 
         // Register DOLA as stablecoin (18 decimals)
         m.registerStablecoin(
             DOLA,                       // stablecoin
-            AUTO_DOLA_YIELD_STRATEGY,   // yieldStrategy
+            autoDolaYieldStrategy,      // yieldStrategy
             1e18,                       // exchangeRate (1:1)
             18                          // decimals
         );
@@ -451,6 +420,7 @@ contract DeployMainnet is Script {
         require(stableYieldAccumulator != address(0), "StableYieldAccumulator must be deployed");
         require(phlimbo != address(0), "PhlimboEA must be deployed");
         require(minter != address(0), "PhusdStableMinter must be deployed");
+        require(autoDolaYieldStrategy != address(0), "AutoDolaYieldStrategy must be deployed");
 
         uint256 gasBefore = gasleft();
 
@@ -477,8 +447,8 @@ contract DeployMainnet is Script {
         console.log("Configured DOLA token config (18 decimals, 1:1 rate)");
 
         // Add AutoDolaYieldStrategy to the yield strategy registry
-        sya.addYieldStrategy(AUTO_DOLA_YIELD_STRATEGY, DOLA);
-        console.log("Added AutoDolaYieldStrategy to yield strategy registry");
+        sya.addYieldStrategy(autoDolaYieldStrategy, DOLA);
+        console.log("Added AutoDolaYieldStrategy to yield strategy registry at:", autoDolaYieldStrategy);
 
         // Set discount rate (e.g., 2% = 200 basis points)
         sya.setDiscountRate(200);
@@ -539,12 +509,19 @@ contract DeployMainnet is Script {
         require(minter != address(0), "PhusdStableMinter must be deployed");
         require(phlimbo != address(0), "PhlimboEA must be deployed");
         require(stableYieldAccumulator != address(0), "StableYieldAccumulator must be deployed");
+        require(autoDolaYieldStrategy != address(0), "AutoDolaYieldStrategy must be deployed");
 
         console.log("CRITICAL: setPauser() must be called BEFORE register()");
 
         uint256 gasBefore = gasleft();
 
         Pauser p = Pauser(newPauser);
+
+        // Register AutoDolaYieldStrategy with NewPauser
+        AutoDolaYieldStrategy(autoDolaYieldStrategy).setPauser(newPauser);
+        console.log("AutoDolaYieldStrategy.setPauser() called");
+        p.register(autoDolaYieldStrategy);
+        console.log("NewPauser.register(AutoDolaYieldStrategy) completed");
 
         // Register PhusdStableMinter with NewPauser
         PhusdStableMinter(minter).setPauser(newPauser);
@@ -567,8 +544,7 @@ contract DeployMainnet is Script {
         uint256 gasUsed = gasBefore - gasleft();
         _markConfigured("NewPauser", gasUsed);
         _writeProgressFile();
-        console.log("All new protocol contracts registered with NewPauser");
-        console.log("NOTE: Old contracts remain managed by OldPauser independently");
+        console.log("All Phase 2 contracts registered with NewPauser");
     }
 
     // ========================================
@@ -617,8 +593,8 @@ contract DeployMainnet is Script {
 
     function _parseProgressJson(string memory json) internal {
         string[] memory names = new string[](10);
-        names[0] = "OldPauserHandling";
-        names[1] = "NewPauser";
+        names[0] = "NewPauser";
+        names[1] = "AutoDolaYieldStrategy";
         names[2] = "PhusdStableMinter";
         names[3] = "PhlimboEA";
         names[4] = "StableYieldAccumulator";
@@ -766,15 +742,16 @@ contract DeployMainnet is Script {
         console.log("  - Yield strategies: AutoDolaYieldStrategy (DOLA)");
         console.log("");
         console.log("Global Pauser System:");
-        console.log("  - NEW Pauser deployed for Phase 2 contracts");
+        console.log("  - NewPauser deployed for all Phase 2 contracts");
+        console.log("  - AutoDolaYieldStrategy registered with NewPauser");
         console.log("  - PhusdStableMinter registered with NewPauser");
         console.log("  - PhlimboEA registered with NewPauser");
         console.log("  - StableYieldAccumulator registered with NewPauser");
-        console.log("  - Old contracts remain with OldPauser independently");
         console.log("  - Burn 1000 EYE to trigger global pause on NewPauser");
         console.log("");
         console.log("Deployed Contract Addresses:");
         console.log("  - NewPauser:", newPauser);
+        console.log("  - AutoDolaYieldStrategy:", autoDolaYieldStrategy);
         console.log("  - PhusdStableMinter:", minter);
         console.log("  - PhlimboEA:", phlimbo);
         console.log("  - StableYieldAccumulator:", stableYieldAccumulator);
@@ -784,8 +761,8 @@ contract DeployMainnet is Script {
         console.log("  - phUSD:", PHUSD);
         console.log("  - USDC:", USDC);
         console.log("  - DOLA:", DOLA);
-        console.log("  - AutoDolaYieldStrategy:", AUTO_DOLA_YIELD_STRATEGY);
-        console.log("  - OldPauser:", OLD_PAUSER);
+        console.log("  - AutoDOLA Vault:", AUTO_DOLA_VAULT);
+        console.log("  - MainRewarder:", MAIN_REWARDER);
         console.log("=========================================");
     }
 }
