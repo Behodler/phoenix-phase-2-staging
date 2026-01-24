@@ -27,7 +27,7 @@ npm run interact:mint                # Mint phUSD by depositing stablecoins
 npm run interact:stake               # Stake phUSD on Phlimbo
 npm run interact:claim-rewards       # Claim accumulated Phlimbo rewards
 npm run interact:withdraw            # Withdraw staked phUSD from Phlimbo
-npm run interact:claim-accumulator   # Trigger Phlimbo to collect from yield accumulator
+npm run interact:claim-accumulator   # Inject rewards into Phlimbo via collectReward
 
 # View operations (read-only, no transactions)
 npm run view:pending-rewards         # View pending rewards for default user
@@ -107,12 +107,12 @@ npm run interact:withdraw
 ```
 
 #### ClaimYieldAccumulator.s.sol
-Triggers Phlimbo to collect rewards from the yield accumulator.
+Injects rewards into Phlimbo via collectReward().
 
 **Flow:**
 1. Call `collectReward()` on Phlimbo
-2. Phlimbo pulls yield from MockYieldStrategy
-3. Logs rewards collected
+2. Updates Phlimbo's internal reward accounting
+3. Logs rewards injected
 
 **Usage:**
 ```bash
@@ -370,7 +370,7 @@ All scripts use Anvil's default account (0xf39F...) for simplicity. To customize
    ```bash
    npm run test:simulate-yield    # Add yield
    npm run view:yield-strategies  # Verify yield
-   npm run interact:claim-accumulator # Collect to Phlimbo
+   npm run interact:claim-accumulator # Inject rewards to Phlimbo
    ```
 
 ## Troubleshooting

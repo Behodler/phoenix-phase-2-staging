@@ -12,18 +12,16 @@ import "../../src/mocks/MockRewardToken.sol";
 import "../../src/mocks/MockYieldStrategy.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phUSD-stable-minter/PhusdStableMinter.sol";
-import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 
 /**
  * @title FullFlowTest
  * @notice Complete test of the Phase 2 architecture with 2 stakers
- * @dev Tests:
+ * @dev Tests (simplified after StableYieldAccumulator removal):
  *      1. Two users mint phUSD using USDT
  *      2. Both users stake phUSD in Phlimbo
- *      3. Yield accumulates in both strategies
- *      4. External user calls claim() on accumulator (pays USDC, receives yield tokens)
- *      5. Phlimbo receives USDC and distributes to stakers
- *      6. Both stakers claim their rewards
+ *      3. Yield accumulates in strategies
+ *      4. Rewards are injected into Phlimbo via collectReward()
+ *      5. Both stakers claim their rewards
  */
 contract FullFlowTest is Script {
     using AddressLoader for *;
@@ -36,7 +34,6 @@ contract FullFlowTest is Script {
     MockYieldStrategy ysUSDT;
     MockYieldStrategy ysUSDS;
     PhusdStableMinter minter;
-    StableYieldAccumulator accumulator;
     PhlimboEA phlimbo;
 
     // Users
@@ -65,8 +62,8 @@ contract FullFlowTest is Script {
         // Step 4: Simulate yield in both strategies
         _step4_simulateYield();
 
-        // Step 5: Call claim on accumulator (user1 does this)
-        _step5_claimAccumulator();
+        // Step 5: Inject rewards via collectReward (simulating external reward injection)
+        _step5_injectRewards();
 
         // Step 6: Check and claim Phlimbo rewards
         _step6_claimPhlimboRewards();
@@ -84,7 +81,6 @@ contract FullFlowTest is Script {
         ysUSDT = MockYieldStrategy(AddressLoader.getYieldStrategyUSDT());
         ysUSDS = MockYieldStrategy(AddressLoader.getYieldStrategyUSDS());
         minter = PhusdStableMinter(AddressLoader.getMinter());
-        accumulator = StableYieldAccumulator(AddressLoader.getAccumulator());
         phlimbo = PhlimboEA(AddressLoader.getPhlimbo());
     }
 
@@ -184,29 +180,28 @@ contract FullFlowTest is Script {
         console.log("Total yield: ~1000 USD equivalent");
     }
 
-    function _step5_claimAccumulator() internal {
-        console.log("\n--- Step 5: Claim from Accumulator ---");
+    function _step5_injectRewards() internal {
+        console.log("\n--- Step 5: Inject Rewards via collectReward ---");
 
-        // Check how much USDC user needs to pay
-        uint256 paymentRequired = accumulator.calculateClaimAmount();
-        console.log("USDC payment required:", paymentRequired);
-        console.log("Discount rate:", accumulator.getDiscountRate(), "bps");
+        // Simulate external reward injection into Phlimbo
+        // In the new architecture, rewards are injected directly via collectReward()
+        uint256 rewardAmount = 500 * 10**6; // 500 USDC
 
-        // User1 needs USDC - they have some from deployment
-        console.log("\nUser1 USDC before:", usdc.balanceOf(user1));
+        console.log("Injecting USDC rewards into Phlimbo...");
         console.log("Phlimbo USDC before:", usdc.balanceOf(address(phlimbo)));
 
         vm.startBroadcast(user1Key);
-        // Add 1% buffer to approval to handle any drift between calculation and claim
-        usdc.approve(address(accumulator), paymentRequired * 101 / 100);
-        accumulator.claim();
+        // Approve Phlimbo to pull USDC from user1
+        usdc.approve(address(phlimbo), rewardAmount);
+        // Transfer and collect reward - anyone can inject rewards
+        usdc.transfer(address(phlimbo), rewardAmount);
+        // Call collectReward to update internal accounting
+        phlimbo.collectReward(rewardAmount);
         vm.stopBroadcast();
 
-        console.log("\n--- After Claim ---");
-        console.log("User1 USDC after:", usdc.balanceOf(user1));
-        console.log("User1 USDT received:", usdt.balanceOf(user1));
-        console.log("User1 USDS received:", usds.balanceOf(user1));
-        console.log("Phlimbo USDC received:", usdc.balanceOf(address(phlimbo)));
+        console.log("\n--- After Reward Injection ---");
+        console.log("Phlimbo USDC after:", usdc.balanceOf(address(phlimbo)));
+        console.log("Rewards injected:", rewardAmount, "USDC");
     }
 
     function _step6_claimPhlimboRewards() internal {

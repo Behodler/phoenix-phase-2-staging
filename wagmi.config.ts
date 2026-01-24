@@ -16,13 +16,11 @@ export default defineConfig({
         // Main Phase 2 contracts
         'PhusdStableMinter.sol/PhusdStableMinter.json',
         'Phlimbo.sol/PhlimboEA.json',
-        'StableYieldAccumulator.sol/StableYieldAccumulator.json',
 
         // Key interfaces
         'IFlax.sol/IFlax.json',
         'IPhlimbo.sol/IPhlimbo.json',
         'interfaces/IYieldStrategy.sol/IYieldStrategy.json',
-        'IStableYieldAccumulator.sol/IStableYieldAccumulator.json',
 
         // View contracts for UI polling
         'DepositView.sol/DepositView.json',
