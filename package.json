@@ -38,7 +38,10 @@
     "admin:pause": "forge script script/interactions/PauseContract.s.sol:PauseContract --rpc-url http://localhost:8545 --broadcast",
     "test:fund-user": "forge script script/interactions/FundTestUser.s.sol:FundTestUser --rpc-url http://localhost:8545 --broadcast",
     "test:simulate-yield": "forge script script/interactions/SimulateYield.s.sol:SimulateYield --rpc-url http://localhost:8545 --broadcast",
-    "test:fast-forward": "forge script script/interactions/FastForward.s.sol:FastForward --rpc-url http://localhost:8545"
+    "test:fast-forward": "forge script script/interactions/FastForward.s.sol:FastForward --rpc-url http://localhost:8545",
+    "mainnet:no-mint-deposit-dry": "forge script script/interactions/NoMintDeposit.s.sol:NoMintDeposit --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:no-mint-deposit": "forge script script/interactions/NoMintDeposit.s.sol:NoMintDeposit --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:no-mint-deposit-alt": "forge script script/interactions/NoMintDeposit.s.sol:NoMintDeposit --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/0'/0/46\" -vvv"
   },
   "keywords": [
     "phoenix",
