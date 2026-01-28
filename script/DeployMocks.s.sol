@@ -332,6 +332,17 @@ contract DeployMocks is Script {
         stableYieldAccumulator.approvePhlimbo(type(uint256).max);
         console.log("Approved Phlimbo to spend reward tokens from StableYieldAccumulator");
 
+        // CRITICAL: Authorize StableYieldAccumulator as withdrawer on all yield strategies
+        // This allows StableYieldAccumulator to withdraw yield from the strategies
+        yieldStrategyUSDT.setWithdrawer(address(stableYieldAccumulator), true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDT");
+
+        yieldStrategyUSDS.setWithdrawer(address(stableYieldAccumulator), true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDS");
+
+        yieldStrategyDola.setWithdrawer(address(stableYieldAccumulator), true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyDola");
+
         uint256 syaConfigGas = gasBefore - gasleft();
 
         // ====== PHASE 8: Pauser Registration ======
@@ -466,6 +477,7 @@ contract DeployMocks is Script {
         console.log("  - Yield strategies registered: YieldStrategyUSDT, YieldStrategyUSDS, YieldStrategyDola");
         console.log("  - Phlimbo set as reward recipient");
         console.log("  - Minter set for yield queries");
+        console.log("  - Authorized as withdrawer on all yield strategies");
         console.log("");
         console.log("Reward Flow:");
         console.log("  - Yield accrues in yield strategies");
