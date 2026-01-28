@@ -7,7 +7,7 @@ import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
-import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import {AutoDolaYieldStrategy} from "@vault/concreteYieldStrategies/Legacy/phase1/AutoDolaYieldStrategy.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";

@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
-import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import {AutoDolaYieldStrategy} from "@vault/concreteYieldStrategies/Legacy/phase1/AutoDolaYieldStrategy.sol";
 
 /**
  * @title FixMainnetWithdrawer
