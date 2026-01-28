@@ -472,6 +472,11 @@ contract DeployMainnet is Script {
         sya.approvePhlimbo(type(uint256).max);
         console.log("Approved Phlimbo to spend reward tokens from StableYieldAccumulator");
 
+        // CRITICAL: Authorize StableYieldAccumulator as withdrawer on AutoDolaYieldStrategy
+        // This allows StableYieldAccumulator to withdraw yield from the strategy via withdrawFrom()
+        AutoDolaYieldStrategy(autoDolaYieldStrategy).setWithdrawer(stableYieldAccumulator, true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on AutoDolaYieldStrategy");
+
         uint256 gasUsed = gasBefore - gasleft();
         _markConfigured("StableYieldAccumulator", gasUsed);
         _writeProgressFile();
