@@ -17,7 +17,7 @@ import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
-import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import {AutoPoolYieldStrategy} from "@vault/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
 
@@ -49,9 +49,12 @@ contract DeployMocks is Script {
     MockToke public toke;
     MockAutoDOLA public mockAutoDola;
     MockMainRewarder public mockMainRewarder;
+    MockAutoDOLA public mockAutoUSDC;  // Reusing MockAutoDOLA pattern for USDC
+    MockMainRewarder public mockMainRewarderUSDC;
     MockYieldStrategy public yieldStrategyUSDT;
     MockYieldStrategy public yieldStrategyUSDS;
-    AutoDolaYieldStrategy public yieldStrategyDola;
+    AutoPoolYieldStrategy public yieldStrategyDola;
+    AutoPoolYieldStrategy public yieldStrategyUSDC;
     PhusdStableMinter public minter;
     PhlimboEA public phlimbo;
     MockEYE public eyeToken;
@@ -161,17 +164,48 @@ contract DeployMocks is Script {
         mockAutoDola.setRewarder(address(mockMainRewarder));
         console.log("Wired MockAutoDOLA to use MockMainRewarder");
 
-        // Deploy real AutoDolaYieldStrategy with mocked dependencies
+        // Deploy real AutoPoolYieldStrategy with mocked dependencies (DOLA)
         gasBefore = gasleft();
-        yieldStrategyDola = new AutoDolaYieldStrategy(
+        yieldStrategyDola = new AutoPoolYieldStrategy(
             deployer,                    // owner
-            address(dola),               // dolaToken
+            address(dola),               // underlyingToken (DOLA)
             address(toke),               // tokeToken
-            address(mockAutoDola),       // autoDolaVault
+            address(mockAutoDola),       // autoPoolVault
             address(mockMainRewarder)    // mainRewarder
         );
         _trackDeployment("YieldStrategyDola", address(yieldStrategyDola), gasBefore - gasleft());
-        console.log("YieldStrategyDola (AutoDolaYieldStrategy) deployed at:", address(yieldStrategyDola));
+        console.log("YieldStrategyDola (AutoPoolYieldStrategy) deployed at:", address(yieldStrategyDola));
+
+        // ====== PHASE 2.6: AutoPool Infrastructure for USDC YieldStrategy ======
+        console.log("\n=== Phase 2.6: Deploying AutoPool Infrastructure for USDC ===");
+
+        // Deploy MockAutoUSDC (ERC4626 vault wrapper for USDC) - reusing MockAutoDOLA pattern
+        gasBefore = gasleft();
+        mockAutoUSDC = new MockAutoDOLA(address(rewardToken)); // rewardToken is USDC (6 decimals)
+        _trackDeployment("MockAutoUSDC", address(mockAutoUSDC), gasBefore - gasleft());
+        console.log("MockAutoUSDC deployed at:", address(mockAutoUSDC));
+
+        // Deploy MockMainRewarder for USDC (staking/rewards contract)
+        gasBefore = gasleft();
+        mockMainRewarderUSDC = new MockMainRewarder(address(mockAutoUSDC), address(toke));
+        _trackDeployment("MockMainRewarderUSDC", address(mockMainRewarderUSDC), gasBefore - gasleft());
+        console.log("MockMainRewarderUSDC deployed at:", address(mockMainRewarderUSDC));
+
+        // Wire MockAutoUSDC to use MockMainRewarderUSDC
+        mockAutoUSDC.setRewarder(address(mockMainRewarderUSDC));
+        console.log("Wired MockAutoUSDC to use MockMainRewarderUSDC");
+
+        // Deploy AutoPoolYieldStrategy for USDC
+        gasBefore = gasleft();
+        yieldStrategyUSDC = new AutoPoolYieldStrategy(
+            deployer,                        // owner
+            address(rewardToken),            // underlyingToken (USDC)
+            address(toke),                   // tokeToken
+            address(mockAutoUSDC),           // autoPoolVault
+            address(mockMainRewarderUSDC)    // mainRewarder
+        );
+        _trackDeployment("YieldStrategyUSDC", address(yieldStrategyUSDC), gasBefore - gasleft());
+        console.log("YieldStrategyUSDC (AutoPoolYieldStrategy) deployed at:", address(yieldStrategyUSDC));
 
         // ====== PHASE 3: Core Contract Deployment ======
         console.log("\n=== Phase 3: Deploying Core Contracts ===");
@@ -204,7 +238,6 @@ contract DeployMocks is Script {
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
 
-        gasBefore = gasleft();
         // Authorize PhlimboEA as phUSD minter
         phUSD.setMinter(address(phlimbo), true);
         console.log("Authorized PhlimboEA as phUSD minter");
@@ -212,27 +245,25 @@ contract DeployMocks is Script {
         // Authorize PhusdStableMinter as phUSD minter
         phUSD.setMinter(address(minter), true);
         console.log("Authorized PhusdStableMinter as phUSD minter");
-        uint256 authGas = gasBefore - gasleft();
 
         // ====== PHASE 5: YieldStrategy Configuration ======
         console.log("\n=== Phase 5: YieldStrategy Configuration ===");
 
-        gasBefore = gasleft();
         // Authorize minter as client on all yield strategies
         yieldStrategyUSDT.setClient(address(minter), true);
         yieldStrategyUSDS.setClient(address(minter), true);
         yieldStrategyDola.setClient(address(minter), true);
+        yieldStrategyUSDC.setClient(address(minter), true);
         console.log("Authorized minter as yield strategy client (all strategies)");
-        uint256 ysConfigGas = gasBefore - gasleft();
 
         // ====== PHASE 6: PhusdStableMinter Configuration ======
         console.log("\n=== Phase 6: PhusdStableMinter Configuration ===");
 
-        gasBefore = gasleft();
         // Approve yield strategies for their respective tokens
         minter.approveYS(address(usdt), address(yieldStrategyUSDT));
         minter.approveYS(address(usds), address(yieldStrategyUSDS));
         minter.approveYS(address(dola), address(yieldStrategyDola));
+        minter.approveYS(address(rewardToken), address(yieldStrategyUSDC)); // USDC
         console.log("Approved yield strategies for their tokens");
 
         // Register USDT as stablecoin (6 decimals)
@@ -261,12 +292,19 @@ contract DeployMocks is Script {
             18                           // decimals
         );
         console.log("Registered DOLA as stablecoin");
-        uint256 minterConfigGas = gasBefore - gasleft();
+
+        // Register USDC as stablecoin (6 decimals)
+        minter.registerStablecoin(
+            address(rewardToken),        // stablecoin (USDC)
+            address(yieldStrategyUSDC),  // yieldStrategy
+            1e18,                        // exchangeRate (1:1)
+            6                            // decimals
+        );
+        console.log("Registered USDC as stablecoin");
 
         // ====== PHASE 7: Phlimbo Configuration ======
         console.log("\n=== Phase 7: Phlimbo Configuration ===");
 
-        gasBefore = gasleft();
         // Set desired APY (5% = 500 basis points) - two-step process
         phlimbo.setDesiredAPY(500);
         console.log("Set desired APY (preview): 500 bps");
@@ -277,12 +315,9 @@ contract DeployMocks is Script {
         // Commit APY change
         phlimbo.setDesiredAPY(500);
         console.log("Set desired APY (commit): 500 bps");
-        uint256 phlimboConfigGas = gasBefore - gasleft();
 
         // ====== PHASE 7.5: StableYieldAccumulator Configuration ======
         console.log("\n=== Phase 7.5: StableYieldAccumulator Configuration ===");
-
-        gasBefore = gasleft();
 
         // Set reward token to USDC (rewardToken is MockRewardToken which is USDC)
         stableYieldAccumulator.setRewardToken(address(rewardToken));
@@ -324,6 +359,10 @@ contract DeployMocks is Script {
         stableYieldAccumulator.addYieldStrategy(address(yieldStrategyDola), address(dola));
         console.log("Added YieldStrategyDola to yield strategy registry");
 
+        // Add YieldStrategyUSDC to the yield strategy registry
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDC), address(rewardToken));
+        console.log("Added YieldStrategyUSDC to yield strategy registry");
+
         // Set discount rate (e.g., 2% = 200 basis points)
         stableYieldAccumulator.setDiscountRate(200);
         console.log("Set discount rate to 200 basis points (2%)");
@@ -343,13 +382,12 @@ contract DeployMocks is Script {
         yieldStrategyDola.setWithdrawer(address(stableYieldAccumulator), true);
         console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyDola");
 
-        uint256 syaConfigGas = gasBefore - gasleft();
+        yieldStrategyUSDC.setWithdrawer(address(stableYieldAccumulator), true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDC");
 
         // ====== PHASE 8: Pauser Registration ======
         console.log("\n=== Phase 8: Pauser Registration ===");
         console.log("CRITICAL: setPauser() must be called BEFORE register()");
-
-        gasBefore = gasleft();
 
         // Register PhusdStableMinter with Pauser
         // Step 1: Set pauser address on contract FIRST
@@ -374,14 +412,11 @@ contract DeployMocks is Script {
         // Step 2: Register with pauser
         pauser.register(address(stableYieldAccumulator));
         console.log("Pauser.register(StableYieldAccumulator) completed");
-
-        uint256 pauserConfigGas = gasBefore - gasleft();
         console.log("All protocol contracts registered with Pauser");
 
         // ====== PHASE 9: Seed YieldStrategyDola with PhUSD Minting ======
         console.log("\n=== Phase 9: Seed YieldStrategyDola with PhUSD Minting ===");
 
-        gasBefore = gasleft();
         uint256 dolaAmount = 5000 * 10**18; // 5000 DOLA
 
         // Deployer already has DOLA from MockDola constructor mint
@@ -396,12 +431,9 @@ contract DeployMocks is Script {
         console.log("  - DOLA deposited to YieldStrategyDola");
         console.log("  - PhUSD minted to deployer:", deployer);
 
-        uint256 seedingGas = gasBefore - gasleft();
-
         // ====== PHASE 9.5: Add DOLA Yield to MockAutoDOLA Vault ======
         console.log("\n=== Phase 9.5: Add DOLA Yield to MockAutoDOLA Vault ===");
 
-        gasBefore = gasleft();
         uint256 yieldAmount = 1000 * 10**18; // 1000 DOLA
 
         // To create yield, we must transfer DOLA directly to the vault WITHOUT minting shares.
@@ -413,23 +445,32 @@ contract DeployMocks is Script {
         console.log("Minted 1000 DOLA directly to MockAutoDOLA vault as yield");
         console.log("  - totalAssets increased without minting new shares");
         console.log("  - Share price now > 1, creating claimable yield");
-        console.log("  - YieldStrategyDola can claim this yield via AutoDolaYieldStrategy");
+        console.log("  - YieldStrategyDola can claim this yield via AutoPoolYieldStrategy");
 
-        uint256 yieldSeedingGas = gasBefore - gasleft();
+        // ====== PHASE 9.6: Add USDC Yield to MockAutoUSDC Vault ======
+        console.log("\n=== Phase 9.6: Add USDC Yield to MockAutoUSDC Vault ===");
+
+        uint256 usdcYieldAmount = 1000 * 10**6; // 1000 USDC (6 decimals)
+
+        // Mint 1000 USDC directly to the vault address (not to deployer)
+        rewardToken.mint(address(mockAutoUSDC), usdcYieldAmount);
+        console.log("Minted 1000 USDC directly to MockAutoUSDC vault as yield");
+        console.log("  - totalAssets increased without minting new shares");
+        console.log("  - Share price now > 1, creating claimable yield");
+        console.log("  - YieldStrategyUSDC can claim this yield via AutoPoolYieldStrategy");
 
         // ====== PHASE 10: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 10: Deploy DepositView for UI Polling ===");
 
-        gasBefore = gasleft();
         depositView = new DepositView(
             IPhlimbo(address(phlimbo)),
             IERC20(address(phUSD))
         );
-        _trackDeployment("DepositView", address(depositView), gasBefore - gasleft());
+        _trackDeployment("DepositView", address(depositView), 0);
         console.log("DepositView deployed at:", address(depositView));
 
-        // Mark configurations as complete
-        _markConfigured("MockPhUSD", authGas / 2);
+        // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
+        _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
         _markConfigured("MockUSDT", 0);
         _markConfigured("MockUSDS", 0);
@@ -438,20 +479,25 @@ contract DeployMocks is Script {
         _markConfigured("MockEYE", 0);
         _markConfigured("MockAutoDOLA", 0);
         _markConfigured("MockMainRewarder", 0);
-        _markConfigured("YieldStrategyUSDT", ysConfigGas / 3);
-        _markConfigured("YieldStrategyUSDS", ysConfigGas / 3);
-        _markConfigured("YieldStrategyDola", ysConfigGas / 3);
-        _markConfigured("PhusdStableMinter", minterConfigGas);
-        _markConfigured("PhlimboEA", phlimboConfigGas + authGas / 2);
-        _markConfigured("StableYieldAccumulator", syaConfigGas);
-        _markConfigured("Pauser", pauserConfigGas);
+        _markConfigured("MockAutoUSDC", 0);
+        _markConfigured("MockMainRewarderUSDC", 0);
+        _markConfigured("YieldStrategyUSDT", 0);
+        _markConfigured("YieldStrategyUSDS", 0);
+        _markConfigured("YieldStrategyDola", 0);
+        _markConfigured("YieldStrategyUSDC", 0);
+        _markConfigured("PhusdStableMinter", 0);
+        _markConfigured("PhlimboEA", 0);
+        _markConfigured("StableYieldAccumulator", 0);
+        _markConfigured("Pauser", 0);
         _markConfigured("DepositView", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
-        _markConfigured("Seeding", seedingGas);
+        _markConfigured("Seeding", 0);
         _trackDeployment("DolaYield", address(0), 0);
-        _markConfigured("DolaYield", yieldSeedingGas);
+        _markConfigured("DolaYield", 0);
+        _trackDeployment("UsdcYield", address(0), 0);
+        _markConfigured("UsdcYield", 0);
 
         vm.stopBroadcast();
 
@@ -465,16 +511,21 @@ contract DeployMocks is Script {
         console.log("Architecture Summary:");
         console.log("  - USDT -> YieldStrategyUSDT (MockYieldStrategy) -> PhusdStableMinter");
         console.log("  - USDS -> YieldStrategyUSDS (MockYieldStrategy) -> PhusdStableMinter");
-        console.log("  - DOLA -> YieldStrategyDola (AutoDolaYieldStrategy) -> PhusdStableMinter");
-        console.log("    \\-> AutoDolaYieldStrategy uses real contract with mocked dependencies:");
+        console.log("  - DOLA -> YieldStrategyDola (AutoPoolYieldStrategy) -> PhusdStableMinter");
+        console.log("    \\-> AutoPoolYieldStrategy uses real contract with mocked dependencies:");
         console.log("        - MockAutoDOLA (ERC4626 vault)");
         console.log("        - MockMainRewarder (TOKE rewards)");
+        console.log("        - MockToke (reward token)");
+        console.log("  - USDC -> YieldStrategyUSDC (AutoPoolYieldStrategy) -> PhusdStableMinter");
+        console.log("    \\-> AutoPoolYieldStrategy uses real contract with mocked dependencies:");
+        console.log("        - MockAutoUSDC (ERC4626 vault)");
+        console.log("        - MockMainRewarderUSDC (TOKE rewards)");
         console.log("        - MockToke (reward token)");
         console.log("");
         console.log("StableYieldAccumulator Configuration:");
         console.log("  - Reward token: USDC (MockRewardToken)");
         console.log("  - Discount rate: 2% (200 basis points)");
-        console.log("  - Yield strategies registered: YieldStrategyUSDT, YieldStrategyUSDS, YieldStrategyDola");
+        console.log("  - Yield strategies registered: YieldStrategyUSDT, YieldStrategyUSDS, YieldStrategyDola, YieldStrategyUSDC");
         console.log("  - Phlimbo set as reward recipient");
         console.log("  - Minter set for yield queries");
         console.log("  - Authorized as withdrawer on all yield strategies");

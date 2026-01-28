@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import "@vault/imports/IAutoDOLA.sol";
+import "@vault/imports/Legacy/IAutoDOLA.sol";
 import "./MockDola.sol";
 
 /**
