@@ -18,18 +18,26 @@ import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
 import "@vault/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
 
 /**
  * @title DeployMocks
  * @notice Deployment script for Phase 2 contracts on local Anvil
- * @dev Simplified architecture after StableYieldAccumulator removal:
+ * @dev Full architecture matching DeployMainnet pattern:
  *
  * Architecture Overview:
  * - Multiple YieldStrategies (vaults) accumulate yield from different stablecoins
  * - PhusdStableMinter manages stablecoin deposits and phUSD minting
- * - Phlimbo handles staking and reward distribution via collectReward()
- * - Rewards are injected directly into Phlimbo through collectReward
+ * - StableYieldAccumulator gathers yield from all strategies and offers to users for discounted USDC
+ * - USDC is then injected into Phlimbo for distribution via collectReward()
+ * - Phlimbo handles staking and reward distribution
+ *
+ * Key Integration Points:
+ * - StableYieldAccumulator deployment and configuration
+ * - Multiple YieldStrategy deployment and registration
+ * - USDC holding account setup for the collectReward swap mechanism
+ * - Phlimbo contract integration for yield distribution
  */
 contract DeployMocks is Script {
     // Deployment addresses
@@ -48,6 +56,7 @@ contract DeployMocks is Script {
     PhlimboEA public phlimbo;
     MockEYE public eyeToken;
     Pauser public pauser;
+    StableYieldAccumulator public stableYieldAccumulator;
     DepositView public depositView;
 
     // Progress tracking structure
@@ -173,7 +182,7 @@ contract DeployMocks is Script {
         _trackDeployment("PhusdStableMinter", address(minter), gasBefore - gasleft());
         console.log("PhusdStableMinter deployed at:", address(minter));
 
-        // 2. Deploy PhlimboEA (no longer depends on StableYieldAccumulator)
+        // 2. Deploy PhlimboEA
         // Using Linear Depletion model: depletion window = 1 week (604800 seconds)
         uint256 oneWeekInSeconds = 604800;
         gasBefore = gasleft();
@@ -185,6 +194,12 @@ contract DeployMocks is Script {
         _trackDeployment("PhlimboEA", address(phlimbo), gasBefore - gasleft());
         console.log("PhlimboEA deployed at:", address(phlimbo));
         console.log("  - Depletion window:", oneWeekInSeconds, "seconds (1 week)");
+
+        // 3. Deploy StableYieldAccumulator
+        gasBefore = gasleft();
+        stableYieldAccumulator = new StableYieldAccumulator();
+        _trackDeployment("StableYieldAccumulator", address(stableYieldAccumulator), gasBefore - gasleft());
+        console.log("StableYieldAccumulator deployed at:", address(stableYieldAccumulator));
 
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
@@ -264,6 +279,61 @@ contract DeployMocks is Script {
         console.log("Set desired APY (commit): 500 bps");
         uint256 phlimboConfigGas = gasBefore - gasleft();
 
+        // ====== PHASE 7.5: StableYieldAccumulator Configuration ======
+        console.log("\n=== Phase 7.5: StableYieldAccumulator Configuration ===");
+
+        gasBefore = gasleft();
+
+        // Set reward token to USDC (rewardToken is MockRewardToken which is USDC)
+        stableYieldAccumulator.setRewardToken(address(rewardToken));
+        console.log("Set reward token to USDC:", address(rewardToken));
+
+        // Set Phlimbo as the reward recipient
+        stableYieldAccumulator.setPhlimbo(address(phlimbo));
+        console.log("Set Phlimbo as reward recipient:", address(phlimbo));
+
+        // Set minter address for yield queries
+        stableYieldAccumulator.setMinter(address(minter));
+        console.log("Set minter for yield queries:", address(minter));
+
+        // Configure USDC token (6 decimals, 1:1 exchange rate)
+        stableYieldAccumulator.setTokenConfig(address(rewardToken), 6, 1e18);
+        console.log("Configured USDC token config (6 decimals, 1:1 rate)");
+
+        // Configure USDT token (6 decimals, 1:1 exchange rate)
+        stableYieldAccumulator.setTokenConfig(address(usdt), 6, 1e18);
+        console.log("Configured USDT token config (6 decimals, 1:1 rate)");
+
+        // Configure USDS token (18 decimals, 1:1 exchange rate)
+        stableYieldAccumulator.setTokenConfig(address(usds), 18, 1e18);
+        console.log("Configured USDS token config (18 decimals, 1:1 rate)");
+
+        // Configure DOLA token (18 decimals, 1:1 exchange rate)
+        stableYieldAccumulator.setTokenConfig(address(dola), 18, 1e18);
+        console.log("Configured DOLA token config (18 decimals, 1:1 rate)");
+
+        // Add YieldStrategyUSDT to the yield strategy registry
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDT), address(usdt));
+        console.log("Added YieldStrategyUSDT to yield strategy registry");
+
+        // Add YieldStrategyUSDS to the yield strategy registry
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDS), address(usds));
+        console.log("Added YieldStrategyUSDS to yield strategy registry");
+
+        // Add YieldStrategyDola to the yield strategy registry
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyDola), address(dola));
+        console.log("Added YieldStrategyDola to yield strategy registry");
+
+        // Set discount rate (e.g., 2% = 200 basis points)
+        stableYieldAccumulator.setDiscountRate(200);
+        console.log("Set discount rate to 200 basis points (2%)");
+
+        // Approve Phlimbo to spend reward tokens with max approval
+        stableYieldAccumulator.approvePhlimbo(type(uint256).max);
+        console.log("Approved Phlimbo to spend reward tokens from StableYieldAccumulator");
+
+        uint256 syaConfigGas = gasBefore - gasleft();
+
         // ====== PHASE 8: Pauser Registration ======
         console.log("\n=== Phase 8: Pauser Registration ===");
         console.log("CRITICAL: setPauser() must be called BEFORE register()");
@@ -286,8 +356,16 @@ contract DeployMocks is Script {
         pauser.register(address(phlimbo));
         console.log("Pauser.register(PhlimboEA) completed");
 
+        // Register StableYieldAccumulator with Pauser
+        // Step 1: Set pauser address on contract FIRST
+        stableYieldAccumulator.setPauser(address(pauser));
+        console.log("StableYieldAccumulator.setPauser() called");
+        // Step 2: Register with pauser
+        pauser.register(address(stableYieldAccumulator));
+        console.log("Pauser.register(StableYieldAccumulator) completed");
+
         uint256 pauserConfigGas = gasBefore - gasleft();
-        console.log("Both protocol contracts registered with Pauser");
+        console.log("All protocol contracts registered with Pauser");
 
         // ====== PHASE 9: Seed YieldStrategyDola with PhUSD Minting ======
         console.log("\n=== Phase 9: Seed YieldStrategyDola with PhUSD Minting ===");
@@ -308,6 +386,25 @@ contract DeployMocks is Script {
         console.log("  - PhUSD minted to deployer:", deployer);
 
         uint256 seedingGas = gasBefore - gasleft();
+
+        // ====== PHASE 9.5: Add DOLA Yield to MockAutoDOLA Vault ======
+        console.log("\n=== Phase 9.5: Add DOLA Yield to MockAutoDOLA Vault ===");
+
+        gasBefore = gasleft();
+        uint256 yieldAmount = 1000 * 10**18; // 1000 DOLA
+
+        // To create yield, we must transfer DOLA directly to the vault WITHOUT minting shares.
+        // This increases totalAssets without increasing totalSupply, raising share price.
+        // Using deposit() would mint new shares, keeping share price at 1:1 (no yield).
+
+        // Mint 1000 DOLA directly to the vault address (not to deployer)
+        dola.mint(address(mockAutoDola), yieldAmount);
+        console.log("Minted 1000 DOLA directly to MockAutoDOLA vault as yield");
+        console.log("  - totalAssets increased without minting new shares");
+        console.log("  - Share price now > 1, creating claimable yield");
+        console.log("  - YieldStrategyDola can claim this yield via AutoDolaYieldStrategy");
+
+        uint256 yieldSeedingGas = gasBefore - gasleft();
 
         // ====== PHASE 10: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 10: Deploy DepositView for UI Polling ===");
@@ -335,8 +432,15 @@ contract DeployMocks is Script {
         _markConfigured("YieldStrategyDola", ysConfigGas / 3);
         _markConfigured("PhusdStableMinter", minterConfigGas);
         _markConfigured("PhlimboEA", phlimboConfigGas + authGas / 2);
+        _markConfigured("StableYieldAccumulator", syaConfigGas);
         _markConfigured("Pauser", pauserConfigGas);
         _markConfigured("DepositView", 0);
+
+        // Track seeding completion
+        _trackDeployment("Seeding", address(0), 0);
+        _markConfigured("Seeding", seedingGas);
+        _trackDeployment("DolaYield", address(0), 0);
+        _markConfigured("DolaYield", yieldSeedingGas);
 
         vm.stopBroadcast();
 
@@ -355,18 +459,36 @@ contract DeployMocks is Script {
         console.log("        - MockAutoDOLA (ERC4626 vault)");
         console.log("        - MockMainRewarder (TOKE rewards)");
         console.log("        - MockToke (reward token)");
-        console.log("  - Rewards injected directly into Phlimbo via collectReward()");
+        console.log("");
+        console.log("StableYieldAccumulator Configuration:");
+        console.log("  - Reward token: USDC (MockRewardToken)");
+        console.log("  - Discount rate: 2% (200 basis points)");
+        console.log("  - Yield strategies registered: YieldStrategyUSDT, YieldStrategyUSDS, YieldStrategyDola");
+        console.log("  - Phlimbo set as reward recipient");
+        console.log("  - Minter set for yield queries");
+        console.log("");
+        console.log("Reward Flow:");
+        console.log("  - Yield accrues in yield strategies");
+        console.log("  - StableYieldAccumulator gathers yield and offers to users for discounted USDC");
+        console.log("  - USDC is then injected into Phlimbo via collectReward()");
+        console.log("  - Phlimbo distributes rewards to stakers");
         console.log("");
         console.log("Global Pauser System:");
         console.log("  - Pauser contract deployed with MockEYE token");
         console.log("  - PhusdStableMinter registered with Pauser");
         console.log("  - PhlimboEA registered with Pauser");
+        console.log("  - StableYieldAccumulator registered with Pauser");
         console.log("  - Burn 1000 EYE to trigger global pause");
         console.log("");
         console.log("Initial Seeding:");
         console.log("  - 5000 DOLA deposited to YieldStrategyDola via minter.mint()");
         console.log("  - Deployer received 5000 PhUSD");
         console.log("  - YieldStrategyDola now has positive balance");
+        console.log("");
+        console.log("DOLA Yield Seeding:");
+        console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
+        console.log("  - This increases share value for YieldStrategyDola");
+        console.log("  - AutoDolaYieldStrategy can claim this yield via StableYieldAccumulator");
     }
 
     /**
