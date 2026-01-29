@@ -447,6 +447,26 @@ contract DeployMocks is Script {
         console.log("  - Share price now > 1, creating claimable yield");
         console.log("  - YieldStrategyDola can claim this yield via AutoPoolYieldStrategy");
 
+        // ====== PHASE 9.55: Seed YieldStrategyUSDC with PhUSD Minting ======
+        console.log("\n=== Phase 9.55: Seed YieldStrategyUSDC with PhUSD Minting ===");
+
+        uint256 usdcAmount = 5000 * 10**6; // 5000 USDC (6 decimals)
+
+        // Deployer already has USDC from MockRewardToken constructor mint
+        // Approve minter to spend deployer's USDC
+        rewardToken.approve(address(minter), usdcAmount);
+        console.log("Approved minter to spend 5000 USDC");
+
+        // Mint PhUSD by depositing USDC through the minter
+        // This will: 1) Transfer USDC to minter, 2) Deposit USDC into YieldStrategyUSDC, 3) Mint PhUSD to deployer
+        minter.mint(address(rewardToken), usdcAmount);
+        console.log("Minted PhUSD with 5000 USDC");
+        console.log("  - USDC deposited to YieldStrategyUSDC");
+        console.log("  - PhUSD minted to deployer:", deployer);
+
+        _trackDeployment("UsdcSeeding", address(0), 0);
+        _markConfigured("UsdcSeeding", 0);
+
         // ====== PHASE 9.6: Add USDC Yield to MockAutoUSDC Vault ======
         console.log("\n=== Phase 9.6: Add USDC Yield to MockAutoUSDC Vault ===");
 
@@ -552,6 +572,16 @@ contract DeployMocks is Script {
         console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
         console.log("  - This increases share value for YieldStrategyDola");
         console.log("  - AutoDolaYieldStrategy can claim this yield via StableYieldAccumulator");
+        console.log("");
+        console.log("USDC Seeding:");
+        console.log("  - 5000 USDC deposited to YieldStrategyUSDC via minter.mint()");
+        console.log("  - Deployer received 5000 PhUSD");
+        console.log("  - YieldStrategyUSDC now has positive balance");
+        console.log("");
+        console.log("USDC Yield Seeding:");
+        console.log("  - 1000 USDC deposited directly to MockAutoUSDC vault");
+        console.log("  - This increases share value for YieldStrategyUSDC");
+        console.log("  - AutoPoolYieldStrategy can claim this yield via StableYieldAccumulator");
     }
 
     /**

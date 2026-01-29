@@ -165,6 +165,10 @@ contract DeployMocksSepolia is Script {
         console.log("\n=== Phase 9.5: Add DOLA Yield to MockAutoDOLA Vault ===");
         _addDolaYield(deployer);
 
+        // ====== PHASE 9.55: Seed YieldStrategyUSDC with PhUSD Minting ======
+        console.log("\n=== Phase 9.55: Seed YieldStrategyUSDC with PhUSD Minting ===");
+        _seedYieldStrategyUSDC(deployer);
+
         // ====== PHASE 9.6: Add USDC Yield to MockAutoUSDC Vault ======
         console.log("\n=== Phase 9.6: Add USDC Yield to MockAutoUSDC Vault ===");
         _addUsdcYield(deployer);
@@ -875,6 +879,42 @@ contract DeployMocksSepolia is Script {
     }
 
     // ========================================
+    // PHASE 9.55: Seed YieldStrategyUSDC
+    // ========================================
+
+    function _seedYieldStrategyUSDC(address deployer) internal {
+        // Use a special tracking key for seeding
+        if (_isConfigured("UsdcSeeding")) {
+            console.log("YieldStrategyUSDC already seeded");
+            return;
+        }
+
+        require(rewardToken != address(0), "MockUSDC must be deployed");
+        require(minter != address(0), "PhusdStableMinter must be deployed");
+
+        uint256 usdcAmount = 5000 * 10**6; // 5000 USDC (6 decimals)
+
+        uint256 gasBefore = gasleft();
+
+        // Approve minter to spend deployer's USDC
+        MockRewardToken(rewardToken).approve(minter, usdcAmount);
+        console.log("Approved minter to spend 5000 USDC");
+
+        // Mint PhUSD by depositing USDC through the minter
+        PhusdStableMinter(minter).mint(rewardToken, usdcAmount);
+        console.log("Minted PhUSD with 5000 USDC");
+        console.log("  - USDC deposited to YieldStrategyUSDC");
+        console.log("  - PhUSD minted to deployer:", deployer);
+
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Track seeding completion
+        _trackDeployment("UsdcSeeding", address(0), 0);
+        _markConfigured("UsdcSeeding", gasUsed);
+        _writeProgressFile();
+    }
+
+    // ========================================
     // PHASE 9.6: Add USDC Yield to MockAutoUSDC
     // ========================================
 
@@ -967,7 +1007,7 @@ contract DeployMocksSepolia is Script {
         // We need to extract contract addresses from the JSON
         // Format: "ContractName": {"address": "0x...", "deployed": true, ...}
 
-        string[] memory names = new string[](22);
+        string[] memory names = new string[](23);
         names[0] = "MockPhUSD";
         names[1] = "MockUSDC";
         names[2] = "MockUSDT";
@@ -989,7 +1029,8 @@ contract DeployMocksSepolia is Script {
         names[18] = "DepositView";
         names[19] = "Seeding";
         names[20] = "DolaYield";
-        names[21] = "UsdcYield";
+        names[21] = "UsdcSeeding";
+        names[22] = "UsdcYield";
 
         for (uint256 i = 0; i < names.length; i++) {
             string memory name = names[i];
@@ -1167,5 +1208,15 @@ contract DeployMocksSepolia is Script {
         console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
         console.log("  - This increases share value for YieldStrategyDola");
         console.log("  - AutoDolaYieldStrategy can claim this yield");
+        console.log("");
+        console.log("USDC Seeding:");
+        console.log("  - 5000 USDC deposited to YieldStrategyUSDC via minter.mint()");
+        console.log("  - Deployer received 5000 PhUSD");
+        console.log("  - YieldStrategyUSDC now has positive balance");
+        console.log("");
+        console.log("USDC Yield Seeding:");
+        console.log("  - 1000 USDC deposited directly to MockAutoUSDC vault");
+        console.log("  - This increases share value for YieldStrategyUSDC");
+        console.log("  - AutoPoolYieldStrategy can claim this yield");
     }
 }
