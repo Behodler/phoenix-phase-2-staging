@@ -30,7 +30,7 @@ export const mainnetAddresses: ContractAddresses = {
   YieldStrategyDola: "0x01d34d7EF3988C5b981ee06bF0Ba4485Bd8eA20C",
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
   PhlimboEA: "0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4",
-  StableYieldAccumulator: "0xdD9A470dFFa0DF2cE264Ca2ECeA265d30ac1008f",
+  StableYieldAccumulator: "0xFc88cE7Ca2f4D2A78b2f96F6d1c34691960A9027",
   DepositView: "0x2Fdf77d4Ea75eFd48922B8E521612197FFbB564c",
   // External protocol contracts
   PhUSD: "0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605",

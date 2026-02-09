@@ -49,7 +49,9 @@
     "mainnet:no-mint-deposit-alt": "forge script script/interactions/NoMintDeposit.s.sol:NoMintDeposit --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/0'/0/46\" -vvv",
     "mainnet:collect-reward-dry": "forge script script/interactions/CollectReward.s.sol:CollectReward --rpc-url $RPC_MAINNET --sender 0x3E9003DA2ad56A7cc677b6b414AD475A0231Eb28 -vvv",
     "mainnet:collect-reward": "forge script script/interactions/CollectReward.s.sol:CollectReward --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/48'/0/0\" -vvv",
-    "mainnet:fix-withdrawer": "forge script script/FixMainnetWithdrawer.s.sol:FixMainnetWithdrawer --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "mainnet:fix-withdrawer": "forge script script/FixMainnetWithdrawer.s.sol:FixMainnetWithdrawer --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:set-depletion-dry": "forge script script/interactions/SetDepletionDuration.s.sol:SetDepletionDuration --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:set-depletion": "rm -rf broadcast/SetDepletionDuration.s.sol && forge script script/interactions/SetDepletionDuration.s.sol:SetDepletionDuration --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
