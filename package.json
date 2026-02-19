@@ -51,7 +51,9 @@
     "mainnet:collect-reward": "forge script script/interactions/CollectReward.s.sol:CollectReward --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/48'/0/0\" -vvv",
     "mainnet:fix-withdrawer": "forge script script/FixMainnetWithdrawer.s.sol:FixMainnetWithdrawer --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "mainnet:set-depletion-dry": "forge script script/interactions/SetDepletionDuration.s.sol:SetDepletionDuration --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
-    "mainnet:set-depletion": "rm -rf broadcast/SetDepletionDuration.s.sol && forge script script/interactions/SetDepletionDuration.s.sol:SetDepletionDuration --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "mainnet:set-depletion": "rm -rf broadcast/SetDepletionDuration.s.sol && forge script script/interactions/SetDepletionDuration.s.sol:SetDepletionDuration --rpc-url $RPC_MAINNET --broadcast --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:mint-phusd-dry": "forge script script/interactions/MintPhUSDMainnet.s.sol:MintPhUSDMainnet --sig \"run(uint256)\" 1 --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mint-phusd": "bash scripts/mint-phusd.sh"
   },
   "keywords": [
     "phoenix",

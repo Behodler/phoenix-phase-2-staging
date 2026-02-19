@@ -25,7 +25,12 @@ remappings = [
     "lib/phUSD-stable-minter/lib/mutable/vault/=lib/vault/",
     "openzeppelin-contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/",
     "erc4626-tests/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/erc4626-tests/",
-    "halmos-cheatcodes/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/halmos-cheatcodes/src/"
+    "halmos-cheatcodes/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/halmos-cheatcodes/src/",
+    "v4-core/=lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/src/",
+    "v4-periphery/=lib/stable-yield-accumulator/lib/v4-periphery/",
+    "@uniswap/v4-core/=lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/",
+    "lib/stable-yield-accumulator/lib/openzeppelin-contracts/=lib/stable-yield-accumulator/lib/openzeppelin-contracts/",
+    "@flax-token/=lib/flax-token-v2/src/"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
