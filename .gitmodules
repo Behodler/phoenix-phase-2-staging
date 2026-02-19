@@ -16,3 +16,6 @@
 [submodule "lib/vault"]
 	path = lib/vault
 	url = git@github.com:Behodler/reflax-yield-vault.git
+[submodule "lib/flax-token-v2"]
+	path = lib/flax-token-v2
+	url = git@github.com:Behodler/flax-token-v2.git
