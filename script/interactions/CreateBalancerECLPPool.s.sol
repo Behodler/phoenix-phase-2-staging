@@ -32,7 +32,7 @@ import {
  *         using 200-digit Python `decimal` arithmetic.  See the companion
  *         script at /tmp/compute_eclp_derived_params.py for the full derivation.
  *
- *         Ledger index: 45  (HD path m/44'/60'/45'/0/0)
+ *         Ledger index: 44  (HD path m/44'/60'/44'/0/0)
  */
 contract CreateBalancerECLPPool is Script {
     // ──────────────────────────────────────────────
@@ -110,10 +110,8 @@ contract CreateBalancerECLPPool is Script {
     uint256 internal constant SEED_PHUSD = 10000000000000000000;  // 10 phUSD
 
     // ──────────────────────────────────────────────
-    //  NOTE: Ledger index 45 address is unknown at script creation time.
-    //  The user must determine it via:
-    //    cast wallet address --ledger --hd-paths "m/44'/60'/45'/0/0"
-    //  and update the dry-run --sender flag in package.json.
+    //  Ledger index 44 (HD path m/44'/60'/44'/0/0)
+    //  Dry-run sender: 0x20D567D039cFC0174a3887F427BE54D418f7C274
     // ──────────────────────────────────────────────
 
     function run() external {
