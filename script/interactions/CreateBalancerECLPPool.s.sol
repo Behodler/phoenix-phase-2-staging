@@ -52,8 +52,8 @@ contract CreateBalancerECLPPool is Script {
     string public constant POOL_NAME = "Gyro E-CLP phUSD/sUSDS";
     string public constant POOL_SYMBOL = "ECLP-phUSD-sUSDS";
 
-    /// @dev 0.04% swap fee = 4e14 in 18-decimal
-    uint256 public constant SWAP_FEE = 400000000000000;
+    /// @dev 0.3% swap fee = 3e15 in 18-decimal
+    uint256 public constant SWAP_FEE = 3000000000000000;
 
     /// @dev Deterministic salt for reproducible pool address
     bytes32 public constant SALT = keccak256("phUSD-sUSDS-ECLP-v1");
@@ -163,10 +163,12 @@ contract CreateBalancerECLPPool is Script {
             paysYieldFees: false
         });
 
-        // ── Build PoolRoleAccounts (all roles -> msg.sender) ──
+        // ── Build PoolRoleAccounts ──
+        // pauseManager & swapFeeManager = address(0) delegates to Balancer Governance
+        // poolCreator remains msg.sender (Ledger index 45)
         PoolRoleAccounts memory roleAccounts = PoolRoleAccounts({
-            pauseManager: msg.sender,
-            swapFeeManager: msg.sender,
+            pauseManager: address(0),
+            swapFeeManager: address(0),
             poolCreator: msg.sender
         });
 
@@ -185,7 +187,7 @@ contract CreateBalancerECLPPool is Script {
             roleAccounts,
             SWAP_FEE,
             address(0),   // poolHooksContract — none
-            false,         // enableDonation
+            true,          // enableDonation
             false,         // disableUnbalancedLiquidity
             SALT
         );
@@ -234,7 +236,7 @@ contract CreateBalancerECLPPool is Script {
         console.log("BPT received:", bptOut);
         console.log("Seed sUSDS:  ", SEED_SUSDS);
         console.log("Seed phUSD:  ", SEED_PHUSD);
-        console.log("Swap fee:     0.04%");
+        console.log("Swap fee:     0.3%");
         console.log("Salt:         keccak256('phUSD-sUSDS-ECLP-v1')");
         console.log("\n");
     }
