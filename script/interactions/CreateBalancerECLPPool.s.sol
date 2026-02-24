@@ -41,7 +41,7 @@ contract CreateBalancerECLPPool is Script {
     address public constant PHUSD = 0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605;
     address public constant SUSDS = 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD;
 
-    address public constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
+    address public constant GYRO_ECLP_POOL_FACTORY = 0xE9B0a3bc48178D7FE2F5453C8bc1415d73F966d0;
     address public constant BALANCER_VAULT = 0xbA1333333333a1BA1108E8412f11850A5C319bA9;
     address public constant ROUTER = 0xAE563E3f8219521950555F5962419C8919758Ea2;
     address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
@@ -49,14 +49,14 @@ contract CreateBalancerECLPPool is Script {
     // ──────────────────────────────────────────────
     //  Pool configuration
     // ──────────────────────────────────────────────
-    string public constant POOL_NAME = "Gyro E-CLP phUSD/sUSDS";
+    string public constant POOL_NAME = "Gyro phUSD/sUSDS 3";
     string public constant POOL_SYMBOL = "ECLP-phUSD-sUSDS";
 
     /// @dev 0.3% swap fee = 3e15 in 18-decimal
     uint256 public constant SWAP_FEE = 3000000000000000;
 
     /// @dev Deterministic salt for reproducible pool address
-    bytes32 public constant SALT = keccak256("phUSD-sUSDS-ECLP-v1");
+    bytes32 public constant SALT = keccak256("phUSD-sUSDS-ECLP-v3");
 
     // ──────────────────────────────────────────────
     //  E-CLP Base Parameters (18-decimal)
@@ -162,12 +162,11 @@ contract CreateBalancerECLPPool is Script {
         });
 
         // ── Build PoolRoleAccounts ──
-        // pauseManager & swapFeeManager = address(0) delegates to Balancer Governance
-        // poolCreator remains msg.sender (Ledger index 45)
+        // All roles = address(0) — delegates everything to Balancer Governance
         PoolRoleAccounts memory roleAccounts = PoolRoleAccounts({
             pauseManager: address(0),
             swapFeeManager: address(0),
-            poolCreator: msg.sender
+            poolCreator: address(0)
         });
 
         vm.startBroadcast();
@@ -235,7 +234,7 @@ contract CreateBalancerECLPPool is Script {
         console.log("Seed sUSDS:  ", SEED_SUSDS);
         console.log("Seed phUSD:  ", SEED_PHUSD);
         console.log("Swap fee:     0.3%");
-        console.log("Salt:         keccak256('phUSD-sUSDS-ECLP-v1')");
+        console.log("Salt:         keccak256('phUSD-sUSDS-ECLP-v3')");
         console.log("\n");
     }
 }
