@@ -21,16 +21,24 @@ import {
  *         mainnet and seeds it with initial liquidity.
  *
  *         The pool uses an elliptic concentrated liquidity curve to concentrate
- *         liquidity within the phUSD price range of $0.95 - $1.05 (expressed as
- *         sUSDS-per-phUSD rates of ~0.8734 - ~0.9654, given sUSDS at $1.0877).
+ *         liquidity within the phUSD price range of $0.95 - $1.05.
  *
  * @dev    Token ordering (CRITICAL):
  *           token0 = sUSDS (0xa393...) -- lower address
  *           token1 = phUSD (0xf3B5...) -- higher address
  *
+ *         Price convention (CRITICAL):
+ *           alpha and beta are expressed as **phUSD per sUSDS** (token1/token0),
+ *           i.e. "how many phUSD does 1 sUSDS buy at the margin".
+ *
+ *           alpha (lower bound) = sUSDS_rate / phUSD_price_high
+ *                               = $1.0877 / $1.05 ≈ 1.035905
+ *           beta  (upper bound) = sUSDS_rate / phUSD_price_low
+ *                               = $1.0877 / $0.95 ≈ 1.144947
+ *
  *         DerivedEclpParams were computed off-chain from the base EclpParams
  *         using 200-digit Python `decimal` arithmetic.  See the companion
- *         script at /tmp/compute_eclp_derived_params.py for the full derivation.
+ *         script at script/interactions/compute_eclp_derived_params.py.
  *
  *         Ledger index: 44  (HD path m/44'/60'/44'/0/0)
  */
@@ -49,34 +57,36 @@ contract CreateBalancerECLPPool is Script {
     // ──────────────────────────────────────────────
     //  Pool configuration
     // ──────────────────────────────────────────────
-    string public constant POOL_NAME = "Gyro phUSD/sUSDS 3";
+    string public constant POOL_NAME = "Gyro phUSD/sUSDS 5";
     string public constant POOL_SYMBOL = "ECLP-phUSD-sUSDS";
 
     /// @dev 0.3% swap fee = 3e15 in 18-decimal
     uint256 public constant SWAP_FEE = 3000000000000000;
 
     /// @dev Deterministic salt for reproducible pool address
-    bytes32 public constant SALT = keccak256("phUSD-sUSDS-ECLP-v3");
+    bytes32 public constant SALT = keccak256("phUSD-sUSDS-ECLP-v5");
 
     // ──────────────────────────────────────────────
     //  E-CLP Base Parameters (18-decimal)
     // ──────────────────────────────────────────────
-    //  alpha  = lower price bound  (sUSDS/phUSD when phUSD=$0.95)
-    //  beta   = upper price bound  (sUSDS/phUSD when phUSD=$1.05)
-    //  c      = cos(pi/4)
-    //  s      = sin(pi/4)
+    //  alpha  = lower price bound  (phUSD/sUSDS when phUSD=$1.05)
+    //         = sUSDS_rate / 1.05 = 1.0877 / 1.05 ≈ 1.035905
+    //  beta   = upper price bound  (phUSD/sUSDS when phUSD=$0.95)
+    //         = sUSDS_rate / 0.95 = 1.0877 / 0.95 ≈ 1.144947
+    //  c      = cos(0) = 1   (no rotation — symmetric liquidity)
+    //  s      = sin(0) = 0
     //  lambda = 50  (stretching factor)
-    int256 internal constant ALPHA  = 873425000000000000;
-    int256 internal constant BETA   = 965359000000000000;
-    int256 internal constant C      = 707106781186547524;
-    int256 internal constant S      = 707106781186547524;
+    int256 internal constant ALPHA  = 1035905000000000000;
+    int256 internal constant BETA   = 1144947000000000000;
+    int256 internal constant C      = 1000000000000000000;
+    int256 internal constant S      = 0;
     int256 internal constant LAMBDA = 50000000000000000000;
 
     // ──────────────────────────────────────────────
     //  Derived E-CLP Parameters (38-decimal)
     //
     //  Computed via Python `decimal` module at 200-digit precision.
-    //  See /tmp/compute_eclp_derived_params.py for the full derivation.
+    //  See script/interactions/compute_eclp_derived_params.py for derivation.
     //
     //  Method (from Gyroscope concentrated-lps math):
     //    dSq   = c^2 + s^2                  (at full precision)
@@ -91,15 +101,15 @@ contract CreateBalancerECLPPool is Script {
     //    v = s*s*tauBeta.y + c*c*tauAlpha.y
     //    All values scaled by 1e38 and truncated to integer.
     // ──────────────────────────────────────────────
-    int256 internal constant TAU_ALPHA_X = -95887072223554841815617101994534177496;
-    int256 internal constant TAU_ALPHA_Y =  28384315746460711756416744112835898317;
-    int256 internal constant TAU_BETA_X  = -66117287996822805080314124603435138763;
-    int256 internal constant TAU_BETA_Y  =  75023357882363483369325993831865524023;
-    int256 internal constant U           =  14884892113366018350775607306971453973;
-    int256 internal constant V           =  51703836814412097504251675207093076376;
-    int256 internal constant W           =  23319521067951385780015906420446350484;
-    int256 internal constant Z           = -81002180110188823356128657186397891735;
-    int256 internal constant D_SQ        =  99999999999999999886624093342106115200;
+    int256 internal constant TAU_ALPHA_X =  99981367602332163269692323144458353703;
+    int256 internal constant TAU_ALPHA_Y =  1930319239743647598374220090538386313;
+    int256 internal constant TAU_BETA_X  =  99984746838998994989324367248967173323;
+    int256 internal constant TAU_BETA_Y  =  1746539304247253278786255909644152494;
+    int256 internal constant U           =  0;
+    int256 internal constant V           =  1930319239743647598374220090538386313;
+    int256 internal constant W           =  0;
+    int256 internal constant Z           =  99984746838998994989324367248967173323;
+    int256 internal constant D_SQ        =  100000000000000000000000000000000000000;
 
     // ──────────────────────────────────────────────
     //  Seed liquidity
@@ -234,7 +244,7 @@ contract CreateBalancerECLPPool is Script {
         console.log("Seed sUSDS:  ", SEED_SUSDS);
         console.log("Seed phUSD:  ", SEED_PHUSD);
         console.log("Swap fee:     0.3%");
-        console.log("Salt:         keccak256('phUSD-sUSDS-ECLP-v3')");
+        console.log("Salt:         keccak256('phUSD-sUSDS-ECLP-v5')");
         console.log("\n");
     }
 }

@@ -92,7 +92,7 @@ interface IGyroECLPPoolFactory {
     ) external returns (address pool);
 }
 
-/// @notice Balancer V3 Router for pool initialization.
+/// @notice Balancer V3 Router for pool initialization and swaps.
 interface IRouter {
     function initialize(
         address pool,
@@ -102,6 +102,17 @@ interface IRouter {
         bool wethIsEth,
         bytes memory userData
     ) external payable returns (uint256 bptAmountOut);
+
+    function swapSingleTokenExactIn(
+        address pool,
+        IERC20 tokenIn,
+        IERC20 tokenOut,
+        uint256 exactAmountIn,
+        uint256 minAmountOut,
+        uint256 deadline,
+        bool wethIsEth,
+        bytes calldata userData
+    ) external payable returns (uint256 amountCalculated);
 }
 
 /// @notice Uniswap Permit2 allowance-based approval.
