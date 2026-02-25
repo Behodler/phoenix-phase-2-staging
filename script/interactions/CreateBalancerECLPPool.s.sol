@@ -104,10 +104,10 @@ contract CreateBalancerECLPPool is Script {
     // ──────────────────────────────────────────────
     //  Seed liquidity
     // ──────────────────────────────────────────────
-    //  10 phUSD + ~9.194 sUSDS (equivalent at $1 phUSD / $1.0877 sUSDS)
+    //  ~21.754 phUSD + 20 sUSDS (equivalent at $1 phUSD / $1.0877 sUSDS)
     //  amounts[0] = sUSDS (token0), amounts[1] = phUSD (token1)
-    uint256 internal constant SEED_SUSDS = 9193950000000000000;   // ~9.19395 sUSDS
-    uint256 internal constant SEED_PHUSD = 10000000000000000000;  // 10 phUSD
+    uint256 internal constant SEED_SUSDS = 20000000000000000000;  // 20 sUSDS
+    uint256 internal constant SEED_PHUSD = 21754000000000000000;  // ~21.754 phUSD
 
     // ──────────────────────────────────────────────
     //  Ledger index 44 (HD path m/44'/60'/44'/0/0)
