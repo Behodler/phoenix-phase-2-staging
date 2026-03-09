@@ -34,7 +34,9 @@ remappings = [
     "@uniswap/v4-core/=lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/",
     "lib/stable-yield-accumulator/lib/openzeppelin-contracts/=lib/stable-yield-accumulator/lib/openzeppelin-contracts/",
     "@flax-token/=lib/flax-token-v2/src/",
-    "yield-claim-nft/=lib/stable-yield-accumulator/lib/mutable/yield-claim-nft/src/"
+    "yield-claim-nft/=lib/stable-yield-accumulator/lib/mutable/yield-claim-nft/src/",
+    "@yield-claim-nft/=lib/yield-claim-nft/src/",
+    "lib/yield-claim-nft/src/interfaces/IBurnable.sol=lib/pauser/src/interfaces/IBurnable.sol"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
