@@ -59,7 +59,8 @@
     "mainnet:verify-eclp-dry": "POOL_ADDRESS=$POOL_ADDRESS forge script script/interactions/VerifyBalancerECLPPool.s.sol:VerifyBalancerECLPPool --rpc-url $RPC_MAINNET --sender 0x20D567D039cFC0174a3887F427BE54D418f7C274 -vvv",
     "mainnet:verify-eclp-fork": "forge test --fork-url $RPC_MAINNET --match-contract VerifyECLPSymmetry -vvv",
     "mainnet:init-eclp-dry": "forge script script/interactions/InitializeBalancerECLPPool.s.sol:InitializeBalancerECLPPool --rpc-url $RPC_MAINNET --sender 0x20D567D039cFC0174a3887F427BE54D418f7C274 -vvv",
-    "mainnet:init-eclp": "forge script script/interactions/InitializeBalancerECLPPool.s.sol:InitializeBalancerECLPPool --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/44'/0/0\" -vvv"
+    "mainnet:init-eclp": "forge script script/interactions/InitializeBalancerECLPPool.s.sol:InitializeBalancerECLPPool --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/44'/0/0\" -vvv",
+    "mainnet:phusd-amm-balances": "bash scripts/check-phusd-amm-balances.sh"
   },
   "keywords": [
     "phoenix",
