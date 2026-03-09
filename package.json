@@ -22,6 +22,7 @@
     "serve": "node server/index.js",
     "dev": "npm run clean:local && npm run start:anvil & sleep 3 && npm run deploy:local && ./simulate-yield.sh && npm run extract:addresses && npm run serve",
     "test:full-flow": "forge script script/interactions/FullFlowTest.s.sol:FullFlowTest --rpc-url http://localhost:8545 --broadcast",
+    "test:nft-flow": "npm run clean:local && anvil --host 0.0.0.0 --port 8545 --chain-id 31337 & sleep 3 && npm run deploy:local && forge script script/interactions/TestNFTMintAndClaimFlow.s.sol:TestNFTMintAndClaimFlow --rpc-url http://localhost:8545 --broadcast && kill %1",
     "generate:hooks": "wagmi generate",
     "publish:hooks": "cd hooks && npm publish",
     "version:hooks": "cd hooks && npm version",
