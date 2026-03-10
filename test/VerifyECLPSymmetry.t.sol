@@ -43,6 +43,11 @@ contract VerifyECLPSymmetry is Test {
     address deployer;
 
     function setUp() public {
+        // Skip when not running against a mainnet fork
+        uint256 codeSize;
+        assembly { codeSize := extcodesize(0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD) }
+        vm.skip(codeSize == 0);
+
         deployer = makeAddr("deployer");
         deal(SUSDS, deployer, 100 ether);
         deal(PHUSD, deployer, 100 ether);
