@@ -23,6 +23,8 @@ import "@pauser/Pauser.sol";
 import {AutoPoolYieldStrategy} from "@vault/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
+import "../src/views/ViewRouter.sol";
+import "../src/views/DepositPageView.sol";
 import {NFTMinter} from "@yield-claim-nft/NFTMinter.sol";
 import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
 import {Burner} from "@yield-claim-nft/dispatchers/Burner.sol";
@@ -69,6 +71,8 @@ contract DeployMocks is Script {
     Pauser public pauser;
     StableYieldAccumulator public stableYieldAccumulator;
     DepositView public depositView;
+    ViewRouter public viewRouter;
+    DepositPageView public depositPageView;
 
     // NFTMinter infrastructure
     MockSCX public mockSCX;
@@ -625,6 +629,26 @@ contract DeployMocks is Script {
         _trackDeployment("DepositView", address(depositView), 0);
         console.log("DepositView deployed at:", address(depositView));
 
+        // ====== PHASE 11: Deploy ViewRouter + DepositPageView ======
+        console.log("\n=== Phase 11: Deploy ViewRouter + DepositPageView ===");
+
+        gasBefore = gasleft();
+        viewRouter = new ViewRouter();
+        _trackDeployment("ViewRouter", address(viewRouter), gasBefore - gasleft());
+        console.log("ViewRouter deployed at:", address(viewRouter));
+
+        gasBefore = gasleft();
+        depositPageView = new DepositPageView(
+            IPhlimbo(address(phlimbo)),
+            IERC20(address(phUSD))
+        );
+        _trackDeployment("DepositPageView", address(depositPageView), gasBefore - gasleft());
+        console.log("DepositPageView deployed at:", address(depositPageView));
+
+        // Register DepositPageView with ViewRouter
+        viewRouter.setPage(keccak256("deposit"), IPageView(address(depositPageView)));
+        console.log("Registered DepositPageView with ViewRouter under key: keccak256('deposit')");
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -655,6 +679,8 @@ contract DeployMocks is Script {
         _markConfigured("BalancerPooler", 0);
         _markConfigured("GatherDispatcher", 0);
         _markConfigured("DepositView", 0);
+        _markConfigured("ViewRouter", 0);
+        _markConfigured("DepositPageView", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);

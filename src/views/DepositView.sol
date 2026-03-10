@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @deprecated This contract is deprecated in favor of ViewRouter + DepositPageView.
+ * The ViewRouter architecture provides a generic, extensible page-view dispatch system.
+ * DepositPageView implements the same 7 fields via the IPageView interface.
+ * This contract will be removed after phlimbo-ui has migrated to ViewRouter.
+ */
+
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 

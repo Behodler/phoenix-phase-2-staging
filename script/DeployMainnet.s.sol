@@ -10,6 +10,8 @@ import "@pauser/Pauser.sol";
 import {AutoDolaYieldStrategy} from "@vault/concreteYieldStrategies/Legacy/phase1/AutoDolaYieldStrategy.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
+import "../src/views/ViewRouter.sol";
+import "../src/views/DepositPageView.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
@@ -82,6 +84,8 @@ contract DeployMainnet is Script {
     address public stableYieldAccumulator;
     address public newPauser;
     address public depositView;
+    address public viewRouter;
+    address public depositPageView;
     address public autoDolaYieldStrategy;
 
     // Progress tracking
@@ -182,6 +186,10 @@ contract DeployMainnet is Script {
         // ====== PHASE 9: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 9: Deploy DepositView ===");
         _deployDepositView();
+
+        // ====== PHASE 10: Deploy ViewRouter + DepositPageView ======
+        console.log("\n=== Phase 10: Deploy ViewRouter + DepositPageView ===");
+        _deployViewRouter();
 
         if (isPreview) {
             vm.stopPrank();
@@ -594,6 +602,59 @@ contract DeployMainnet is Script {
     }
 
     // ========================================
+    // PHASE 10: Deploy ViewRouter + DepositPageView
+    // ========================================
+
+    function _deployViewRouter() internal {
+        // Deploy ViewRouter
+        if (!_isDeployed("ViewRouter")) {
+            uint256 gasBefore = gasleft();
+            ViewRouter vr = new ViewRouter();
+            viewRouter = address(vr);
+            uint256 gasUsed = gasBefore - gasleft();
+
+            _trackDeployment("ViewRouter", viewRouter, gasUsed);
+            _writeProgressFile();
+            console.log("ViewRouter deployed at:", viewRouter);
+        } else {
+            viewRouter = deployments["ViewRouter"].addr;
+            console.log("ViewRouter already deployed at:", viewRouter);
+        }
+
+        // Deploy DepositPageView
+        if (!_isDeployed("DepositPageView")) {
+            require(phlimbo != address(0), "PhlimboEA must be deployed");
+
+            uint256 gasBefore = gasleft();
+            DepositPageView dpv = new DepositPageView(
+                IPhlimbo(phlimbo),
+                IERC20(PHUSD)
+            );
+            depositPageView = address(dpv);
+            uint256 gasUsed = gasBefore - gasleft();
+
+            _trackDeployment("DepositPageView", depositPageView, gasUsed);
+            _writeProgressFile();
+            console.log("DepositPageView deployed at:", depositPageView);
+        } else {
+            depositPageView = deployments["DepositPageView"].addr;
+            console.log("DepositPageView already deployed at:", depositPageView);
+        }
+
+        // Register DepositPageView with ViewRouter
+        if (!_isConfigured("ViewRouter")) {
+            ViewRouter(viewRouter).setPage(keccak256("deposit"), IPageView(depositPageView));
+            console.log("Registered DepositPageView with ViewRouter under key: keccak256('deposit')");
+
+            _markConfigured("ViewRouter", 0);
+            _markConfigured("DepositPageView", 0);
+            _writeProgressFile();
+        } else {
+            console.log("ViewRouter already configured");
+        }
+    }
+
+    // ========================================
     // Progress File Management
     // ========================================
 
@@ -611,7 +672,7 @@ contract DeployMainnet is Script {
     }
 
     function _parseProgressJson(string memory json) internal {
-        string[] memory names = new string[](9);
+        string[] memory names = new string[](11);
         names[0] = "NewPauser";
         names[1] = "AutoDolaYieldStrategy";
         names[2] = "PhusdStableMinter";
@@ -621,6 +682,8 @@ contract DeployMainnet is Script {
         names[6] = "DepositView";
         names[7] = "Seeding";
         names[8] = "DolaYield";
+        names[9] = "ViewRouter";
+        names[10] = "DepositPageView";
 
         for (uint256 i = 0; i < names.length; i++) {
             string memory name = names[i];
@@ -774,6 +837,8 @@ contract DeployMainnet is Script {
         console.log("  - PhlimboEA:", phlimbo);
         console.log("  - StableYieldAccumulator:", stableYieldAccumulator);
         console.log("  - DepositView:", depositView);
+        console.log("  - ViewRouter:", viewRouter);
+        console.log("  - DepositPageView:", depositPageView);
         console.log("");
         console.log("External Contracts Used:");
         console.log("  - phUSD:", PHUSD);
