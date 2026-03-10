@@ -34,6 +34,7 @@ export default defineConfig({
         // View contracts for UI polling
         'DepositView.sol/DepositView.json',
         'ViewRouter.sol/ViewRouter.json',
+        'MintPageView.sol/MintPageView.json',
       ],
     }),
   ],

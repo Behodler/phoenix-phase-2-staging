@@ -1335,6 +1335,101 @@ export const iYieldStrategyAbi = [
 ] as const
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// MintPageView
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const mintPageViewAbi = [
+  {
+    type: 'constructor',
+    inputs: [
+      {
+        name: '_nftMinter',
+        internalType: 'contract INFTMinter',
+        type: 'address',
+      },
+      {
+        name: '_burnRecorder',
+        internalType: 'contract BurnRecorder',
+        type: 'address',
+      },
+      { name: '_eye', internalType: 'address', type: 'address' },
+      { name: '_scx', internalType: 'address', type: 'address' },
+      { name: '_flax', internalType: 'address', type: 'address' },
+      { name: '_susds', internalType: 'address', type: 'address' },
+      { name: '_wbtc', internalType: 'address', type: 'address' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'burnRecorder',
+    outputs: [
+      { name: '', internalType: 'contract BurnRecorder', type: 'address' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'eye',
+    outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'flax',
+    outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'user', internalType: 'address', type: 'address' }],
+    name: 'getData',
+    outputs: [{ name: 'data', internalType: 'uint256[]', type: 'uint256[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'getNames',
+    outputs: [{ name: 'names', internalType: 'string[]', type: 'string[]' }],
+    stateMutability: 'pure',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'nftMinter',
+    outputs: [
+      { name: '', internalType: 'contract INFTMinter', type: 'address' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'scx',
+    outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'susds',
+    outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'wbtc',
+    outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
+    stateMutability: 'view',
+  },
+] as const
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // MockPhUSD
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
