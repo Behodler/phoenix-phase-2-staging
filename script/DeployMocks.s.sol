@@ -303,11 +303,11 @@ contract DeployMocks is Script {
         _trackDeployment("BurnerSCX", address(burnerSCX), gasBefore - gasleft());
         console.log("BurnerSCX deployed at:", address(burnerSCX));
 
-        // BalancerPooler: adds phUSD liquidity to phUSD/sUSDS pool via MockBalancerVault, receives BPT
+        // BalancerPooler: user sends sUSDS, single-sided add to phUSD/sUSDS pool boosts phUSD price + liquidity
         gasBefore = gasleft();
         balancerPooler = new BalancerPooler(
-            address(phUSD),              // primeToken_ (phUSD - central token of the dapp)
-            address(mockBalancerPool),   // pool_ (BPT token)
+            address(usds),               // primeToken_ (sUSDS - single-sided add boosts phUSD price)
+            address(mockBalancerPool),   // pool_ (BPT token for phUSD/sUSDS pool)
             address(mockBalancerVault),  // vault_
             true,                        // primeTokenIsFirst_
             deployer                     // initialOwner
@@ -733,7 +733,7 @@ contract DeployMocks is Script {
         console.log("  - BurnRecorder tracks token burns across dispatchers");
         console.log("  - BurnerEYE dispatcher (burns EYE tokens)");
         console.log("  - BurnerSCX dispatcher (burns SCX tokens)");
-        console.log("  - BalancerPooler dispatcher (adds phUSD liquidity to phUSD/sUSDS pool)");
+        console.log("  - BalancerPooler dispatcher (sUSDS single-sided add to phUSD/sUSDS pool)");
         console.log("  - GatherDispatcher (accumulates USDC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
         console.log("  - NFTMinter registered with Global Pauser");
