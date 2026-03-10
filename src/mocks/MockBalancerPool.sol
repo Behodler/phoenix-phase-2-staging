@@ -13,7 +13,7 @@ contract MockBalancerPool is ERC20 {
     /// @notice The MockBalancerVault address authorized to mint BPT
     address public vault;
 
-    constructor() ERC20("Mock BPT sUSDS Pool", "mBPT-sUSDS") {}
+    constructor() ERC20("Mock BPT phUSD-sUSDS Pool", "mBPT-phUSD-sUSDS") {}
 
     /**
      * @notice Sets the vault address authorized to mint BPT
