@@ -14,6 +14,8 @@ import "../src/mocks/MockMainRewarder.sol";
 import "../src/mocks/MockYieldStrategy.sol";
 import "../src/mocks/MockEYE.sol";
 import "../src/mocks/MockSCX.sol";
+import "../src/mocks/MockFlax.sol";
+import "../src/mocks/MockWBTC.sol";
 import "../src/mocks/MockBalancerPool.sol";
 import "../src/mocks/MockBalancerVault.sol";
 import "@phlimbo-ea/Phlimbo.sol";
@@ -76,14 +78,17 @@ contract DeployMocks is Script {
 
     // NFTMinter infrastructure
     MockSCX public mockSCX;
+    MockFlax public mockFlax;
+    MockWBTC public mockWBTC;
     MockBalancerPool public mockBalancerPool;
     MockBalancerVault public mockBalancerVault;
     NFTMinter public nftMinter;
     BurnRecorder public burnRecorder;
     Burner public burnerEYE;
     Burner public burnerSCX;
+    Burner public burnerFlax;
     BalancerPooler public balancerPooler;
-    Gather public gatherDispatcher;
+    Gather public gatherWBTC;
 
     // Progress tracking structure
     struct ContractDeployment {
@@ -154,6 +159,16 @@ contract DeployMocks is Script {
         mockSCX = new MockSCX();
         _trackDeployment("MockSCX", address(mockSCX), gasBefore - gasleft());
         console.log("MockSCX deployed at:", address(mockSCX));
+
+        gasBefore = gasleft();
+        mockFlax = new MockFlax();
+        _trackDeployment("MockFlax", address(mockFlax), gasBefore - gasleft());
+        console.log("MockFlax deployed at:", address(mockFlax));
+
+        gasBefore = gasleft();
+        mockWBTC = new MockWBTC();
+        _trackDeployment("MockWBTC", address(mockWBTC), gasBefore - gasleft());
+        console.log("MockWBTC deployed at:", address(mockWBTC));
 
         gasBefore = gasleft();
         pauser = new Pauser(address(eyeToken));
@@ -307,6 +322,12 @@ contract DeployMocks is Script {
         _trackDeployment("BurnerSCX", address(burnerSCX), gasBefore - gasleft());
         console.log("BurnerSCX deployed at:", address(burnerSCX));
 
+        // Burner #3: burns MockFlax (prime token = Flax)
+        gasBefore = gasleft();
+        burnerFlax = new Burner(address(mockFlax), address(burnRecorder), deployer);
+        _trackDeployment("BurnerFlax", address(burnerFlax), gasBefore - gasleft());
+        console.log("BurnerFlax deployed at:", address(burnerFlax));
+
         // BalancerPooler: user sends sUSDS, single-sided add to phUSD/sUSDS pool boosts phUSD price + liquidity
         gasBefore = gasleft();
         balancerPooler = new BalancerPooler(
@@ -319,15 +340,15 @@ contract DeployMocks is Script {
         _trackDeployment("BalancerPooler", address(balancerPooler), gasBefore - gasleft());
         console.log("BalancerPooler deployed at:", address(balancerPooler));
 
-        // Gather: accumulates USDC (rewardToken), sends to deployer
+        // Gather: accumulates WBTC, sends to deployer
         gasBefore = gasleft();
-        gatherDispatcher = new Gather(
-            address(rewardToken),   // token_ (USDC)
+        gatherWBTC = new Gather(
+            address(mockWBTC),      // token_ (WBTC)
             deployer,               // recipient_ (deployer)
             deployer                // initialOwner
         );
-        _trackDeployment("GatherDispatcher", address(gatherDispatcher), gasBefore - gasleft());
-        console.log("GatherDispatcher deployed at:", address(gatherDispatcher));
+        _trackDeployment("GatherWBTC", address(gatherWBTC), gasBefore - gasleft());
+        console.log("GatherWBTC deployed at:", address(gatherWBTC));
 
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
@@ -527,11 +548,14 @@ contract DeployMocks is Script {
         nftMinter.registerDispatcher(address(burnerSCX), initialPrice, growthBps);
         console.log("Registered BurnerSCX dispatcher with NFTMinter (index 2)");
 
-        nftMinter.registerDispatcher(address(balancerPooler), initialPrice, growthBps);
-        console.log("Registered BalancerPooler dispatcher with NFTMinter (index 3)");
+        nftMinter.registerDispatcher(address(burnerFlax), initialPrice, growthBps);
+        console.log("Registered BurnerFlax dispatcher with NFTMinter (index 3)");
 
-        nftMinter.registerDispatcher(address(gatherDispatcher), initialPrice, growthBps);
-        console.log("Registered GatherDispatcher with NFTMinter (index 4)");
+        nftMinter.registerDispatcher(address(balancerPooler), initialPrice, growthBps);
+        console.log("Registered BalancerPooler dispatcher with NFTMinter (index 4)");
+
+        nftMinter.registerDispatcher(address(gatherWBTC), initialPrice, growthBps);
+        console.log("Registered GatherWBTC dispatcher with NFTMinter (index 5)");
 
         // Set minter on each dispatcher
         burnerEYE.setMinter(address(nftMinter));
@@ -540,11 +564,14 @@ contract DeployMocks is Script {
         burnerSCX.setMinter(address(nftMinter));
         console.log("BurnerSCX.setMinter -> NFTMinter");
 
+        burnerFlax.setMinter(address(nftMinter));
+        console.log("BurnerFlax.setMinter -> NFTMinter");
+
         balancerPooler.setMinter(address(nftMinter));
         console.log("BalancerPooler.setMinter -> NFTMinter");
 
-        gatherDispatcher.setMinter(address(nftMinter));
-        console.log("GatherDispatcher.setMinter -> NFTMinter");
+        gatherWBTC.setMinter(address(nftMinter));
+        console.log("GatherWBTC.setMinter -> NFTMinter");
 
         // Set NFTMinter on StableYieldAccumulator
         stableYieldAccumulator.setNFTMinter(address(nftMinter));
@@ -658,6 +685,8 @@ contract DeployMocks is Script {
         _markConfigured("MockToke", 0);
         _markConfigured("MockEYE", 0);
         _markConfigured("MockSCX", 0);
+        _markConfigured("MockFlax", 0);
+        _markConfigured("MockWBTC", 0);
         _markConfigured("MockAutoDOLA", 0);
         _markConfigured("MockMainRewarder", 0);
         _markConfigured("MockAutoUSDC", 0);
@@ -676,8 +705,9 @@ contract DeployMocks is Script {
         _markConfigured("BurnRecorder", 0);
         _markConfigured("BurnerEYE", 0);
         _markConfigured("BurnerSCX", 0);
+        _markConfigured("BurnerFlax", 0);
         _markConfigured("BalancerPooler", 0);
-        _markConfigured("GatherDispatcher", 0);
+        _markConfigured("GatherWBTC", 0);
         _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
         _markConfigured("DepositPageView", 0);
@@ -757,10 +787,11 @@ contract DeployMocks is Script {
         console.log("NFTMinter Infrastructure:");
         console.log("  - NFTMinter (ERC1155) deployed for claim gating");
         console.log("  - BurnRecorder tracks token burns across dispatchers");
-        console.log("  - BurnerEYE dispatcher (burns EYE tokens)");
-        console.log("  - BurnerSCX dispatcher (burns SCX tokens)");
-        console.log("  - BalancerPooler dispatcher (sUSDS single-sided add to phUSD/sUSDS pool)");
-        console.log("  - GatherDispatcher (accumulates USDC to deployer)");
+        console.log("  - BurnerEYE dispatcher (index 1: burns EYE tokens)");
+        console.log("  - BurnerSCX dispatcher (index 2: burns SCX tokens)");
+        console.log("  - BurnerFlax dispatcher (index 3: burns Flax tokens)");
+        console.log("  - BalancerPooler dispatcher (index 4: sUSDS single-sided add to phUSD/sUSDS pool)");
+        console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
         console.log("  - NFTMinter registered with Global Pauser");
     }
