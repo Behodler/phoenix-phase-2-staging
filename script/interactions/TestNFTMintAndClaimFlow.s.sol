@@ -6,7 +6,6 @@ import "@forge-std/console.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import "../../src/mocks/MockUSDS.sol";
-import "../../src/mocks/MockPhUSD.sol";
 import "../../src/mocks/MockRewardToken.sol";
 import "../../src/mocks/MockAutoDOLA.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
@@ -17,8 +16,8 @@ import {NFTMinter} from "@yield-claim-nft/NFTMinter.sol";
  * @notice End-to-end test of NFT minting via BalancerPooler dispatcher and yield claiming
  * @dev Flow:
  *      1. Load deployed contract addresses from progress.json
- *      2. Deployer approves NFTMinter to spend phUSD
- *      3. Mint NFT via BalancerPooler dispatcher (index 3) using phUSD
+ *      2. Deployer approves NFTMinter to spend sUSDS
+ *      3. Mint NFT via BalancerPooler dispatcher (index 3) using sUSDS
  *      4. Verify NFT balance is 1
  *      5. Advance time and accrue yield on MockAutoDola and MockAutoUSDC
  *      6. Approve StableYieldAccumulator to spend USDC for claim payment
@@ -45,19 +44,19 @@ contract TestNFTMintAndClaimFlow is Script {
         string memory progressJson = vm.readFile("server/deployments/progress.31337.json");
 
         address nftMinterAddr = vm.parseJsonAddress(progressJson, ".contracts.NFTMinter.address");
-        address phUSDAddr = vm.parseJsonAddress(progressJson, ".contracts.MockPhUSD.address");
+        address usdsAddr = vm.parseJsonAddress(progressJson, ".contracts.MockUSDS.address");
         address usdcAddr = vm.parseJsonAddress(progressJson, ".contracts.MockUSDC.address");
         address accumulatorAddr = vm.parseJsonAddress(progressJson, ".contracts.StableYieldAccumulator.address");
         address mockAutoDOLAAddr = vm.parseJsonAddress(progressJson, ".contracts.MockAutoDOLA.address");
         address mockAutoUSDCAddr = vm.parseJsonAddress(progressJson, ".contracts.MockAutoUSDC.address");
 
         console.log("NFTMinter:", nftMinterAddr);
-        console.log("MockPhUSD (phUSD):", phUSDAddr);
+        console.log("MockUSDS (sUSDS):", usdsAddr);
         console.log("MockUSDC:", usdcAddr);
         console.log("StableYieldAccumulator:", accumulatorAddr);
 
         NFTMinter nftMinter = NFTMinter(nftMinterAddr);
-        MockPhUSD phUSD = MockPhUSD(phUSDAddr);
+        MockUSDS usds = MockUSDS(usdsAddr);
         MockRewardToken usdc = MockRewardToken(usdcAddr);
         StableYieldAccumulator accumulator = StableYieldAccumulator(accumulatorAddr);
         MockAutoDOLA mockAutoDola = MockAutoDOLA(mockAutoDOLAAddr);
@@ -70,22 +69,22 @@ contract TestNFTMintAndClaimFlow is Script {
         uint256 mintPrice = nftMinter.getPrice(balancerPoolerIndex);
         console.log("\n--- Step 1: Approve & Mint NFT ---");
         console.log("BalancerPooler dispatcher index:", balancerPoolerIndex);
-        console.log("Mint price (phUSD):", mintPrice);
+        console.log("Mint price (sUSDS):", mintPrice);
 
         // Record balances before
-        uint256 phUSDBalanceBefore = phUSD.balanceOf(deployer);
+        uint256 usdsBalanceBefore = usds.balanceOf(deployer);
         uint256 usdcBalanceBefore = usdc.balanceOf(deployer);
-        console.log("Deployer phUSD balance before:", phUSDBalanceBefore);
+        console.log("Deployer sUSDS balance before:", usdsBalanceBefore);
         console.log("Deployer USDC balance before:", usdcBalanceBefore);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Step 2: Approve NFTMinter to spend phUSD
-        phUSD.approve(nftMinterAddr, mintPrice);
-        console.log("Approved NFTMinter to spend", mintPrice, "phUSD");
+        // Step 2: Approve NFTMinter to spend sUSDS
+        usds.approve(nftMinterAddr, mintPrice);
+        console.log("Approved NFTMinter to spend", mintPrice, "sUSDS");
 
-        // Step 3: Mint NFT via BalancerPooler dispatcher (adds phUSD liquidity to pool)
-        nftMinter.mint(address(phUSD), balancerPoolerIndex, deployer);
+        // Step 3: Mint NFT via BalancerPooler dispatcher (sUSDS single-sided add boosts phUSD price)
+        nftMinter.mint(address(usds), balancerPoolerIndex, deployer);
         console.log("Minted 1 NFT via BalancerPooler dispatcher");
 
         vm.stopBroadcast();
@@ -100,9 +99,9 @@ contract TestNFTMintAndClaimFlow is Script {
         require(nftBalance == 1, "NFT balance should be 1 after minting");
         console.log("PASS: NFT balance is 1");
 
-        uint256 phUSDBalanceAfterMint = phUSD.balanceOf(deployer);
-        console.log("Deployer phUSD balance after mint:", phUSDBalanceAfterMint);
-        console.log("phUSD spent on mint:", phUSDBalanceBefore - phUSDBalanceAfterMint);
+        uint256 usdsBalanceAfterMint = usds.balanceOf(deployer);
+        console.log("Deployer sUSDS balance after mint:", usdsBalanceAfterMint);
+        console.log("sUSDS spent on mint:", usdsBalanceBefore - usdsBalanceAfterMint);
 
         // Step 5: Advance time and accrue yield
         console.log("\n--- Step 3: Advance Time & Accrue Yield ---");
@@ -149,13 +148,13 @@ contract TestNFTMintAndClaimFlow is Script {
         console.log("PASS: NFT balance is 0 (burned during claim)");
 
         // Step 10: Log all final results
-        uint256 phUSDBalanceAfterClaim = phUSD.balanceOf(deployer);
+        uint256 usdsBalanceAfterClaim = usds.balanceOf(deployer);
         uint256 usdcBalanceAfterClaim = usdc.balanceOf(deployer);
 
         console.log("\n========================================");
         console.log("    FINAL RESULTS");
         console.log("========================================");
-        console.log("phUSD balance:  before=%d  afterMint=%d  afterClaim=%d", phUSDBalanceBefore, phUSDBalanceAfterMint, phUSDBalanceAfterClaim);
+        console.log("sUSDS balance:  before=%d  afterMint=%d  afterClaim=%d", usdsBalanceBefore, usdsBalanceAfterMint, usdsBalanceAfterClaim);
         console.log("USDC balance:   before=%d  afterClaim=%d", usdcBalanceBefore, usdcBalanceAfterClaim);
         console.log("NFT balance:    afterMint=%d  afterClaim=%d", nftBalance, nftBalanceAfterClaim);
         console.log("Total yield claimed (normalized):", totalYield);
