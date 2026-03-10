@@ -850,7 +850,7 @@ export const iFlaxAbi = [
     name: 'authorizedMinters',
     outputs: [
       {
-        name: 'info',
+        name: '',
         internalType: 'struct IFlax.MinterInfo',
         type: 'tuple',
         components: [
@@ -880,13 +880,6 @@ export const iFlaxAbi = [
   },
   {
     type: 'function',
-    inputs: [],
-    name: 'decimals',
-    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
     inputs: [
       { name: 'recipient', internalType: 'address', type: 'address' },
       { name: 'amount', internalType: 'uint256', type: 'uint256' },
@@ -905,47 +898,9 @@ export const iFlaxAbi = [
   {
     type: 'function',
     inputs: [],
-    name: 'name',
-    outputs: [{ name: '', internalType: 'string', type: 'string' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'owner',
-    outputs: [{ name: '', internalType: 'address', type: 'address' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'renounceOwnership',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [],
     name: 'revokeAllMintPrivileges',
     outputs: [],
     stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [
-      { name: 'minter', internalType: 'address', type: 'address' },
-      { name: 'canMint', internalType: 'bool', type: 'bool' },
-    ],
-    name: 'setMinter',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'symbol',
-    outputs: [{ name: '', internalType: 'string', type: 'string' }],
-    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -976,13 +931,6 @@ export const iFlaxAbi = [
     stateMutability: 'nonpayable',
   },
   {
-    type: 'function',
-    inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
-    name: 'transferOwnership',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
     type: 'event',
     anonymous: false,
     inputs: [
@@ -1006,39 +954,6 @@ export const iFlaxAbi = [
       },
     ],
     name: 'Approval',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'newMintVersion',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-    ],
-    name: 'MintPrivilegesRevoked',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'minter',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      { name: 'canMint', internalType: 'bool', type: 'bool', indexed: false },
-      {
-        name: 'mintVersion',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-    ],
-    name: 'MinterSet',
   },
   {
     type: 'event',
@@ -3922,5 +3837,128 @@ export const phusdStableMinterAbi = [
     type: 'error',
     inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
     name: 'SafeERC20FailedOperation',
+  },
+] as const
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ViewRouter
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const viewRouterAbi = [
+  { type: 'constructor', inputs: [], stateMutability: 'nonpayable' },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'page', internalType: 'bytes32', type: 'bytes32' },
+      { name: 'user', internalType: 'address', type: 'address' },
+    ],
+    name: 'getData',
+    outputs: [{ name: '', internalType: 'uint256[]', type: 'uint256[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'page', internalType: 'bytes32', type: 'bytes32' }],
+    name: 'getNames',
+    outputs: [{ name: '', internalType: 'string[]', type: 'string[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'owner',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '', internalType: 'bytes32', type: 'bytes32' }],
+    name: 'pages',
+    outputs: [
+      { name: '', internalType: 'contract IPageView', type: 'address' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'page', internalType: 'bytes32', type: 'bytes32' }],
+    name: 'removePage',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'renounceOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'page', internalType: 'bytes32', type: 'bytes32' },
+      { name: 'impl', internalType: 'contract IPageView', type: 'address' },
+    ],
+    name: 'setPage',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
+    name: 'transferOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'previousOwner',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newOwner',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'OwnershipTransferred',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'page', internalType: 'bytes32', type: 'bytes32', indexed: true },
+      {
+        name: 'implementation',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'PageRegistered',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'page', internalType: 'bytes32', type: 'bytes32', indexed: true },
+    ],
+    name: 'PageRemoved',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
+    name: 'OwnableInvalidOwner',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'account', internalType: 'address', type: 'address' }],
+    name: 'OwnableUnauthorizedAccount',
   },
 ] as const
