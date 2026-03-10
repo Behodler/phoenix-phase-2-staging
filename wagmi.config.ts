@@ -17,10 +17,19 @@ export default defineConfig({
         'PhusdStableMinter.sol/PhusdStableMinter.json',
         'Phlimbo.sol/PhlimboEA.json',
 
-        // Key interfaces
-        'IFlax.sol/IFlax.json',
+        // Key interfaces (path-prefixed to avoid duplicate artifact conflicts)
+        'src/IFlax.sol/IFlax.json',
         'IPhlimbo.sol/IPhlimbo.json',
         'interfaces/IYieldStrategy.sol/IYieldStrategy.json',
+
+        // NFT Minter infrastructure
+        'NFTMinter.sol/NFTMinter.json',
+        'BurnRecorder.sol/BurnRecorder.json',
+
+        // Dispatchers
+        'BalancerPooler.sol/BalancerPooler.json',
+        'Burner.sol/Burner.json',
+        'Gather.sol/Gather.json',
 
         // View contracts for UI polling
         'DepositView.sol/DepositView.json',
