@@ -36,6 +36,36 @@ const CHAIN_NAME_MAP = {
     1: 'mainnet'
 };
 
+function generateInterfaceFile(chainId, inputFile, contracts) {
+    const interfacePath = path.join(__dirname, 'deployments', 'addresses.ts');
+    const networkName = CHAIN_NAME_MAP[chainId];
+    const timestamp = new Date().toISOString();
+
+    const lines = [];
+    lines.push(`// Generated interface from ${inputFile} on ${timestamp}`);
+    lines.push(`// Chain ID: ${chainId} (${networkName})`);
+    lines.push('// This interface can be copied directly into UI projects');
+    lines.push('');
+    lines.push('export interface ContractAddresses {');
+
+    contracts.forEach(([name]) => {
+        lines.push(`  ${name}: string;`);
+    });
+
+    lines.push('}');
+
+    const output = lines.join('\n') + '\n';
+    fs.writeFileSync(interfacePath, output);
+
+    console.log('\n' + '='.repeat(60));
+    console.log(`TypeScript Interface Generated - ${networkName} (${chainId})`);
+    console.log('='.repeat(60));
+    console.log(`Output file: ${interfacePath}`);
+    console.log('='.repeat(60) + '\n');
+    console.log(output);
+    console.log('\n' + '='.repeat(60));
+}
+
 function generateTsAddresses(chainId) {
     const inputFile = CHAIN_FILE_MAP[chainId];
     const outputFile = CHAIN_OUTPUT_MAP[chainId];
@@ -59,22 +89,41 @@ function generateTsAddresses(chainId) {
     // Read extracted addresses
     const data = JSON.parse(fs.readFileSync(inputPath, 'utf-8'));
 
+    const contracts = Object.entries(data.contracts || {});
+
+    // For local/anvil, generate the interface file first
+    if (chainId === 31337) {
+        generateInterfaceFile(chainId, inputFile, contracts);
+    }
+
     // Build TypeScript object literal
     const lines = [];
     lines.push(`// Generated from ${inputFile} on ${new Date().toISOString()}`);
     lines.push(`// Chain ID: ${chainId} (${networkName})`);
     lines.push('');
-    lines.push(`export const ${networkName}Addresses = {`);
 
-    const contracts = Object.entries(data.contracts || {});
+    if (chainId === 31337) {
+        // For local: import and use the ContractAddresses interface
+        lines.push("import { ContractAddresses } from './addresses';");
+        lines.push('');
+        lines.push(`export const ${networkName}Addresses: ContractAddresses = {`);
+    } else {
+        lines.push(`export const ${networkName}Addresses = {`);
+    }
+
     contracts.forEach(([name, contract], index) => {
         const comma = index < contracts.length - 1 ? ',' : '';
-        lines.push(`  ${name}: "${contract.address}" ${comma}`);
+        lines.push(`  ${name}: "${contract.address}"${comma}`);
     });
 
     lines.push('};');
     lines.push('');
-    lines.push(`export type ${networkName.charAt(0).toUpperCase() + networkName.slice(1)}ContractName = keyof typeof ${networkName}Addresses;`);
+
+    if (chainId === 31337) {
+        lines.push(`export type ${networkName.charAt(0).toUpperCase() + networkName.slice(1)}ContractName = keyof ContractAddresses;`);
+    } else {
+        lines.push(`export type ${networkName.charAt(0).toUpperCase() + networkName.slice(1)}ContractName = keyof typeof ${networkName}Addresses;`);
+    }
 
     const output = lines.join('\n');
 
