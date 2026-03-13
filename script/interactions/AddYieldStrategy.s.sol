@@ -4,20 +4,22 @@ pragma solidity ^0.8.19;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "./AddressLoader.sol";
-import "../../src/mocks/MockYieldStrategy.sol";
+import {AutoPoolYieldStrategy} from "@vault/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 
 /**
  * @title AddYieldStrategy
- * @notice Script to authorize a new client on a yield strategy
- * @dev Admin-only operation on MockYieldStrategy
+ * @notice Script to authorize a new client on an AutoPoolYieldStrategy
+ * @dev Admin-only operation. Addresses need updating from progress.31337.json after redeployment.
  */
 contract AddYieldStrategy is Script {
     using AddressLoader for *;
 
     function run() external {
-        // Load addresses
-        address yieldStrategy = AddressLoader.getYieldStrategy();
         uint256 deployerKey = AddressLoader.getDefaultPrivateKey();
+
+        // NOTE: Update this address from progress.31337.json after redeployment
+        address yieldStrategy = address(0);
+        require(yieldStrategy != address(0), "Set yieldStrategy address from progress.31337.json");
 
         // Example new client to authorize
         address newClient = address(0x9876543210987654321098765432109876543210);
@@ -26,21 +28,12 @@ contract AddYieldStrategy is Script {
         console.log("Yield strategy:", yieldStrategy);
         console.log("New client:", newClient);
 
-        // Check current authorization
-        bool wasAuthorized = MockYieldStrategy(yieldStrategy).authorizedClients(newClient);
-        console.log("Currently authorized:", wasAuthorized ? "YES" : "NO");
-
         vm.startBroadcast(deployerKey);
 
-        // Authorize the new client
-        MockYieldStrategy(yieldStrategy).setClient(newClient, true);
+        AutoPoolYieldStrategy(yieldStrategy).setClient(newClient, true);
         console.log("Client authorized");
 
         vm.stopBroadcast();
-
-        // Verify authorization
-        bool isAuthorized = MockYieldStrategy(yieldStrategy).authorizedClients(newClient);
-        console.log("Now authorized:", isAuthorized ? "YES" : "NO");
 
         console.log("=== Authorization Complete ===\n");
     }

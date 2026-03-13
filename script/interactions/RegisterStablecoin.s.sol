@@ -17,8 +17,11 @@ contract RegisterStablecoin is Script {
     function run() external {
         // Load addresses
         address minter = AddressLoader.getMinter();
-        address yieldStrategy = AddressLoader.getYieldStrategy();
         uint256 deployerKey = AddressLoader.getDefaultPrivateKey();
+
+        // NOTE: Set yield strategy address from progress.31337.json after redeployment
+        address yieldStrategy = address(0);
+        require(yieldStrategy != address(0), "Set yieldStrategy address from progress.31337.json");
 
         // Example: Register a new mock stablecoin
         // In practice, this would be a new ERC20 token address
