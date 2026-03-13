@@ -1,28 +1,29 @@
 // Generated from mainnet.json on 2026-01-29
 // Chain ID: 1 (mainnet)
+import { ContractAddresses } from './addresses';
 
-export interface ContractAddresses {
-  PhUSD: string,
-  USDC: string,
-  USDT: string,
-  Dola: string,
-  USDS: string,
-  Toke: string,
-  EYE: string,
-  Pauser: string,
-  YieldStrategyUSDT: string,
-  YieldStrategyDola: string,
-  YieldStrategyUSDS: string,
-  YieldStrategyUSDC: string,
-  PhusdStableMinter: string,
-  StableYieldAccumulator: string,
-  PhlimboEA: string,
-  AutoDOLA: string,
-  AutoUSDC: string,
-  MainRewarder: string,
-  MainRewarderUSDC: string,
-  DepositView: string,
-}
+// export interface ContractAddresses {
+//   PhUSD: string,
+//   USDC: string,
+//   USDT: string,
+//   Dola: string,
+//   USDS: string,
+//   Toke: string,
+//   EYE: string,
+//   Pauser: string,
+//   YieldStrategyUSDT: string,
+//   YieldStrategyDola: string,
+//   YieldStrategyUSDS: string,
+//   YieldStrategyUSDC: string,
+//   PhusdStableMinter: string,
+//   StableYieldAccumulator: string,
+//   PhlimboEA: string,
+//   AutoDOLA: string,
+//   AutoUSDC: string,
+//   MainRewarder: string,
+//   MainRewarderUSDC: string,
+//   DepositView: string,
+// }
 
 export const mainnetAddresses: ContractAddresses = {
   // Deployed Phase 2 contracts
@@ -39,16 +40,32 @@ export const mainnetAddresses: ContractAddresses = {
   AutoDOLA: "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",
   EYE: "0x155ff1A85F440EE0A382eA949f24CE4E0b751c65",
 
-  // Not yet used on mainnet
-  USDT: "0x0000000000000000000000000000000000000000",
-  USDS: "0x0000000000000000000000000000000000000000",
-  Toke: "0x0000000000000000000000000000000000000000",
-  YieldStrategyUSDT: "0x0000000000000000000000000000000000000000",
-  YieldStrategyUSDS: "0x0000000000000000000000000000000000000000",
+
   YieldStrategyUSDC: "0xf5F91E8240a0320CAC40b799B25F944a61090E5B",
   AutoUSDC: "0xa7569A44f348d3D70d8ad5889e50F78E33d80D35",
   MainRewarder: "0x0000000000000000000000000000000000000000",
   MainRewarderUSDC: "0x726104cfbd7ece2d1f5b3654a19109a9e2b6c27b",
+
+
+  //Currently Unused
+  USDS: "0x0000000000000000000000000000000000000000",
+  Toke: "0x0000000000000000000000000000000000000000",
+  SCX: "0x0000000000000000000000000000000000000000",
+  Flax: "0x0000000000000000000000000000000000000000",
+  WBTC: "0x0000000000000000000000000000000000000000",
+
+  BalancerPool: "0x59b670e9fA9D0A427751Af201D676719a970857b",
+  BalancerVault: "0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1",
+  NFTMinter: "0xa85233C63b9Ee964Add6F2cffe00Fd84eb32338f",
+  BurnRecorder: "0x4A679253410272dd5232B3Ff7cF5dbB88f295319",
+  BurnerEYE: "0x7a2088a1bFc9d81c55368AE168C2C02570cB814F",
+  BurnerSCX: "0x09635F643e140090A9A8Dcd712eD6285858ceBef",
+  BurnerFlax: "0xc5a5C42992dECbae36851359345FE25997F5C42d",
+  BalancerPooler: "0x67d269191c92Caf3cD7723F116c85e6E9bf55933",
+  GatherWBTC: "0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E",
+  ViewRouter: "0xf4B146FbA71F41E0592668ffbF264F1D186b2Ca8",
+  DepositPageView: "0x172076E0166D1F9Cc711C77Adf8488051744980C",
+  MintPageView: "0xBEc49fA140aCaA83533fB00A2BB19bDdd0290f25"
 };
 
 export type MainnetContractName = keyof ContractAddresses;
