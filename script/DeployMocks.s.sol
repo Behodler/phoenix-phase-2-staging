@@ -27,6 +27,8 @@ import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
 import "../src/views/ViewRouter.sol";
 import "../src/views/DepositPageView.sol";
+import {MintPageView} from "../src/views/MintPageView.sol";
+import {INFTMinter as INFTMinterView} from "@yield-claim-nft/interfaces/INFTMinter.sol";
 import {NFTMinter} from "@yield-claim-nft/NFTMinter.sol";
 import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
 import {Burner} from "@yield-claim-nft/dispatchers/Burner.sol";
@@ -75,6 +77,7 @@ contract DeployMocks is Script {
     DepositView public depositView;
     ViewRouter public viewRouter;
     DepositPageView public depositPageView;
+    MintPageView public mintPageView;
 
     // NFTMinter infrastructure
     MockSCX public mockSCX;
@@ -676,6 +679,23 @@ contract DeployMocks is Script {
         viewRouter.setPage(keccak256("deposit"), IPageView(address(depositPageView)));
         console.log("Registered DepositPageView with ViewRouter under key: keccak256('deposit')");
 
+        gasBefore = gasleft();
+        mintPageView = new MintPageView(
+            INFTMinterView(address(nftMinter)),
+            burnRecorder,
+            address(eyeToken),
+            address(mockSCX),
+            address(mockFlax),
+            address(usds),
+            address(mockWBTC)
+        );
+        _trackDeployment("MintPageView", address(mintPageView), gasBefore - gasleft());
+        console.log("MintPageView deployed at:", address(mintPageView));
+
+        // Register MintPageView with ViewRouter
+        viewRouter.setPage(keccak256("mint"), IPageView(address(mintPageView)));
+        console.log("Registered MintPageView with ViewRouter under key: keccak256('mint')");
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -711,6 +731,7 @@ contract DeployMocks is Script {
         _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
         _markConfigured("DepositPageView", 0);
+        _markConfigured("MintPageView", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
