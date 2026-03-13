@@ -5,13 +5,11 @@ import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "../src/mocks/MockPhUSD.sol";
 import "../src/mocks/MockRewardToken.sol";
-import "../src/mocks/MockUSDT.sol";
 import "../src/mocks/MockUSDS.sol";
 import "../src/mocks/MockDola.sol";
 import "../src/mocks/MockToke.sol";
 import "../src/mocks/MockAutoDOLA.sol";
 import "../src/mocks/MockMainRewarder.sol";
-import "../src/mocks/MockYieldStrategy.sol";
 import "../src/mocks/MockEYE.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
@@ -40,7 +38,6 @@ contract DeployMocksSepolia is Script {
     // Deployment addresses - loaded from progress file or set during deployment
     address public phUSD;
     address public rewardToken; // USDC - the consolidated reward token
-    address public usdt;
     address public usds;
     address public dola;
     address public toke;
@@ -48,8 +45,6 @@ contract DeployMocksSepolia is Script {
     address public mockMainRewarder;
     address public mockAutoUSDC;
     address public mockMainRewarderUSDC;
-    address public yieldStrategyUSDT;
-    address public yieldStrategyUSDS;
     address public yieldStrategyDola;
     address public yieldStrategyUSDC;
     address public minter;
@@ -98,7 +93,6 @@ contract DeployMocksSepolia is Script {
 
         _deployMockPhUSD();
         _deployMockUSDC();
-        _deployMockUSDT();
         _deployMockUSDS();
         _deployMockDola();
         _deployMockToke();
@@ -108,12 +102,6 @@ contract DeployMocksSepolia is Script {
 
         _deployMockEYE();
         _deployPauser(deployer);
-
-        // ====== PHASE 2: Yield Strategy Deployment ======
-        console.log("\n=== Phase 2: Deploying Yield Strategies ===");
-
-        _deployYieldStrategyUSDT();
-        _deployYieldStrategyUSDS();
 
         // ====== PHASE 2.5: AutoDola Infrastructure for DOLA YieldStrategy ======
         console.log("\n=== Phase 2.5: Deploying AutoDola Infrastructure ===");
@@ -225,23 +213,6 @@ contract DeployMocksSepolia is Script {
         console.log("MockUSDC (RewardToken) deployed at:", rewardToken);
     }
 
-    function _deployMockUSDT() internal {
-        if (_isDeployed("MockUSDT")) {
-            usdt = deployments["MockUSDT"].addr;
-            console.log("MockUSDT already deployed at:", usdt);
-            return;
-        }
-
-        uint256 gasBefore = gasleft();
-        MockUSDT token = new MockUSDT();
-        usdt = address(token);
-        uint256 gasUsed = gasBefore - gasleft();
-
-        _trackDeployment("MockUSDT", usdt, gasUsed);
-        _writeProgressFile();
-        console.log("MockUSDT deployed at:", usdt);
-    }
-
     function _deployMockUSDS() internal {
         if (_isDeployed("MockUSDS")) {
             usds = deployments["MockUSDS"].addr;
@@ -336,40 +307,6 @@ contract DeployMocksSepolia is Script {
     // ========================================
     // PHASE 2: Yield Strategies
     // ========================================
-
-    function _deployYieldStrategyUSDT() internal {
-        if (_isDeployed("YieldStrategyUSDT")) {
-            yieldStrategyUSDT = deployments["YieldStrategyUSDT"].addr;
-            console.log("YieldStrategyUSDT already deployed at:", yieldStrategyUSDT);
-            return;
-        }
-
-        uint256 gasBefore = gasleft();
-        MockYieldStrategy ys = new MockYieldStrategy();
-        yieldStrategyUSDT = address(ys);
-        uint256 gasUsed = gasBefore - gasleft();
-
-        _trackDeployment("YieldStrategyUSDT", yieldStrategyUSDT, gasUsed);
-        _writeProgressFile();
-        console.log("YieldStrategyUSDT deployed at:", yieldStrategyUSDT);
-    }
-
-    function _deployYieldStrategyUSDS() internal {
-        if (_isDeployed("YieldStrategyUSDS")) {
-            yieldStrategyUSDS = deployments["YieldStrategyUSDS"].addr;
-            console.log("YieldStrategyUSDS already deployed at:", yieldStrategyUSDS);
-            return;
-        }
-
-        uint256 gasBefore = gasleft();
-        MockYieldStrategy ys = new MockYieldStrategy();
-        yieldStrategyUSDS = address(ys);
-        uint256 gasUsed = gasBefore - gasleft();
-
-        _trackDeployment("YieldStrategyUSDS", yieldStrategyUSDS, gasUsed);
-        _writeProgressFile();
-        console.log("YieldStrategyUSDS deployed at:", yieldStrategyUSDS);
-    }
 
     // ========================================
     // PHASE 2.5: AutoDola Infrastructure
@@ -635,13 +572,11 @@ contract DeployMocksSepolia is Script {
     // ========================================
 
     function _configureYieldStrategies() internal {
-        if (_isConfigured("YieldStrategyUSDT") && _isConfigured("YieldStrategyUSDS") && _isConfigured("YieldStrategyDola") && _isConfigured("YieldStrategyUSDC")) {
+        if (_isConfigured("YieldStrategyDola") && _isConfigured("YieldStrategyUSDC")) {
             console.log("YieldStrategies already configured");
             return;
         }
 
-        require(yieldStrategyUSDT != address(0), "YieldStrategyUSDT must be deployed");
-        require(yieldStrategyUSDS != address(0), "YieldStrategyUSDS must be deployed");
         require(yieldStrategyDola != address(0), "YieldStrategyDola must be deployed");
         require(yieldStrategyUSDC != address(0), "YieldStrategyUSDC must be deployed");
         require(minter != address(0), "PhusdStableMinter must be deployed");
@@ -649,16 +584,12 @@ contract DeployMocksSepolia is Script {
         uint256 gasBefore = gasleft();
 
         // Authorize minter as client on all yield strategies
-        MockYieldStrategy(yieldStrategyUSDT).setClient(minter, true);
-        MockYieldStrategy(yieldStrategyUSDS).setClient(minter, true);
         AutoPoolYieldStrategy(yieldStrategyDola).setClient(minter, true);
         AutoPoolYieldStrategy(yieldStrategyUSDC).setClient(minter, true);
         console.log("Authorized minter as yield strategy client (all strategies)");
 
         uint256 gasUsed = gasBefore - gasleft();
-        uint256 gasPerStrategy = gasUsed / 4;
-        _markConfigured("YieldStrategyUSDT", gasPerStrategy);
-        _markConfigured("YieldStrategyUSDS", gasPerStrategy);
+        uint256 gasPerStrategy = gasUsed / 2;
         _markConfigured("YieldStrategyDola", gasPerStrategy);
         _markConfigured("YieldStrategyUSDC", gasPerStrategy);
         _writeProgressFile();
@@ -675,12 +606,8 @@ contract DeployMocksSepolia is Script {
         }
 
         require(minter != address(0), "PhusdStableMinter must be deployed");
-        require(usdt != address(0), "MockUSDT must be deployed");
-        require(usds != address(0), "MockUSDS must be deployed");
         require(dola != address(0), "MockDola must be deployed");
         require(rewardToken != address(0), "MockUSDC must be deployed");
-        require(yieldStrategyUSDT != address(0), "YieldStrategyUSDT must be deployed");
-        require(yieldStrategyUSDS != address(0), "YieldStrategyUSDS must be deployed");
         require(yieldStrategyDola != address(0), "YieldStrategyDola must be deployed");
         require(yieldStrategyUSDC != address(0), "YieldStrategyUSDC must be deployed");
 
@@ -689,29 +616,9 @@ contract DeployMocksSepolia is Script {
         PhusdStableMinter m = PhusdStableMinter(minter);
 
         // Approve yield strategies for their respective tokens
-        m.approveYS(usdt, yieldStrategyUSDT);
-        m.approveYS(usds, yieldStrategyUSDS);
         m.approveYS(dola, yieldStrategyDola);
         m.approveYS(rewardToken, yieldStrategyUSDC); // USDC
         console.log("Approved yield strategies for their tokens");
-
-        // Register USDT as stablecoin (6 decimals)
-        m.registerStablecoin(
-            usdt,                   // stablecoin
-            yieldStrategyUSDT,      // yieldStrategy
-            1e18,                   // exchangeRate (1:1)
-            6                       // decimals
-        );
-        console.log("Registered USDT as stablecoin");
-
-        // Register USDS as stablecoin (18 decimals)
-        m.registerStablecoin(
-            usds,                   // stablecoin
-            yieldStrategyUSDS,      // yieldStrategy
-            1e18,                   // exchangeRate (1:1)
-            18                      // decimals
-        );
-        console.log("Registered USDS as stablecoin");
 
         // Register DOLA as stablecoin (18 decimals)
         m.registerStablecoin(
@@ -1007,30 +914,27 @@ contract DeployMocksSepolia is Script {
         // We need to extract contract addresses from the JSON
         // Format: "ContractName": {"address": "0x...", "deployed": true, ...}
 
-        string[] memory names = new string[](23);
+        string[] memory names = new string[](20);
         names[0] = "MockPhUSD";
         names[1] = "MockUSDC";
-        names[2] = "MockUSDT";
-        names[3] = "MockUSDS";
-        names[4] = "MockDola";
-        names[5] = "MockToke";
-        names[6] = "MockEYE";
-        names[7] = "Pauser";
-        names[8] = "YieldStrategyUSDT";
-        names[9] = "YieldStrategyUSDS";
-        names[10] = "MockAutoDOLA";
-        names[11] = "MockMainRewarder";
-        names[12] = "YieldStrategyDola";
-        names[13] = "MockAutoUSDC";
-        names[14] = "MockMainRewarderUSDC";
-        names[15] = "YieldStrategyUSDC";
-        names[16] = "PhusdStableMinter";
-        names[17] = "PhlimboEA";
-        names[18] = "DepositView";
-        names[19] = "Seeding";
-        names[20] = "DolaYield";
-        names[21] = "UsdcSeeding";
-        names[22] = "UsdcYield";
+        names[2] = "MockUSDS";
+        names[3] = "MockDola";
+        names[4] = "MockToke";
+        names[5] = "MockEYE";
+        names[6] = "Pauser";
+        names[7] = "MockAutoDOLA";
+        names[8] = "MockMainRewarder";
+        names[9] = "YieldStrategyDola";
+        names[10] = "MockAutoUSDC";
+        names[11] = "MockMainRewarderUSDC";
+        names[12] = "YieldStrategyUSDC";
+        names[13] = "PhusdStableMinter";
+        names[14] = "PhlimboEA";
+        names[15] = "DepositView";
+        names[16] = "Seeding";
+        names[17] = "DolaYield";
+        names[18] = "UsdcSeeding";
+        names[19] = "UsdcYield";
 
         for (uint256 i = 0; i < names.length; i++) {
             string memory name = names[i];
@@ -1180,12 +1084,15 @@ contract DeployMocksSepolia is Script {
     function _printArchitectureSummary() internal pure {
         console.log("");
         console.log("Architecture Summary:");
-        console.log("  - USDT -> YieldStrategyUSDT (MockYieldStrategy) -> PhusdStableMinter");
-        console.log("  - USDS -> YieldStrategyUSDS (MockYieldStrategy) -> PhusdStableMinter");
-        console.log("  - DOLA -> YieldStrategyDola (AutoDolaYieldStrategy) -> PhusdStableMinter");
-        console.log("    \\-> AutoDolaYieldStrategy uses real contract with mocked dependencies:");
+        console.log("  - DOLA -> YieldStrategyDola (AutoPoolYieldStrategy) -> PhusdStableMinter");
+        console.log("    \\-> AutoPoolYieldStrategy uses real contract with mocked dependencies:");
         console.log("        - MockAutoDOLA (ERC4626 vault)");
         console.log("        - MockMainRewarder (TOKE rewards)");
+        console.log("        - MockToke (reward token)");
+        console.log("  - USDC -> YieldStrategyUSDC (AutoPoolYieldStrategy) -> PhusdStableMinter");
+        console.log("    \\-> AutoPoolYieldStrategy uses real contract with mocked dependencies:");
+        console.log("        - MockAutoUSDC (ERC4626 vault)");
+        console.log("        - MockMainRewarderUSDC (TOKE rewards)");
         console.log("        - MockToke (reward token)");
         console.log("  - Rewards injected directly into Phlimbo via collectReward()");
         console.log("");

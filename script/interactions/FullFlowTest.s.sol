@@ -6,22 +6,18 @@ import "@forge-std/console.sol";
 import "./AddressLoader.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../../src/mocks/MockPhUSD.sol";
-import "../../src/mocks/MockUSDT.sol";
-import "../../src/mocks/MockUSDS.sol";
 import "../../src/mocks/MockRewardToken.sol";
-import "../../src/mocks/MockYieldStrategy.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phUSD-stable-minter/PhusdStableMinter.sol";
 
 /**
  * @title FullFlowTest
  * @notice Complete test of the Phase 2 architecture with 2 stakers
- * @dev Tests (simplified after StableYieldAccumulator removal):
- *      1. Two users mint phUSD using USDT
+ * @dev Tests:
+ *      1. Two users mint phUSD using USDC
  *      2. Both users stake phUSD in Phlimbo
- *      3. Yield accumulates in strategies
- *      4. Rewards are injected into Phlimbo via collectReward()
- *      5. Both stakers claim their rewards
+ *      3. Rewards are injected into Phlimbo via collectReward()
+ *      4. Both stakers claim their rewards
  */
 contract FullFlowTest is Script {
     using AddressLoader for *;
@@ -29,10 +25,6 @@ contract FullFlowTest is Script {
     // Contract instances
     MockPhUSD phUSD;
     MockRewardToken usdc;
-    MockUSDT usdt;
-    MockUSDS usds;
-    MockYieldStrategy ysUSDT;
-    MockYieldStrategy ysUSDS;
     PhusdStableMinter minter;
     PhlimboEA phlimbo;
 
@@ -50,7 +42,7 @@ contract FullFlowTest is Script {
         console.log("    FULL FLOW TEST - 2 STAKERS");
         console.log("========================================\n");
 
-        // Step 1: Fund users with USDT for minting
+        // Step 1: Fund users with USDC for minting
         _step1_fundUsers();
 
         // Step 2: Both users mint phUSD
@@ -59,14 +51,11 @@ contract FullFlowTest is Script {
         // Step 3: Both users stake in Phlimbo
         _step3_stakeInPhlimbo();
 
-        // Step 4: Simulate yield in both strategies
-        _step4_simulateYield();
+        // Step 4: Inject rewards via collectReward (simulating external reward injection)
+        _step4_injectRewards();
 
-        // Step 5: Inject rewards via collectReward (simulating external reward injection)
-        _step5_injectRewards();
-
-        // Step 6: Check and claim Phlimbo rewards
-        _step6_claimPhlimboRewards();
+        // Step 5: Check and claim Phlimbo rewards
+        _step5_claimPhlimboRewards();
 
         console.log("\n========================================");
         console.log("    TEST COMPLETE!");
@@ -76,10 +65,6 @@ contract FullFlowTest is Script {
     function _loadContracts() internal {
         phUSD = MockPhUSD(AddressLoader.getPhUSD());
         usdc = MockRewardToken(AddressLoader.getUSDC());
-        usdt = MockUSDT(AddressLoader.getUSDT());
-        usds = MockUSDS(AddressLoader.getUSDS());
-        ysUSDT = MockYieldStrategy(AddressLoader.getYieldStrategyUSDT());
-        ysUSDS = MockYieldStrategy(AddressLoader.getYieldStrategyUSDS());
         minter = PhusdStableMinter(AddressLoader.getMinter());
         phlimbo = PhlimboEA(AddressLoader.getPhlimbo());
     }
@@ -95,37 +80,37 @@ contract FullFlowTest is Script {
     }
 
     function _step1_fundUsers() internal {
-        console.log("\n--- Step 1: Funding Users with USDT ---");
+        console.log("\n--- Step 1: Funding Users with USDC ---");
 
-        uint256 usdtAmount = 1000 * 10**6; // 1000 USDT each
+        uint256 usdcAmount = 1000 * 10**6; // 1000 USDC each
 
         vm.startBroadcast(user1Key);
-        // User1 (deployer) already has USDT from deployment
+        // User1 (deployer) already has USDC from deployment
         // Transfer some to user2
-        usdt.transfer(user2, usdtAmount);
-        console.log("Transferred 1000 USDT to User2");
+        usdc.transfer(user2, usdcAmount);
+        console.log("Transferred 1000 USDC to User2");
         vm.stopBroadcast();
 
-        console.log("User1 USDT:", usdt.balanceOf(user1));
-        console.log("User2 USDT:", usdt.balanceOf(user2));
+        console.log("User1 USDC:", usdc.balanceOf(user1));
+        console.log("User2 USDC:", usdc.balanceOf(user2));
     }
 
     function _step2_mintPhUSD() internal {
         console.log("\n--- Step 2: Both Users Mint phUSD ---");
 
-        uint256 mintAmount = 500 * 10**6; // 500 USDT each
+        uint256 mintAmount = 500 * 10**6; // 500 USDC each
 
         // User1 mints
         vm.startBroadcast(user1Key);
-        usdt.approve(address(minter), mintAmount);
-        minter.mint(address(usdt), mintAmount);
+        usdc.approve(address(minter), mintAmount);
+        minter.mint(address(usdc), mintAmount);
         vm.stopBroadcast();
         console.log("User1 minted phUSD. Balance:", phUSD.balanceOf(user1));
 
         // User2 mints
         vm.startBroadcast(user2Key);
-        usdt.approve(address(minter), mintAmount);
-        minter.mint(address(usdt), mintAmount);
+        usdc.approve(address(minter), mintAmount);
+        minter.mint(address(usdc), mintAmount);
         vm.stopBroadcast();
         console.log("User2 minted phUSD. Balance:", phUSD.balanceOf(user2));
     }
@@ -154,37 +139,10 @@ contract FullFlowTest is Script {
         console.log("User2 share: 40%");
     }
 
-    function _step4_simulateYield() internal {
-        console.log("\n--- Step 4: Simulating Yield in Strategies ---");
-
-        // Add 500 USDT yield
-        uint256 usdtYield = 500 * 10**6;
-        // Add 500 USDS yield
-        uint256 usdsYield = 500 * 10**18;
-
-        vm.startBroadcast(user1Key);
-
-        // First, transfer actual tokens to the strategies so they can be withdrawn
-        // The strategies need actual tokens, not just accounting entries
-        usdt.transfer(address(ysUSDT), usdtYield);
-        usds.transfer(address(ysUSDS), usdsYield);
-
-        // Then add the yield to the internal accounting
-        ysUSDT.addYield(address(usdt), address(minter), usdtYield);
-        ysUSDS.addYield(address(usds), address(minter), usdsYield);
-
-        vm.stopBroadcast();
-
-        console.log("Added 500 USDT yield to YieldStrategyUSDT");
-        console.log("Added 500 USDS yield to YieldStrategyUSDS");
-        console.log("Total yield: ~1000 USD equivalent");
-    }
-
-    function _step5_injectRewards() internal {
-        console.log("\n--- Step 5: Inject Rewards via collectReward ---");
+    function _step4_injectRewards() internal {
+        console.log("\n--- Step 4: Inject Rewards via collectReward ---");
 
         // Simulate external reward injection into Phlimbo
-        // In the new architecture, rewards are injected directly via collectReward()
         uint256 rewardAmount = 500 * 10**6; // 500 USDC
 
         console.log("Injecting USDC rewards into Phlimbo...");
@@ -204,8 +162,8 @@ contract FullFlowTest is Script {
         console.log("Rewards injected:", rewardAmount, "USDC");
     }
 
-    function _step6_claimPhlimboRewards() internal {
-        console.log("\n--- Step 6: Check and Claim Phlimbo Rewards ---");
+    function _step5_claimPhlimboRewards() internal {
+        console.log("\n--- Step 5: Check and Claim Phlimbo Rewards ---");
 
         // Fast forward time to allow rewards to accumulate
         // Phlimbo uses EMA smoothing, so rewards need time to become claimable

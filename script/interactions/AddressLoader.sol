@@ -24,28 +24,6 @@ library AddressLoader {
         return getUSDC();
     }
 
-    function getUSDT() internal pure returns (address) {
-        return 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0;
-    }
-
-    function getUSDS() internal pure returns (address) {
-        return 0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9;
-    }
-
-    // ========== Yield Strategy Addresses ==========
-
-    function getYieldStrategyUSDT() internal pure returns (address) {
-        return 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9;
-    }
-
-    function getYieldStrategyUSDS() internal pure returns (address) {
-        return 0x5FC8d32690cc91D4c39d9d3abcBD16989F875707;
-    }
-
-    function getYieldStrategy() internal pure returns (address) {
-        return getYieldStrategyUSDT();
-    }
-
     // ========== Core Contract Addresses ==========
 
     function getMinter() internal pure returns (address) {
@@ -80,10 +58,6 @@ library AddressLoader {
         console.log("=== Deployed Contract Addresses ===");
         console.log("MockPhUSD:", getPhUSD());
         console.log("MockUSDC:", getUSDC());
-        console.log("MockUSDT:", getUSDT());
-        console.log("MockUSDS:", getUSDS());
-        console.log("YieldStrategyUSDT:", getYieldStrategyUSDT());
-        console.log("YieldStrategyUSDS:", getYieldStrategyUSDS());
         console.log("PhusdStableMinter:", getMinter());
         console.log("PhlimboEA:", getPhlimbo());
         console.log("===================================");
