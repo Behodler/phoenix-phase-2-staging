@@ -31,8 +31,14 @@ export default defineConfig({
         'Burner.sol/Burner.json',
         'Gather.sol/Gather.json',
 
+        // Core infrastructure
+        'StableYieldAccumulator.sol/StableYieldAccumulator.json',
+        'AutoPoolYieldStrategy.sol/AutoPoolYieldStrategy.json',
+        'Pauser.sol/Pauser.json',
+
         // View contracts for UI polling
         'DepositView.sol/DepositView.json',
+        'DepositPageView.sol/DepositPageView.json',
         'ViewRouter.sol/ViewRouter.json',
         'MintPageView.sol/MintPageView.json',
       ],
