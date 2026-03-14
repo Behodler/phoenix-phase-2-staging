@@ -477,24 +477,23 @@ contract DeployMocks is Script {
         // ====== PHASE 8.5: NFTMinter Configuration ======
         console.log("\n=== Phase 8.5: NFTMinter Configuration ===");
 
-        // Register each dispatcher with NFTMinter (initialPrice = 100e18, growthBps = 0)
+        // Register each dispatcher with NFTMinter (initialPrice = 100e18, varying growthBps)
         uint256 initialPrice = 100 * 10 ** 18;
-        uint256 growthBps = 0;
 
-        nftMinter.registerDispatcher(address(burnerEYE), initialPrice, growthBps);
-        console.log("Registered BurnerEYE dispatcher with NFTMinter (index 1)");
+        nftMinter.registerDispatcher(address(burnerEYE), initialPrice, 200); // 2% growth
+        console.log("Registered BurnerEYE dispatcher with NFTMinter (index 1, 2% growth)");
 
-        nftMinter.registerDispatcher(address(burnerSCX), initialPrice, growthBps);
-        console.log("Registered BurnerSCX dispatcher with NFTMinter (index 2)");
+        nftMinter.registerDispatcher(address(burnerSCX), initialPrice, 200); // 2% growth
+        console.log("Registered BurnerSCX dispatcher with NFTMinter (index 2, 2% growth)");
 
-        nftMinter.registerDispatcher(address(burnerFlax), initialPrice, growthBps);
-        console.log("Registered BurnerFlax dispatcher with NFTMinter (index 3)");
+        nftMinter.registerDispatcher(address(burnerFlax), initialPrice, 200); // 2% growth
+        console.log("Registered BurnerFlax dispatcher with NFTMinter (index 3, 2% growth)");
 
-        nftMinter.registerDispatcher(address(balancerPooler), initialPrice, growthBps);
-        console.log("Registered BalancerPooler dispatcher with NFTMinter (index 4)");
+        nftMinter.registerDispatcher(address(balancerPooler), initialPrice, 10); // 0.1% growth
+        console.log("Registered BalancerPooler dispatcher with NFTMinter (index 4, 0.1% growth)");
 
-        nftMinter.registerDispatcher(address(gatherWBTC), initialPrice, growthBps);
-        console.log("Registered GatherWBTC dispatcher with NFTMinter (index 5)");
+        nftMinter.registerDispatcher(address(gatherWBTC), initialPrice, 1000); // 10% growth
+        console.log("Registered GatherWBTC dispatcher with NFTMinter (index 5, 10% growth)");
 
         // Set minter on each dispatcher
         burnerEYE.setMinter(address(nftMinter));
