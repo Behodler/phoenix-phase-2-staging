@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-03-13T23:43:43.967Z",
+  "extractedAt": "2026-03-16T20:29:05.952Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -162,7 +162,7 @@
       "address": "0x4A679253410272dd5232B3Ff7cF5dbB88f295319",
       "deployed": true,
       "configured": true,
-      "deployGas": 276277,
+      "deployGas": 289463,
       "configGas": 0
     },
     "BurnerEYE": {
@@ -201,31 +201,31 @@
       "configGas": 0
     },
     "DepositView": {
-      "address": "0x202CCe504e04bEd6fC0521238dDf04Bc9E8E15aB",
+      "address": "0x4EE6eCAD1c2Dae9f525404De8555724e3c35d07B",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "ViewRouter": {
-      "address": "0xf4B146FbA71F41E0592668ffbF264F1D186b2Ca8",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 418107,
-      "configGas": 0
-    },
-    "DepositPageView": {
-      "address": "0x172076E0166D1F9Cc711C77Adf8488051744980C",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 466015,
-      "configGas": 0
-    },
-    "MintPageView": {
       "address": "0xBEc49fA140aCaA83533fB00A2BB19bDdd0290f25",
       "deployed": true,
       "configured": true,
-      "deployGas": 1480816,
+      "deployGas": 418109,
+      "configGas": 0
+    },
+    "DepositPageView": {
+      "address": "0xD84379CEae14AA33C123Af12424A37803F885889",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 466018,
+      "configGas": 0
+    },
+    "MintPageView": {
+      "address": "0xfbC22278A96299D91d41C453234d97b4F5Eb9B2d",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1480832,
       "configGas": 0
     }
   }
