@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-03-13T23:43:44.103Z
+// Generated from local.json on 2026-03-16T20:29:06.050Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -32,10 +32,10 @@ export const anvilAddresses: ContractAddresses = {
   BurnerFlax: "0xc5a5C42992dECbae36851359345FE25997F5C42d",
   BalancerPooler: "0x67d269191c92Caf3cD7723F116c85e6E9bf55933",
   GatherWBTC: "0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E",
-  DepositView: "0x202CCe504e04bEd6fC0521238dDf04Bc9E8E15aB",
-  ViewRouter: "0xf4B146FbA71F41E0592668ffbF264F1D186b2Ca8",
-  DepositPageView: "0x172076E0166D1F9Cc711C77Adf8488051744980C",
-  MintPageView: "0xBEc49fA140aCaA83533fB00A2BB19bDdd0290f25"
+  DepositView: "0x4EE6eCAD1c2Dae9f525404De8555724e3c35d07B",
+  ViewRouter: "0xBEc49fA140aCaA83533fB00A2BB19bDdd0290f25",
+  DepositPageView: "0xD84379CEae14AA33C123Af12424A37803F885889",
+  MintPageView: "0xfbC22278A96299D91d41C453234d97b4F5Eb9B2d"
 };
 
 export type AnvilContractName = keyof ContractAddresses;
