@@ -286,9 +286,9 @@ contract DeployMocks is Script {
         _trackDeployment("NFTMinter", address(nftMinter), gasBefore - gasleft());
         console.log("NFTMinter deployed at:", address(nftMinter));
 
-        // 4. Deploy BurnRecorder (needs NFTMinter address as minter)
+        // 4. Deploy BurnRecorder
         gasBefore = gasleft();
-        burnRecorder = new BurnRecorder(deployer, address(nftMinter));
+        burnRecorder = new BurnRecorder(deployer);
         _trackDeployment("BurnRecorder", address(burnRecorder), gasBefore - gasleft());
         console.log("BurnRecorder deployed at:", address(burnRecorder));
 
@@ -332,6 +332,12 @@ contract DeployMocks is Script {
         );
         _trackDeployment("GatherWBTC", address(gatherWBTC), gasBefore - gasleft());
         console.log("GatherWBTC deployed at:", address(gatherWBTC));
+
+        // 6. Authorize burner dispatchers on BurnRecorder
+        burnRecorder.setBurner(address(burnerEYE), true);
+        burnRecorder.setBurner(address(burnerSCX), true);
+        burnRecorder.setBurner(address(burnerFlax), true);
+        console.log("Authorized BurnerEYE, BurnerSCX, BurnerFlax as burners on BurnRecorder");
 
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
