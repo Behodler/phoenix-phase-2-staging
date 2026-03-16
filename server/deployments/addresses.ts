@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-03-16T20:29:06.047Z
+// Generated interface from local.json on 2026-03-16T21:45:32.220Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -6,6 +6,7 @@ export interface ContractAddresses {
   PhUSD: string;
   USDC: string;
   USDS: string;
+  SUSDS: string;
   Dola: string;
   Toke: string;
   EYE: string;

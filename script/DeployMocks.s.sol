@@ -9,6 +9,7 @@ import "../src/mocks/MockUSDS.sol";
 import "../src/mocks/MockDola.sol";
 import "../src/mocks/MockToke.sol";
 import "../src/mocks/MockAutoDOLA.sol";
+import "../src/mocks/MockSUSDS.sol";
 import "../src/mocks/MockMainRewarder.sol";
 import "../src/mocks/MockEYE.sol";
 import "../src/mocks/MockSCX.sol";
@@ -55,7 +56,8 @@ contract DeployMocks is Script {
     // Deployment addresses
     MockPhUSD public phUSD;
     MockRewardToken public rewardToken; // USDC - the consolidated reward token
-    MockUSDS public usds; // Used as sUSDS for BalancerPooler/MintPageView liquidity
+    MockUSDS public usds; // Underlying USDS stablecoin (plain ERC20)
+    MockSUSDS public susds; // ERC4626 savings vault wrapping USDS
     MockDola public dola;
     MockToke public toke;
     MockAutoDOLA public mockAutoDola;
@@ -126,9 +128,21 @@ contract DeployMocks is Script {
         console.log("MockUSDC (RewardToken) deployed at:", address(rewardToken));
 
         gasBefore = gasleft();
-        usds = new MockUSDS(); // Used as sUSDS for BalancerPooler/MintPageView
+        usds = new MockUSDS();
         _trackDeployment("MockUSDS", address(usds), gasBefore - gasleft());
         console.log("MockUSDS deployed at:", address(usds));
+
+        // Deploy MockSUSDS (ERC4626 savings vault wrapping USDS)
+        gasBefore = gasleft();
+        susds = new MockSUSDS(address(usds));
+        _trackDeployment("MockSUSDS", address(susds), gasBefore - gasleft());
+        console.log("MockSUSDS deployed at:", address(susds));
+
+        // Deposit initial USDS into MockSUSDS to establish baseline shares
+        uint256 initialSusdsDeposit = 10_000 * 10**18; // 10,000 USDS
+        usds.approve(address(susds), initialSusdsDeposit);
+        susds.deposit(initialSusdsDeposit, deployer);
+        console.log("Deposited 10,000 USDS into MockSUSDS (baseline shares established)");
 
         gasBefore = gasleft();
         dola = new MockDola();
@@ -314,7 +328,7 @@ contract DeployMocks is Script {
         // BalancerPooler: user sends sUSDS, single-sided add to phUSD/sUSDS pool boosts phUSD price + liquidity
         gasBefore = gasleft();
         balancerPooler = new BalancerPooler(
-            address(usds),               // primeToken_ (sUSDS - single-sided add boosts phUSD price)
+            address(susds),              // primeToken_ (sUSDS ERC4626 vault - single-sided add boosts phUSD price)
             address(mockBalancerPool),   // pool_ (BPT token for phUSD/sUSDS pool)
             address(mockBalancerVault),  // vault_
             true,                        // primeTokenIsFirst_
@@ -627,7 +641,7 @@ contract DeployMocks is Script {
             address(eyeToken),
             address(mockSCX),
             address(mockFlax),
-            address(usds),
+            address(susds),
             address(mockWBTC)
         );
         _trackDeployment("MintPageView", address(mintPageView), gasBefore - gasleft());
@@ -641,6 +655,7 @@ contract DeployMocks is Script {
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
         _markConfigured("MockUSDS", 0);
+        _markConfigured("MockSUSDS", 0);
         _markConfigured("MockDola", 0);
         _markConfigured("MockToke", 0);
         _markConfigured("MockEYE", 0);
