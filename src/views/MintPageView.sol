@@ -141,20 +141,15 @@ contract MintPageView is IPageView {
         data[offset] = token.allowance(user, address(nftMinter));
 
         // Price and growthBasisPoints from config
-        (, uint256 price, uint256 growthBasisPoints) = nftMinter.configs(dispatcherIndex);
+        (, uint256 price, uint256 growthBasisPoints,) = nftMinter.configs(dispatcherIndex);
         data[offset + 1] = price;
         data[offset + 2] = growthBasisPoints;
 
         // User's token balance
         data[offset + 3] = token.balanceOf(user);
 
-        // User's NFT balance - resolve token ID via override
-        (address dispatcher,,) = nftMinter.configs(dispatcherIndex);
-        uint256 tokenId = nftMinter.dispatcherTokenIdOverride(dispatcher);
-        if (tokenId == 0) {
-            tokenId = dispatcherIndex;
-        }
-        data[offset + 4] = IERC1155(address(nftMinter)).balanceOf(user, tokenId);
+        // User's NFT balance (tokenId == dispatcherIndex always)
+        data[offset + 4] = IERC1155(address(nftMinter)).balanceOf(user, dispatcherIndex);
 
         // Dispatcher index
         data[offset + 5] = dispatcherIndex;
