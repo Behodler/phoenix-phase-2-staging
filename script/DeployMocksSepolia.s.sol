@@ -242,6 +242,33 @@ contract DeployMocksSepolia is Script {
 
         vm.stopBroadcast();
 
+        // ====== Mark all contracts as configured ======
+        // Contracts that don't have dedicated configuration steps (mock tokens,
+        // view contracts, etc.) or whose configuration happens inside another
+        // function's scope need to be explicitly marked here.
+        _markConfigured("MockUSDC", 0);
+        _markConfigured("MockUSDS", 0);
+        _markConfigured("MockSUSDS", 0);
+        _markConfigured("MockDola", 0);
+        _markConfigured("MockToke", 0);
+        _markConfigured("MockEYE", 0);
+        _markConfigured("MockSCX", 0);
+        _markConfigured("MockFlax", 0);
+        _markConfigured("MockWBTC", 0);
+        _markConfigured("MockMainRewarder", 0);
+        _markConfigured("MockMainRewarderUSDC", 0);
+        _markConfigured("MockBalancerVault", 0);
+        _markConfigured("NFTMinter", 0);
+        _markConfigured("BurnRecorder", 0);
+        _markConfigured("BurnerEYE", 0);
+        _markConfigured("BurnerSCX", 0);
+        _markConfigured("BurnerFlax", 0);
+        _markConfigured("BalancerPooler", 0);
+        _markConfigured("GatherWBTC", 0);
+        _markConfigured("ViewRouter", 0);
+        _markConfigured("DepositPageView", 0);
+        _markConfigured("MintPageView", 0);
+
         // ====== Final Progress Update ======
         _markDeploymentComplete();
 
