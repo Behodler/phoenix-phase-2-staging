@@ -1,0 +1,239 @@
+{
+  "chainId": 11155111,
+  "networkName": "sepolia",
+  "deploymentStatus": "completed",
+  "extractedAt": "2026-03-18T10:27:46.555Z",
+  "contracts": {
+    "PhUSD": {
+      "address": "0x6Ebbf752c521fa09DaBb5425E5ffb0f8bc3C12cd",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 718249,
+      "configGas": 96608
+    },
+    "USDC": {
+      "address": "0xD6e15052b9365c7d9aA32fb614590B5B9933d6E4",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 499564,
+      "configGas": 0
+    },
+    "USDS": {
+      "address": "0x41DFA31CE0B63697c26A372f6756324FFF534ca2",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 486022,
+      "configGas": 0
+    },
+    "SUSDS": {
+      "address": "0xdFB8ec9C2BB80039EDF7c73154AC3061fBEA0C54",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 927591,
+      "configGas": 0
+    },
+    "Dola": {
+      "address": "0x73fdDD2ef628A51e6aD609CA7Bc01703C57eE856",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 486354,
+      "configGas": 0
+    },
+    "Toke": {
+      "address": "0x42355603465c446F6c19DD114892b9F562abf0A4",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 486563,
+      "configGas": 0
+    },
+    "EYE": {
+      "address": "0xa80876A3940B4D02C74835aFb640aE1470a0c6Fc",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 517525,
+      "configGas": 0
+    },
+    "SCX": {
+      "address": "0xf27004B9da22C5A6311F4610A4FF07C50c1979E5",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 517682,
+      "configGas": 0
+    },
+    "Flax": {
+      "address": "0xd764a2c4EdC9FcA0c97BB6cf17AcD2a233d16fb2",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 518055,
+      "configGas": 0
+    },
+    "WBTC": {
+      "address": "0x56c511398e3a05d91a64b6Ac48F7f4288D5A2AeB",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 487781,
+      "configGas": 0
+    },
+    "Pauser": {
+      "address": "0x4719261C9BB19170650FF0eA0A06dae74Cd8e291",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 784462,
+      "configGas": 387493
+    },
+    "AutoDOLA": {
+      "address": "0x7763c5150BecF54f0F204a3C9A68fADE98852171",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1071606,
+      "configGas": 23074
+    },
+    "MainRewarder": {
+      "address": "0x4A72635Cc0cCede7ddc1BABB955A9cC8437Ff901",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 468488,
+      "configGas": 0
+    },
+    "YieldStrategyDola": {
+      "address": "0xB6CF3Cff6cf8C99D30cd9a883dfdE872a26dC0D0",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2725642,
+      "configGas": 25217
+    },
+    "AutoUSDC": {
+      "address": "0xa1E4831Bf90Ca97f94A025a27F408787e42FD972",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1080161,
+      "configGas": 23074
+    },
+    "MainRewarderUSDC": {
+      "address": "0x92b4000230aa0cea2eEC948FA5C5e7Ff851c59bF",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 468774,
+      "configGas": 0
+    },
+    "YieldStrategyUSDC": {
+      "address": "0x8e3Ac76b94C2f3b163b9658023d794C833d243CA",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2756289,
+      "configGas": 25217
+    },
+    "PhusdStableMinter": {
+      "address": "0xaf85F26db32726dbE0EB7985e37d2D43766bCDBa",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1044497,
+      "configGas": 241426
+    },
+    "PhlimboEA": {
+      "address": "0x319BdCA68DFc9Ba75dA72BC1d67e18AC834623cB",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1378571,
+      "configGas": 99626
+    },
+    "StableYieldAccumulator": {
+      "address": "0x8531C1733E45b96854a52DB0F4bacAf7d3A9367e",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1708216,
+      "configGas": 438344
+    },
+    "BalancerPool": {
+      "address": "0xCc3283dD76bc25843E507815E57Dd73572f5426f",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 509992,
+      "configGas": 22989
+    },
+    "BalancerVault": {
+      "address": "0xdB20DDE5FeD5311D545253E3f1C75C3C87A4A8E2",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 428541,
+      "configGas": 0
+    },
+    "NFTMinter": {
+      "address": "0xb5a90127e6Ee66a6691c53151F2F7E6f7a5202Fe",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 2322690,
+      "configGas": 0
+    },
+    "BurnRecorder": {
+      "address": "0x4Ad8aD05C155123b821590043F44AEfCf8771cB8",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 289480,
+      "configGas": 0
+    },
+    "BurnerEYE": {
+      "address": "0xeF92775ED61336E03992342ed5554FBE2a8558c6",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 788133,
+      "configGas": 0
+    },
+    "BurnerSCX": {
+      "address": "0x36066B8CC5f4d4610007840007B5BA9139fda234",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 786615,
+      "configGas": 0
+    },
+    "BurnerFlax": {
+      "address": "0xA1F407F9d9485394b82839D2C80f3c03558d6023",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 785270,
+      "configGas": 0
+    },
+    "BalancerPooler": {
+      "address": "0xbb72C18573F29110D6815e842b5280a727625d72",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 1154264,
+      "configGas": 0
+    },
+    "GatherWBTC": {
+      "address": "0xC7b18De08545a792f1272756A0BE088e8491A691",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 824604,
+      "configGas": 0
+    },
+    "DepositView": {
+      "address": "0x5dE89918D61460b1C4B1070f9b16AB5D8BB263Af",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 301294,
+      "configGas": 0
+    },
+    "ViewRouter": {
+      "address": "0x6Cb2BDa71E12213Bd7a74b203C2072228F1F6Aa6",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 417852,
+      "configGas": 0
+    },
+    "DepositPageView": {
+      "address": "0xfDC1E4b188a955544EF520f51B2fC821139bEbce",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 465520,
+      "configGas": 0
+    },
+    "MintPageView": {
+      "address": "0xa4738Abc04cE7D88cF04c77a83f3A648e8dDC2fF",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 1780861,
+      "configGas": 0
+    }
+  }
+}
