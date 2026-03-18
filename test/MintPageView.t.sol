@@ -81,8 +81,8 @@ contract MintPageViewTest is Test {
         // Deploy NFTMinter
         nftMinter = new NFTMinter(owner);
 
-        // Deploy BurnRecorder with nftMinter as the authorized minter
-        burnRecorder = new BurnRecorder(owner, address(nftMinter));
+        // Deploy BurnRecorder
+        burnRecorder = new BurnRecorder(owner);
 
         // Deploy mock dispatchers
         dispatcherEYE = new MockDispatcher(address(eye));
@@ -112,7 +112,7 @@ contract MintPageViewTest is Test {
 
     function testGetNamesReturnsCorrectCount() public view {
         string[] memory names = view_.getNames();
-        assertEq(names.length, 28, "Should return 28 field names");
+        assertEq(names.length, 33, "Should return 33 field names");
     }
 
     function testGetNamesReturnsCorrectFieldNames() public view {
@@ -124,44 +124,49 @@ contract MintPageViewTest is Test {
         assertEq(names[2], "EYE-growthBasisPoints");
         assertEq(names[3], "EYE-balance");
         assertEq(names[4], "EYE-nftBalance");
+        assertEq(names[5], "EYE-dispatcherIndex");
 
         // SCX fields
-        assertEq(names[5], "SCX-allowance");
-        assertEq(names[6], "SCX-price");
-        assertEq(names[7], "SCX-growthBasisPoints");
-        assertEq(names[8], "SCX-balance");
-        assertEq(names[9], "SCX-nftBalance");
+        assertEq(names[6], "SCX-allowance");
+        assertEq(names[7], "SCX-price");
+        assertEq(names[8], "SCX-growthBasisPoints");
+        assertEq(names[9], "SCX-balance");
+        assertEq(names[10], "SCX-nftBalance");
+        assertEq(names[11], "SCX-dispatcherIndex");
 
         // Flax fields
-        assertEq(names[10], "Flax-allowance");
-        assertEq(names[11], "Flax-price");
-        assertEq(names[12], "Flax-growthBasisPoints");
-        assertEq(names[13], "Flax-balance");
-        assertEq(names[14], "Flax-nftBalance");
+        assertEq(names[12], "Flax-allowance");
+        assertEq(names[13], "Flax-price");
+        assertEq(names[14], "Flax-growthBasisPoints");
+        assertEq(names[15], "Flax-balance");
+        assertEq(names[16], "Flax-nftBalance");
+        assertEq(names[17], "Flax-dispatcherIndex");
 
         // sUSDS fields
-        assertEq(names[15], "sUSDS-allowance");
-        assertEq(names[16], "sUSDS-price");
-        assertEq(names[17], "sUSDS-growthBasisPoints");
-        assertEq(names[18], "sUSDS-balance");
-        assertEq(names[19], "sUSDS-nftBalance");
+        assertEq(names[18], "sUSDS-allowance");
+        assertEq(names[19], "sUSDS-price");
+        assertEq(names[20], "sUSDS-growthBasisPoints");
+        assertEq(names[21], "sUSDS-balance");
+        assertEq(names[22], "sUSDS-nftBalance");
+        assertEq(names[23], "sUSDS-dispatcherIndex");
 
         // WBTC fields
-        assertEq(names[20], "WBTC-allowance");
-        assertEq(names[21], "WBTC-price");
-        assertEq(names[22], "WBTC-growthBasisPoints");
-        assertEq(names[23], "WBTC-balance");
-        assertEq(names[24], "WBTC-nftBalance");
+        assertEq(names[24], "WBTC-allowance");
+        assertEq(names[25], "WBTC-price");
+        assertEq(names[26], "WBTC-growthBasisPoints");
+        assertEq(names[27], "WBTC-balance");
+        assertEq(names[28], "WBTC-nftBalance");
+        assertEq(names[29], "WBTC-dispatcherIndex");
 
         // Burn totals
-        assertEq(names[25], "EYE-totalBurnt");
-        assertEq(names[26], "SCX-totalBurnt");
-        assertEq(names[27], "Flax-totalBurnt");
+        assertEq(names[30], "EYE-totalBurnt");
+        assertEq(names[31], "SCX-totalBurnt");
+        assertEq(names[32], "Flax-totalBurnt");
     }
 
     function testGetDataReturnsCorrectCount() public view {
         uint256[] memory data = view_.getData(user);
-        assertEq(data.length, 28, "Should return 28 data values");
+        assertEq(data.length, 33, "Should return 33 data values");
     }
 
     function testGetDataWithZeroBalancesAndAllowances() public view {
@@ -169,43 +174,50 @@ contract MintPageViewTest is Test {
 
         // All allowances should be 0
         assertEq(data[0], 0, "EYE allowance should be 0");
-        assertEq(data[5], 0, "SCX allowance should be 0");
-        assertEq(data[10], 0, "Flax allowance should be 0");
-        assertEq(data[15], 0, "sUSDS allowance should be 0");
-        assertEq(data[20], 0, "WBTC allowance should be 0");
+        assertEq(data[6], 0, "SCX allowance should be 0");
+        assertEq(data[12], 0, "Flax allowance should be 0");
+        assertEq(data[18], 0, "sUSDS allowance should be 0");
+        assertEq(data[24], 0, "WBTC allowance should be 0");
 
         // Prices should match registered values
         assertEq(data[1], 1 ether, "EYE price");
-        assertEq(data[6], 2 ether, "SCX price");
-        assertEq(data[11], 0.5 ether, "Flax price");
-        assertEq(data[16], 10 ether, "sUSDS price");
-        assertEq(data[21], 0.001 ether, "WBTC price");
+        assertEq(data[7], 2 ether, "SCX price");
+        assertEq(data[13], 0.5 ether, "Flax price");
+        assertEq(data[19], 10 ether, "sUSDS price");
+        assertEq(data[25], 0.001 ether, "WBTC price");
 
         // Growth basis points should match registered values
         assertEq(data[2], 100, "EYE growthBasisPoints");
-        assertEq(data[7], 200, "SCX growthBasisPoints");
-        assertEq(data[12], 50, "Flax growthBasisPoints");
-        assertEq(data[17], 300, "sUSDS growthBasisPoints");
-        assertEq(data[22], 500, "WBTC growthBasisPoints");
+        assertEq(data[8], 200, "SCX growthBasisPoints");
+        assertEq(data[14], 50, "Flax growthBasisPoints");
+        assertEq(data[20], 300, "sUSDS growthBasisPoints");
+        assertEq(data[26], 500, "WBTC growthBasisPoints");
 
         // All balances should be 0
         assertEq(data[3], 0, "EYE balance should be 0");
-        assertEq(data[8], 0, "SCX balance should be 0");
-        assertEq(data[13], 0, "Flax balance should be 0");
-        assertEq(data[18], 0, "sUSDS balance should be 0");
-        assertEq(data[23], 0, "WBTC balance should be 0");
+        assertEq(data[9], 0, "SCX balance should be 0");
+        assertEq(data[15], 0, "Flax balance should be 0");
+        assertEq(data[21], 0, "sUSDS balance should be 0");
+        assertEq(data[27], 0, "WBTC balance should be 0");
 
         // All NFT balances should be 0
         assertEq(data[4], 0, "EYE nftBalance should be 0");
-        assertEq(data[9], 0, "SCX nftBalance should be 0");
-        assertEq(data[14], 0, "Flax nftBalance should be 0");
-        assertEq(data[19], 0, "sUSDS nftBalance should be 0");
-        assertEq(data[24], 0, "WBTC nftBalance should be 0");
+        assertEq(data[10], 0, "SCX nftBalance should be 0");
+        assertEq(data[16], 0, "Flax nftBalance should be 0");
+        assertEq(data[22], 0, "sUSDS nftBalance should be 0");
+        assertEq(data[28], 0, "WBTC nftBalance should be 0");
+
+        // Dispatcher indices
+        assertEq(data[5], 1, "EYE dispatcherIndex should be 1");
+        assertEq(data[11], 2, "SCX dispatcherIndex should be 2");
+        assertEq(data[17], 3, "Flax dispatcherIndex should be 3");
+        assertEq(data[23], 4, "sUSDS dispatcherIndex should be 4");
+        assertEq(data[29], 5, "WBTC dispatcherIndex should be 5");
 
         // All burn totals should be 0
-        assertEq(data[25], 0, "EYE totalBurnt should be 0");
-        assertEq(data[26], 0, "SCX totalBurnt should be 0");
-        assertEq(data[27], 0, "Flax totalBurnt should be 0");
+        assertEq(data[30], 0, "EYE totalBurnt should be 0");
+        assertEq(data[31], 0, "SCX totalBurnt should be 0");
+        assertEq(data[32], 0, "Flax totalBurnt should be 0");
     }
 
     function testGetDataReturnsCorrectValuesForMockScenario() public {
@@ -229,17 +241,24 @@ contract MintPageViewTest is Test {
 
         // Allowances
         assertEq(data[0], 10 ether, "EYE allowance");
-        assertEq(data[5], 20 ether, "SCX allowance");
-        assertEq(data[10], 30 ether, "Flax allowance");
-        assertEq(data[15], 40 ether, "sUSDS allowance");
-        assertEq(data[20], 0.5 ether, "WBTC allowance");
+        assertEq(data[6], 20 ether, "SCX allowance");
+        assertEq(data[12], 30 ether, "Flax allowance");
+        assertEq(data[18], 40 ether, "sUSDS allowance");
+        assertEq(data[24], 0.5 ether, "WBTC allowance");
 
         // Balances
         assertEq(data[3], 100 ether, "EYE balance");
-        assertEq(data[8], 50 ether, "SCX balance");
-        assertEq(data[13], 200 ether, "Flax balance");
-        assertEq(data[18], 1000 ether, "sUSDS balance");
-        assertEq(data[23], 5 ether, "WBTC balance");
+        assertEq(data[9], 50 ether, "SCX balance");
+        assertEq(data[15], 200 ether, "Flax balance");
+        assertEq(data[21], 1000 ether, "sUSDS balance");
+        assertEq(data[27], 5 ether, "WBTC balance");
+
+        // Dispatcher indices
+        assertEq(data[5], 1, "EYE dispatcherIndex");
+        assertEq(data[11], 2, "SCX dispatcherIndex");
+        assertEq(data[17], 3, "Flax dispatcherIndex");
+        assertEq(data[23], 4, "sUSDS dispatcherIndex");
+        assertEq(data[29], 5, "WBTC dispatcherIndex");
     }
 
     function testGetDataWithDispatcherTokenIdOverride() public {

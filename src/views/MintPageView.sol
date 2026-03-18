@@ -18,7 +18,7 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 ///        Index 4: sUSDS - BalancerPooler
 ///        Index 5: WBTC  - Gather
 ///
-///      Returns 28 fields total (5 per token + 3 burn totals).
+///      Returns 33 fields total (6 per token + 3 burn totals).
 contract MintPageView is IPageView {
     INFTMinter public immutable nftMinter;
     BurnRecorder public immutable burnRecorder;
@@ -31,8 +31,8 @@ contract MintPageView is IPageView {
 
     /// @notice Number of NFT configurations.
     uint256 private constant NUM_TOKENS = 5;
-    /// @notice Fields per token: allowance, price, growthBasisPoints, balance, nftBalance.
-    uint256 private constant FIELDS_PER_TOKEN = 5;
+    /// @notice Fields per token: allowance, price, growthBasisPoints, balance, nftBalance, dispatcherIndex.
+    uint256 private constant FIELDS_PER_TOKEN = 6;
     /// @notice Number of burn total fields (EYE, SCX, Flax only).
     uint256 private constant BURN_FIELDS = 3;
     /// @notice Total fields returned.
@@ -59,45 +59,50 @@ contract MintPageView is IPageView {
     function getNames() external pure returns (string[] memory names) {
         names = new string[](TOTAL_FIELDS);
 
-        // EYE fields (index 0-4)
+        // EYE fields (index 0-5)
         names[0] = "EYE-allowance";
         names[1] = "EYE-price";
         names[2] = "EYE-growthBasisPoints";
         names[3] = "EYE-balance";
         names[4] = "EYE-nftBalance";
+        names[5] = "EYE-dispatcherIndex";
 
-        // SCX fields (index 5-9)
-        names[5] = "SCX-allowance";
-        names[6] = "SCX-price";
-        names[7] = "SCX-growthBasisPoints";
-        names[8] = "SCX-balance";
-        names[9] = "SCX-nftBalance";
+        // SCX fields (index 6-11)
+        names[6] = "SCX-allowance";
+        names[7] = "SCX-price";
+        names[8] = "SCX-growthBasisPoints";
+        names[9] = "SCX-balance";
+        names[10] = "SCX-nftBalance";
+        names[11] = "SCX-dispatcherIndex";
 
-        // Flax fields (index 10-14)
-        names[10] = "Flax-allowance";
-        names[11] = "Flax-price";
-        names[12] = "Flax-growthBasisPoints";
-        names[13] = "Flax-balance";
-        names[14] = "Flax-nftBalance";
+        // Flax fields (index 12-17)
+        names[12] = "Flax-allowance";
+        names[13] = "Flax-price";
+        names[14] = "Flax-growthBasisPoints";
+        names[15] = "Flax-balance";
+        names[16] = "Flax-nftBalance";
+        names[17] = "Flax-dispatcherIndex";
 
-        // sUSDS fields (index 15-19)
-        names[15] = "sUSDS-allowance";
-        names[16] = "sUSDS-price";
-        names[17] = "sUSDS-growthBasisPoints";
-        names[18] = "sUSDS-balance";
-        names[19] = "sUSDS-nftBalance";
+        // sUSDS fields (index 18-23)
+        names[18] = "sUSDS-allowance";
+        names[19] = "sUSDS-price";
+        names[20] = "sUSDS-growthBasisPoints";
+        names[21] = "sUSDS-balance";
+        names[22] = "sUSDS-nftBalance";
+        names[23] = "sUSDS-dispatcherIndex";
 
-        // WBTC fields (index 20-24)
-        names[20] = "WBTC-allowance";
-        names[21] = "WBTC-price";
-        names[22] = "WBTC-growthBasisPoints";
-        names[23] = "WBTC-balance";
-        names[24] = "WBTC-nftBalance";
+        // WBTC fields (index 24-29)
+        names[24] = "WBTC-allowance";
+        names[25] = "WBTC-price";
+        names[26] = "WBTC-growthBasisPoints";
+        names[27] = "WBTC-balance";
+        names[28] = "WBTC-nftBalance";
+        names[29] = "WBTC-dispatcherIndex";
 
-        // Burn totals (index 25-27)
-        names[25] = "EYE-totalBurnt";
-        names[26] = "SCX-totalBurnt";
-        names[27] = "Flax-totalBurnt";
+        // Burn totals (index 30-32)
+        names[30] = "EYE-totalBurnt";
+        names[31] = "SCX-totalBurnt";
+        names[32] = "Flax-totalBurnt";
     }
 
     function getData(address user) external view returns (uint256[] memory data) {
@@ -107,24 +112,24 @@ contract MintPageView is IPageView {
         _fillTokenData(data, 0, eye, 1, user);
 
         // SCX (dispatcher index 2)
-        _fillTokenData(data, 5, scx, 2, user);
+        _fillTokenData(data, 6, scx, 2, user);
 
         // Flax (dispatcher index 3)
-        _fillTokenData(data, 10, flax, 3, user);
+        _fillTokenData(data, 12, flax, 3, user);
 
         // sUSDS (dispatcher index 4)
-        _fillTokenData(data, 15, susds, 4, user);
+        _fillTokenData(data, 18, susds, 4, user);
 
         // WBTC (dispatcher index 5)
-        _fillTokenData(data, 20, wbtc, 5, user);
+        _fillTokenData(data, 24, wbtc, 5, user);
 
         // Burn totals
-        data[25] = burnRecorder.getTotalBurnt(address(eye));
-        data[26] = burnRecorder.getTotalBurnt(address(scx));
-        data[27] = burnRecorder.getTotalBurnt(address(flax));
+        data[30] = burnRecorder.getTotalBurnt(address(eye));
+        data[31] = burnRecorder.getTotalBurnt(address(scx));
+        data[32] = burnRecorder.getTotalBurnt(address(flax));
     }
 
-    /// @dev Fills 5 fields for a given token starting at `offset` in the data array.
+    /// @dev Fills 6 fields for a given token starting at `offset` in the data array.
     function _fillTokenData(
         uint256[] memory data,
         uint256 offset,
@@ -150,5 +155,8 @@ contract MintPageView is IPageView {
             tokenId = dispatcherIndex;
         }
         data[offset + 4] = IERC1155(address(nftMinter)).balanceOf(user, tokenId);
+
+        // Dispatcher index
+        data[offset + 5] = dispatcherIndex;
     }
 }
