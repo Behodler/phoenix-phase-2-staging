@@ -109,8 +109,10 @@ contract DeployMocksSepolia is Script {
     mapping(string => ContractDeployment) public deployments;
     string[] public contractNames;
     bool progressFileExists;
+    bool previewMode;
 
     function run() external {
+        previewMode = vm.envOr("PREVIEW_MODE", false);
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_SEPOLIA_pk");
         address deployer = vm.addr(deployerPrivateKey);
 
@@ -1726,6 +1728,7 @@ contract DeployMocksSepolia is Script {
      * @dev Mark deployment as complete
      */
     function _markDeploymentComplete() internal {
+        if (previewMode) return;
         // Final write with completed status
         _writeProgressFileWithStatus("completed");
     }
@@ -1734,6 +1737,7 @@ contract DeployMocksSepolia is Script {
      * @dev Write progress file with in_progress status
      */
     function _writeProgressFile() internal {
+        if (previewMode) return;
         _writeProgressFileWithStatus("in_progress");
     }
 
