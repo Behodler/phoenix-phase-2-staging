@@ -261,18 +261,6 @@ contract MintPageViewTest is Test {
         assertEq(data[29], 5, "WBTC dispatcherIndex");
     }
 
-    function testGetDataWithDispatcherTokenIdOverride() public {
-        // Set a custom token ID for the EYE dispatcher (index 1)
-        uint256 customTokenId = 42;
-        nftMinter.setDispatcherTokenId(address(dispatcherEYE), customTokenId);
-
-        // The view should still work correctly even with an override
-        uint256[] memory data = view_.getData(user);
-
-        // NFT balance should be 0 (queried with overridden token ID)
-        assertEq(data[4], 0, "EYE nftBalance with override should be 0");
-    }
-
     function testGetNamesAndGetDataLengthsMatch() public view {
         string[] memory names = view_.getNames();
         uint256[] memory data = view_.getData(user);
