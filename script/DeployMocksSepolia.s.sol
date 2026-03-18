@@ -6,17 +6,33 @@ import "@forge-std/console.sol";
 import "../src/mocks/MockPhUSD.sol";
 import "../src/mocks/MockRewardToken.sol";
 import "../src/mocks/MockUSDS.sol";
+import "../src/mocks/MockSUSDS.sol";
 import "../src/mocks/MockDola.sol";
 import "../src/mocks/MockToke.sol";
 import "../src/mocks/MockAutoDOLA.sol";
 import "../src/mocks/MockMainRewarder.sol";
 import "../src/mocks/MockEYE.sol";
+import "../src/mocks/MockSCX.sol";
+import "../src/mocks/MockFlax.sol";
+import "../src/mocks/MockWBTC.sol";
+import "../src/mocks/MockBalancerPool.sol";
+import "../src/mocks/MockBalancerVault.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
 import {AutoPoolYieldStrategy} from "@vault/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
+import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
+import "../src/views/ViewRouter.sol";
+import "../src/views/DepositPageView.sol";
+import {MintPageView} from "../src/views/MintPageView.sol";
+import {INFTMinter as INFTMinterView} from "@yield-claim-nft/interfaces/INFTMinter.sol";
+import {NFTMinter} from "@yield-claim-nft/NFTMinter.sol";
+import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
+import {Burner} from "@yield-claim-nft/dispatchers/Burner.sol";
+import {BalancerPooler} from "@yield-claim-nft/dispatchers/BalancerPooler.sol";
+import {Gather} from "@yield-claim-nft/dispatchers/Gather.sol";
 
 /**
  * @title DeployMocksSepolia
@@ -28,17 +44,20 @@ import "../src/views/DepositView.sol";
  *      - Updates progress.11155111.json after EACH successful deployment/configuration step
  *      - Uses Sepolia chain ID (11155111) in progress file path
  *
- * Architecture Overview (simplified after StableYieldAccumulator removal):
+ * Architecture Overview:
  * - Multiple YieldStrategies (vaults) accumulate yield from different stablecoins
  * - PhusdStableMinter manages stablecoin deposits and phUSD minting
- * - Phlimbo handles staking and reward distribution via collectReward()
- * - Rewards are injected directly into Phlimbo through collectReward
+ * - StableYieldAccumulator gathers yield from all strategies and offers to users for discounted USDC
+ * - USDC is then injected into Phlimbo for distribution via collectReward()
+ * - Phlimbo handles staking and reward distribution
+ * - NFTMinter infrastructure for claim gating via dispatchers
  */
 contract DeployMocksSepolia is Script {
     // Deployment addresses - loaded from progress file or set during deployment
     address public phUSD;
     address public rewardToken; // USDC - the consolidated reward token
     address public usds;
+    address public susds;
     address public dola;
     address public toke;
     address public mockAutoDola;
@@ -50,8 +69,26 @@ contract DeployMocksSepolia is Script {
     address public minter;
     address public phlimbo;
     address public eyeToken;
+    address public mockSCX;
+    address public mockFlax;
+    address public mockWBTC;
     address public pauser;
+    address public stableYieldAccumulator;
     address public depositView;
+    address public viewRouter;
+    address public depositPageView;
+    address public mintPageView;
+
+    // NFTMinter infrastructure
+    address public mockBalancerPool;
+    address public mockBalancerVault;
+    address public nftMinter;
+    address public burnRecorder;
+    address public burnerEYE;
+    address public burnerSCX;
+    address public burnerFlax;
+    address public balancerPooler;
+    address public gatherWBTC;
 
     // Progress tracking
     string constant PROGRESS_FILE = "server/deployments/progress.11155111.json";
@@ -94,6 +131,7 @@ contract DeployMocksSepolia is Script {
         _deployMockPhUSD();
         _deployMockUSDC();
         _deployMockUSDS();
+        _deployMockSUSDS(deployer);
         _deployMockDola();
         _deployMockToke();
 
@@ -101,6 +139,9 @@ contract DeployMocksSepolia is Script {
         console.log("\n=== Phase 1.5: Deploying EYE Token and Pauser ===");
 
         _deployMockEYE();
+        _deployMockSCX();
+        _deployMockFlax();
+        _deployMockWBTC();
         _deployPauser(deployer);
 
         // ====== PHASE 2.5: AutoDola Infrastructure for DOLA YieldStrategy ======
@@ -124,6 +165,22 @@ contract DeployMocksSepolia is Script {
 
         _deployPhusdStableMinter();
         _deployPhlimboEA();
+        _deployStableYieldAccumulator();
+
+        // ====== PHASE 3.5: NFTMinter Infrastructure ======
+        console.log("\n=== Phase 3.5: Deploying NFTMinter Infrastructure ===");
+
+        _deployMockBalancerPool();
+        _deployMockBalancerVault();
+        _wireBalancerPool();
+        _deployNFTMinter(deployer);
+        _deployBurnRecorder(deployer);
+        _deployBurnerEYE(deployer);
+        _deployBurnerSCX(deployer);
+        _deployBurnerFlax(deployer);
+        _deployBalancerPooler(deployer);
+        _deployGatherWBTC(deployer);
+        _authorizeBurnersOnBurnRecorder();
 
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
@@ -141,9 +198,18 @@ contract DeployMocksSepolia is Script {
         console.log("\n=== Phase 7: Phlimbo Configuration ===");
         _configurePhlimbo();
 
+        // ====== PHASE 7.5: StableYieldAccumulator Configuration ======
+        console.log("\n=== Phase 7.5: StableYieldAccumulator Configuration ===");
+        _configureStableYieldAccumulator();
+
         // ====== PHASE 8: Pauser Registration ======
         console.log("\n=== Phase 8: Pauser Registration ===");
         _configurePauser();
+
+        // ====== PHASE 8.5: NFTMinter Configuration ======
+        console.log("\n=== Phase 8.5: NFTMinter Configuration ===");
+        _registerDispatchersWithNFTMinter();
+        _setMintersOnDispatchers();
 
         // ====== PHASE 9: Seed YieldStrategyDola with PhUSD Minting ======
         console.log("\n=== Phase 9: Seed YieldStrategyDola with PhUSD Minting ===");
@@ -164,6 +230,13 @@ contract DeployMocksSepolia is Script {
         // ====== PHASE 10: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 10: Deploy DepositView for UI Polling ===");
         _deployDepositView();
+
+        // ====== PHASE 11: Deploy ViewRouter + DepositPageView + MintPageView ======
+        console.log("\n=== Phase 11: Deploy ViewRouter + DepositPageView + MintPageView ===");
+        _deployViewRouter();
+        _deployDepositPageView();
+        _deployMintPageView();
+        _registerPagesWithViewRouter();
 
         vm.stopBroadcast();
 
@@ -230,6 +303,31 @@ contract DeployMocksSepolia is Script {
         console.log("MockUSDS deployed at:", usds);
     }
 
+    function _deployMockSUSDS(address deployer) internal {
+        if (_isDeployed("MockSUSDS")) {
+            susds = deployments["MockSUSDS"].addr;
+            console.log("MockSUSDS already deployed at:", susds);
+            return;
+        }
+
+        require(usds != address(0), "MockUSDS must be deployed before MockSUSDS");
+
+        uint256 gasBefore = gasleft();
+        MockSUSDS token = new MockSUSDS(usds);
+        susds = address(token);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Deposit initial USDS into MockSUSDS to establish baseline shares
+        uint256 initialSusdsDeposit = 10_000 * 10**18; // 10,000 USDS
+        MockUSDS(usds).approve(susds, initialSusdsDeposit);
+        MockSUSDS(susds).deposit(initialSusdsDeposit, deployer);
+        console.log("Deposited 10,000 USDS into MockSUSDS (baseline shares established)");
+
+        _trackDeployment("MockSUSDS", susds, gasUsed);
+        _writeProgressFile();
+        console.log("MockSUSDS deployed at:", susds);
+    }
+
     function _deployMockDola() internal {
         if (_isDeployed("MockDola")) {
             dola = deployments["MockDola"].addr;
@@ -283,6 +381,57 @@ contract DeployMocksSepolia is Script {
         _trackDeployment("MockEYE", eyeToken, gasUsed);
         _writeProgressFile();
         console.log("MockEYE deployed at:", eyeToken);
+    }
+
+    function _deployMockSCX() internal {
+        if (_isDeployed("MockSCX")) {
+            mockSCX = deployments["MockSCX"].addr;
+            console.log("MockSCX already deployed at:", mockSCX);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        MockSCX token = new MockSCX();
+        mockSCX = address(token);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("MockSCX", mockSCX, gasUsed);
+        _writeProgressFile();
+        console.log("MockSCX deployed at:", mockSCX);
+    }
+
+    function _deployMockFlax() internal {
+        if (_isDeployed("MockFlax")) {
+            mockFlax = deployments["MockFlax"].addr;
+            console.log("MockFlax already deployed at:", mockFlax);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        MockFlax token = new MockFlax();
+        mockFlax = address(token);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("MockFlax", mockFlax, gasUsed);
+        _writeProgressFile();
+        console.log("MockFlax deployed at:", mockFlax);
+    }
+
+    function _deployMockWBTC() internal {
+        if (_isDeployed("MockWBTC")) {
+            mockWBTC = deployments["MockWBTC"].addr;
+            console.log("MockWBTC already deployed at:", mockWBTC);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        MockWBTC token = new MockWBTC();
+        mockWBTC = address(token);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("MockWBTC", mockWBTC, gasUsed);
+        _writeProgressFile();
+        console.log("MockWBTC deployed at:", mockWBTC);
     }
 
     function _deployPauser(address /* deployer */) internal {
@@ -538,6 +687,250 @@ contract DeployMocksSepolia is Script {
         console.log("  - Depletion window:", oneMonthInSeconds, "seconds (1 month / 30.44 days)");
     }
 
+    function _deployStableYieldAccumulator() internal {
+        if (_isDeployed("StableYieldAccumulator")) {
+            stableYieldAccumulator = deployments["StableYieldAccumulator"].addr;
+            console.log("StableYieldAccumulator already deployed at:", stableYieldAccumulator);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        StableYieldAccumulator sya = new StableYieldAccumulator();
+        stableYieldAccumulator = address(sya);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("StableYieldAccumulator", stableYieldAccumulator, gasUsed);
+        _writeProgressFile();
+        console.log("StableYieldAccumulator deployed at:", stableYieldAccumulator);
+    }
+
+    // ========================================
+    // PHASE 3.5: NFTMinter Infrastructure
+    // ========================================
+
+    function _deployMockBalancerPool() internal {
+        if (_isDeployed("MockBalancerPool")) {
+            mockBalancerPool = deployments["MockBalancerPool"].addr;
+            console.log("MockBalancerPool already deployed at:", mockBalancerPool);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        MockBalancerPool pool = new MockBalancerPool();
+        mockBalancerPool = address(pool);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("MockBalancerPool", mockBalancerPool, gasUsed);
+        _writeProgressFile();
+        console.log("MockBalancerPool deployed at:", mockBalancerPool);
+    }
+
+    function _deployMockBalancerVault() internal {
+        if (_isDeployed("MockBalancerVault")) {
+            mockBalancerVault = deployments["MockBalancerVault"].addr;
+            console.log("MockBalancerVault already deployed at:", mockBalancerVault);
+            return;
+        }
+
+        require(mockBalancerPool != address(0), "MockBalancerPool must be deployed before MockBalancerVault");
+
+        uint256 gasBefore = gasleft();
+        MockBalancerVault vault = new MockBalancerVault(mockBalancerPool);
+        mockBalancerVault = address(vault);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("MockBalancerVault", mockBalancerVault, gasUsed);
+        _writeProgressFile();
+        console.log("MockBalancerVault deployed at:", mockBalancerVault);
+    }
+
+    function _wireBalancerPool() internal {
+        if (_isConfigured("MockBalancerPool")) {
+            console.log("MockBalancerPool already wired to MockBalancerVault");
+            return;
+        }
+
+        require(mockBalancerPool != address(0), "MockBalancerPool must be deployed");
+        require(mockBalancerVault != address(0), "MockBalancerVault must be deployed");
+
+        uint256 gasBefore = gasleft();
+        MockBalancerPool(mockBalancerPool).setVault(mockBalancerVault);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _markConfigured("MockBalancerPool", gasUsed);
+        _writeProgressFile();
+        console.log("Wired MockBalancerPool to recognize MockBalancerVault");
+    }
+
+    function _deployNFTMinter(address deployer) internal {
+        if (_isDeployed("NFTMinter")) {
+            nftMinter = deployments["NFTMinter"].addr;
+            console.log("NFTMinter already deployed at:", nftMinter);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        NFTMinter minterNFT = new NFTMinter(deployer);
+        nftMinter = address(minterNFT);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("NFTMinter", nftMinter, gasUsed);
+        _writeProgressFile();
+        console.log("NFTMinter deployed at:", nftMinter);
+    }
+
+    function _deployBurnRecorder(address deployer) internal {
+        if (_isDeployed("BurnRecorder")) {
+            burnRecorder = deployments["BurnRecorder"].addr;
+            console.log("BurnRecorder already deployed at:", burnRecorder);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        BurnRecorder recorder = new BurnRecorder(deployer);
+        burnRecorder = address(recorder);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("BurnRecorder", burnRecorder, gasUsed);
+        _writeProgressFile();
+        console.log("BurnRecorder deployed at:", burnRecorder);
+    }
+
+    function _deployBurnerEYE(address deployer) internal {
+        if (_isDeployed("BurnerEYE")) {
+            burnerEYE = deployments["BurnerEYE"].addr;
+            console.log("BurnerEYE already deployed at:", burnerEYE);
+            return;
+        }
+
+        require(eyeToken != address(0), "MockEYE must be deployed");
+        require(burnRecorder != address(0), "BurnRecorder must be deployed");
+
+        uint256 gasBefore = gasleft();
+        Burner b = new Burner(eyeToken, burnRecorder, deployer);
+        burnerEYE = address(b);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("BurnerEYE", burnerEYE, gasUsed);
+        _writeProgressFile();
+        console.log("BurnerEYE deployed at:", burnerEYE);
+    }
+
+    function _deployBurnerSCX(address deployer) internal {
+        if (_isDeployed("BurnerSCX")) {
+            burnerSCX = deployments["BurnerSCX"].addr;
+            console.log("BurnerSCX already deployed at:", burnerSCX);
+            return;
+        }
+
+        require(mockSCX != address(0), "MockSCX must be deployed");
+        require(burnRecorder != address(0), "BurnRecorder must be deployed");
+
+        uint256 gasBefore = gasleft();
+        Burner b = new Burner(mockSCX, burnRecorder, deployer);
+        burnerSCX = address(b);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("BurnerSCX", burnerSCX, gasUsed);
+        _writeProgressFile();
+        console.log("BurnerSCX deployed at:", burnerSCX);
+    }
+
+    function _deployBurnerFlax(address deployer) internal {
+        if (_isDeployed("BurnerFlax")) {
+            burnerFlax = deployments["BurnerFlax"].addr;
+            console.log("BurnerFlax already deployed at:", burnerFlax);
+            return;
+        }
+
+        require(mockFlax != address(0), "MockFlax must be deployed");
+        require(burnRecorder != address(0), "BurnRecorder must be deployed");
+
+        uint256 gasBefore = gasleft();
+        Burner b = new Burner(mockFlax, burnRecorder, deployer);
+        burnerFlax = address(b);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("BurnerFlax", burnerFlax, gasUsed);
+        _writeProgressFile();
+        console.log("BurnerFlax deployed at:", burnerFlax);
+    }
+
+    function _deployBalancerPooler(address deployer) internal {
+        if (_isDeployed("BalancerPooler")) {
+            balancerPooler = deployments["BalancerPooler"].addr;
+            console.log("BalancerPooler already deployed at:", balancerPooler);
+            return;
+        }
+
+        require(susds != address(0), "MockSUSDS must be deployed");
+        require(mockBalancerPool != address(0), "MockBalancerPool must be deployed");
+        require(mockBalancerVault != address(0), "MockBalancerVault must be deployed");
+
+        uint256 gasBefore = gasleft();
+        BalancerPooler bp = new BalancerPooler(
+            susds,              // primeToken_ (sUSDS)
+            mockBalancerPool,   // pool_ (BPT token)
+            mockBalancerVault,  // vault_
+            true,               // primeTokenIsFirst_
+            deployer            // initialOwner
+        );
+        balancerPooler = address(bp);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("BalancerPooler", balancerPooler, gasUsed);
+        _writeProgressFile();
+        console.log("BalancerPooler deployed at:", balancerPooler);
+    }
+
+    function _deployGatherWBTC(address deployer) internal {
+        if (_isDeployed("GatherWBTC")) {
+            gatherWBTC = deployments["GatherWBTC"].addr;
+            console.log("GatherWBTC already deployed at:", gatherWBTC);
+            return;
+        }
+
+        require(mockWBTC != address(0), "MockWBTC must be deployed");
+
+        uint256 gasBefore = gasleft();
+        Gather g = new Gather(
+            mockWBTC,   // token_ (WBTC)
+            deployer,   // recipient_
+            deployer    // initialOwner
+        );
+        gatherWBTC = address(g);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("GatherWBTC", gatherWBTC, gasUsed);
+        _writeProgressFile();
+        console.log("GatherWBTC deployed at:", gatherWBTC);
+    }
+
+    function _authorizeBurnersOnBurnRecorder() internal {
+        if (_isConfigured("BurnRecorderAuth")) {
+            console.log("BurnRecorder burner authorization already configured");
+            return;
+        }
+
+        require(burnRecorder != address(0), "BurnRecorder must be deployed");
+        require(burnerEYE != address(0), "BurnerEYE must be deployed");
+        require(burnerSCX != address(0), "BurnerSCX must be deployed");
+        require(burnerFlax != address(0), "BurnerFlax must be deployed");
+
+        uint256 gasBefore = gasleft();
+
+        BurnRecorder(burnRecorder).setBurner(burnerEYE, true);
+        BurnRecorder(burnRecorder).setBurner(burnerSCX, true);
+        BurnRecorder(burnRecorder).setBurner(burnerFlax, true);
+
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("BurnRecorderAuth", address(0), 0);
+        _markConfigured("BurnRecorderAuth", gasUsed);
+        _writeProgressFile();
+        console.log("Authorized BurnerEYE, BurnerSCX, BurnerFlax as burners on BurnRecorder");
+    }
+
     // ========================================
     // PHASE 4: Token Authorization
     // ========================================
@@ -675,6 +1068,76 @@ contract DeployMocksSepolia is Script {
     }
 
     // ========================================
+    // PHASE 7.5: StableYieldAccumulator Configuration
+    // ========================================
+
+    function _configureStableYieldAccumulator() internal {
+        if (_isConfigured("StableYieldAccumulator")) {
+            console.log("StableYieldAccumulator already configured");
+            return;
+        }
+
+        require(stableYieldAccumulator != address(0), "StableYieldAccumulator must be deployed");
+        require(rewardToken != address(0), "MockUSDC must be deployed");
+        require(phlimbo != address(0), "PhlimboEA must be deployed");
+        require(minter != address(0), "PhusdStableMinter must be deployed");
+        require(dola != address(0), "MockDola must be deployed");
+        require(yieldStrategyDola != address(0), "YieldStrategyDola must be deployed");
+        require(yieldStrategyUSDC != address(0), "YieldStrategyUSDC must be deployed");
+
+        uint256 gasBefore = gasleft();
+
+        StableYieldAccumulator sya = StableYieldAccumulator(stableYieldAccumulator);
+
+        // Set reward token to USDC
+        sya.setRewardToken(rewardToken);
+        console.log("Set reward token to USDC:", rewardToken);
+
+        // Set Phlimbo as the reward recipient
+        sya.setPhlimbo(phlimbo);
+        console.log("Set Phlimbo as reward recipient:", phlimbo);
+
+        // Set minter address for yield queries
+        sya.setMinter(minter);
+        console.log("Set minter for yield queries:", minter);
+
+        // Configure USDC token (6 decimals, 1:1 exchange rate)
+        sya.setTokenConfig(rewardToken, 6, 1e18);
+        console.log("Configured USDC token config (6 decimals, 1:1 rate)");
+
+        // Configure DOLA token (18 decimals, 1:1 exchange rate)
+        sya.setTokenConfig(dola, 18, 1e18);
+        console.log("Configured DOLA token config (18 decimals, 1:1 rate)");
+
+        // Add YieldStrategyDola to the yield strategy registry
+        sya.addYieldStrategy(yieldStrategyDola, dola);
+        console.log("Added YieldStrategyDola to yield strategy registry");
+
+        // Add YieldStrategyUSDC to the yield strategy registry
+        sya.addYieldStrategy(yieldStrategyUSDC, rewardToken);
+        console.log("Added YieldStrategyUSDC to yield strategy registry");
+
+        // Set discount rate (20% = 2000 basis points)
+        sya.setDiscountRate(2000);
+        console.log("Set discount rate to 2000 basis points (20%)");
+
+        // Approve Phlimbo to spend reward tokens with max approval
+        sya.approvePhlimbo(type(uint256).max);
+        console.log("Approved Phlimbo to spend reward tokens from StableYieldAccumulator");
+
+        // Authorize StableYieldAccumulator as withdrawer on all yield strategies
+        AutoPoolYieldStrategy(yieldStrategyDola).setWithdrawer(stableYieldAccumulator, true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyDola");
+
+        AutoPoolYieldStrategy(yieldStrategyUSDC).setWithdrawer(stableYieldAccumulator, true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDC");
+
+        uint256 gasUsed = gasBefore - gasleft();
+        _markConfigured("StableYieldAccumulator", gasUsed);
+        _writeProgressFile();
+    }
+
+    // ========================================
     // PHASE 8: Pauser Registration
     // ========================================
 
@@ -687,6 +1150,8 @@ contract DeployMocksSepolia is Script {
         require(pauser != address(0), "Pauser must be deployed");
         require(minter != address(0), "PhusdStableMinter must be deployed");
         require(phlimbo != address(0), "PhlimboEA must be deployed");
+        require(stableYieldAccumulator != address(0), "StableYieldAccumulator must be deployed");
+        require(nftMinter != address(0), "NFTMinter must be deployed");
 
         console.log("CRITICAL: setPauser() must be called BEFORE register()");
 
@@ -706,10 +1171,112 @@ contract DeployMocksSepolia is Script {
         p.register(phlimbo);
         console.log("Pauser.register(PhlimboEA) completed");
 
+        // Register StableYieldAccumulator with Pauser
+        StableYieldAccumulator(stableYieldAccumulator).setPauser(pauser);
+        console.log("StableYieldAccumulator.setPauser() called");
+        p.register(stableYieldAccumulator);
+        console.log("Pauser.register(StableYieldAccumulator) completed");
+
+        // Register NFTMinter with Pauser
+        NFTMinter(nftMinter).setPauser(pauser);
+        console.log("NFTMinter.setPauser() called");
+        p.register(nftMinter);
+        console.log("Pauser.register(NFTMinter) completed");
+
         uint256 gasUsed = gasBefore - gasleft();
         _markConfigured("Pauser", gasUsed);
         _writeProgressFile();
-        console.log("Both protocol contracts registered with Pauser");
+        console.log("All protocol contracts registered with Pauser");
+    }
+
+    // ========================================
+    // PHASE 8.5: NFTMinter Configuration
+    // ========================================
+
+    function _registerDispatchersWithNFTMinter() internal {
+        if (_isConfigured("NFTMinterDispatchers")) {
+            console.log("NFTMinter dispatchers already registered");
+            return;
+        }
+
+        require(nftMinter != address(0), "NFTMinter must be deployed");
+        require(burnerEYE != address(0), "BurnerEYE must be deployed");
+        require(burnerSCX != address(0), "BurnerSCX must be deployed");
+        require(burnerFlax != address(0), "BurnerFlax must be deployed");
+        require(balancerPooler != address(0), "BalancerPooler must be deployed");
+        require(gatherWBTC != address(0), "GatherWBTC must be deployed");
+
+        uint256 gasBefore = gasleft();
+
+        uint256 initialPrice = 100 * 10 ** 18;
+
+        NFTMinter(nftMinter).registerDispatcher(burnerEYE, initialPrice, 200); // 2% growth
+        console.log("Registered BurnerEYE dispatcher with NFTMinter (index 1, 2% growth)");
+
+        NFTMinter(nftMinter).registerDispatcher(burnerSCX, initialPrice, 200); // 2% growth
+        console.log("Registered BurnerSCX dispatcher with NFTMinter (index 2, 2% growth)");
+
+        NFTMinter(nftMinter).registerDispatcher(burnerFlax, initialPrice, 200); // 2% growth
+        console.log("Registered BurnerFlax dispatcher with NFTMinter (index 3, 2% growth)");
+
+        NFTMinter(nftMinter).registerDispatcher(balancerPooler, initialPrice, 10); // 0.1% growth
+        console.log("Registered BalancerPooler dispatcher with NFTMinter (index 4, 0.1% growth)");
+
+        NFTMinter(nftMinter).registerDispatcher(gatherWBTC, initialPrice, 1000); // 10% growth
+        console.log("Registered GatherWBTC dispatcher with NFTMinter (index 5, 10% growth)");
+
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("NFTMinterDispatchers", address(0), 0);
+        _markConfigured("NFTMinterDispatchers", gasUsed);
+        _writeProgressFile();
+    }
+
+    function _setMintersOnDispatchers() internal {
+        if (_isConfigured("DispatcherMinters")) {
+            console.log("Dispatcher minters already configured");
+            return;
+        }
+
+        require(nftMinter != address(0), "NFTMinter must be deployed");
+        require(burnerEYE != address(0), "BurnerEYE must be deployed");
+        require(burnerSCX != address(0), "BurnerSCX must be deployed");
+        require(burnerFlax != address(0), "BurnerFlax must be deployed");
+        require(balancerPooler != address(0), "BalancerPooler must be deployed");
+        require(gatherWBTC != address(0), "GatherWBTC must be deployed");
+        require(stableYieldAccumulator != address(0), "StableYieldAccumulator must be deployed");
+
+        uint256 gasBefore = gasleft();
+
+        // Set minter on each dispatcher
+        Burner(burnerEYE).setMinter(nftMinter);
+        console.log("BurnerEYE.setMinter -> NFTMinter");
+
+        Burner(burnerSCX).setMinter(nftMinter);
+        console.log("BurnerSCX.setMinter -> NFTMinter");
+
+        Burner(burnerFlax).setMinter(nftMinter);
+        console.log("BurnerFlax.setMinter -> NFTMinter");
+
+        BalancerPooler(balancerPooler).setMinter(nftMinter);
+        console.log("BalancerPooler.setMinter -> NFTMinter");
+
+        Gather(gatherWBTC).setMinter(nftMinter);
+        console.log("GatherWBTC.setMinter -> NFTMinter");
+
+        // Set NFTMinter on StableYieldAccumulator
+        StableYieldAccumulator(stableYieldAccumulator).setNFTMinter(nftMinter);
+        console.log("StableYieldAccumulator.setNFTMinter -> NFTMinter");
+
+        // Set StableYieldAccumulator as authorized burner on NFTMinter
+        NFTMinter(nftMinter).setAuthorizedBurner(stableYieldAccumulator, true);
+        console.log("NFTMinter.setAuthorizedBurner(StableYieldAccumulator, true)");
+
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("DispatcherMinters", address(0), 0);
+        _markConfigured("DispatcherMinters", gasUsed);
+        _writeProgressFile();
     }
 
     // ========================================
@@ -887,6 +1454,108 @@ contract DeployMocksSepolia is Script {
     }
 
     // ========================================
+    // PHASE 11: ViewRouter + DepositPageView + MintPageView
+    // ========================================
+
+    function _deployViewRouter() internal {
+        if (_isDeployed("ViewRouter")) {
+            viewRouter = deployments["ViewRouter"].addr;
+            console.log("ViewRouter already deployed at:", viewRouter);
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        ViewRouter vr = new ViewRouter();
+        viewRouter = address(vr);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("ViewRouter", viewRouter, gasUsed);
+        _writeProgressFile();
+        console.log("ViewRouter deployed at:", viewRouter);
+    }
+
+    function _deployDepositPageView() internal {
+        if (_isDeployed("DepositPageView")) {
+            depositPageView = deployments["DepositPageView"].addr;
+            console.log("DepositPageView already deployed at:", depositPageView);
+            return;
+        }
+
+        require(phlimbo != address(0), "PhlimboEA must be deployed");
+        require(phUSD != address(0), "MockPhUSD must be deployed");
+
+        uint256 gasBefore = gasleft();
+        DepositPageView dpv = new DepositPageView(
+            IPhlimbo(phlimbo),
+            IERC20(phUSD)
+        );
+        depositPageView = address(dpv);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("DepositPageView", depositPageView, gasUsed);
+        _writeProgressFile();
+        console.log("DepositPageView deployed at:", depositPageView);
+    }
+
+    function _deployMintPageView() internal {
+        if (_isDeployed("MintPageView")) {
+            mintPageView = deployments["MintPageView"].addr;
+            console.log("MintPageView already deployed at:", mintPageView);
+            return;
+        }
+
+        require(nftMinter != address(0), "NFTMinter must be deployed");
+        require(burnRecorder != address(0), "BurnRecorder must be deployed");
+        require(eyeToken != address(0), "MockEYE must be deployed");
+        require(mockSCX != address(0), "MockSCX must be deployed");
+        require(mockFlax != address(0), "MockFlax must be deployed");
+        require(susds != address(0), "MockSUSDS must be deployed");
+        require(mockWBTC != address(0), "MockWBTC must be deployed");
+
+        uint256 gasBefore = gasleft();
+        MintPageView mpv = new MintPageView(
+            INFTMinterView(nftMinter),
+            BurnRecorder(burnRecorder),
+            eyeToken,
+            mockSCX,
+            mockFlax,
+            susds,
+            mockWBTC
+        );
+        mintPageView = address(mpv);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("MintPageView", mintPageView, gasUsed);
+        _writeProgressFile();
+        console.log("MintPageView deployed at:", mintPageView);
+    }
+
+    function _registerPagesWithViewRouter() internal {
+        if (_isConfigured("ViewRouterPages")) {
+            console.log("ViewRouter pages already registered");
+            return;
+        }
+
+        require(viewRouter != address(0), "ViewRouter must be deployed");
+        require(depositPageView != address(0), "DepositPageView must be deployed");
+        require(mintPageView != address(0), "MintPageView must be deployed");
+
+        uint256 gasBefore = gasleft();
+
+        ViewRouter(viewRouter).setPage(keccak256("deposit"), IPageView(depositPageView));
+        console.log("Registered DepositPageView with ViewRouter under key: keccak256('deposit')");
+
+        ViewRouter(viewRouter).setPage(keccak256("mint"), IPageView(mintPageView));
+        console.log("Registered MintPageView with ViewRouter under key: keccak256('mint')");
+
+        uint256 gasUsed = gasBefore - gasleft();
+
+        _trackDeployment("ViewRouterPages", address(0), 0);
+        _markConfigured("ViewRouterPages", gasUsed);
+        _writeProgressFile();
+    }
+
+    // ========================================
     // Progress File Management
     // ========================================
 
@@ -914,27 +1583,49 @@ contract DeployMocksSepolia is Script {
         // We need to extract contract addresses from the JSON
         // Format: "ContractName": {"address": "0x...", "deployed": true, ...}
 
-        string[] memory names = new string[](20);
+        string[] memory names = new string[](42);
         names[0] = "MockPhUSD";
         names[1] = "MockUSDC";
         names[2] = "MockUSDS";
-        names[3] = "MockDola";
-        names[4] = "MockToke";
-        names[5] = "MockEYE";
-        names[6] = "Pauser";
-        names[7] = "MockAutoDOLA";
-        names[8] = "MockMainRewarder";
-        names[9] = "YieldStrategyDola";
-        names[10] = "MockAutoUSDC";
-        names[11] = "MockMainRewarderUSDC";
-        names[12] = "YieldStrategyUSDC";
-        names[13] = "PhusdStableMinter";
-        names[14] = "PhlimboEA";
-        names[15] = "DepositView";
-        names[16] = "Seeding";
-        names[17] = "DolaYield";
-        names[18] = "UsdcSeeding";
-        names[19] = "UsdcYield";
+        names[3] = "MockSUSDS";
+        names[4] = "MockDola";
+        names[5] = "MockToke";
+        names[6] = "MockEYE";
+        names[7] = "MockSCX";
+        names[8] = "MockFlax";
+        names[9] = "MockWBTC";
+        names[10] = "Pauser";
+        names[11] = "MockAutoDOLA";
+        names[12] = "MockMainRewarder";
+        names[13] = "YieldStrategyDola";
+        names[14] = "MockAutoUSDC";
+        names[15] = "MockMainRewarderUSDC";
+        names[16] = "YieldStrategyUSDC";
+        names[17] = "PhusdStableMinter";
+        names[18] = "PhlimboEA";
+        names[19] = "StableYieldAccumulator";
+        names[20] = "MockBalancerPool";
+        names[21] = "MockBalancerVault";
+        names[22] = "NFTMinter";
+        names[23] = "BurnRecorder";
+        names[24] = "BurnerEYE";
+        names[25] = "BurnerSCX";
+        names[26] = "BurnerFlax";
+        names[27] = "BalancerPooler";
+        names[28] = "GatherWBTC";
+        names[29] = "BurnRecorderAuth";
+        names[30] = "NFTMinterDispatchers";
+        names[31] = "DispatcherMinters";
+        names[32] = "DepositView";
+        names[33] = "ViewRouter";
+        names[34] = "DepositPageView";
+        names[35] = "MintPageView";
+        names[36] = "ViewRouterPages";
+        names[37] = "Seeding";
+        names[38] = "DolaYield";
+        names[39] = "UsdcSeeding";
+        names[40] = "UsdcYield";
+        names[41] = "DeploymentComplete";
 
         for (uint256 i = 0; i < names.length; i++) {
             string memory name = names[i];
@@ -1094,7 +1785,20 @@ contract DeployMocksSepolia is Script {
         console.log("        - MockAutoUSDC (ERC4626 vault)");
         console.log("        - MockMainRewarderUSDC (TOKE rewards)");
         console.log("        - MockToke (reward token)");
-        console.log("  - Rewards injected directly into Phlimbo via collectReward()");
+        console.log("");
+        console.log("StableYieldAccumulator Configuration:");
+        console.log("  - Reward token: USDC (MockRewardToken)");
+        console.log("  - Discount rate: 20% (2000 basis points)");
+        console.log("  - Yield strategies registered: YieldStrategyDola, YieldStrategyUSDC");
+        console.log("  - Phlimbo set as reward recipient");
+        console.log("  - Minter set for yield queries");
+        console.log("  - Authorized as withdrawer on all yield strategies");
+        console.log("");
+        console.log("Reward Flow:");
+        console.log("  - Yield accrues in yield strategies");
+        console.log("  - StableYieldAccumulator gathers yield and offers to users for discounted USDC");
+        console.log("  - USDC is then injected into Phlimbo via collectReward()");
+        console.log("  - Phlimbo distributes rewards to stakers");
         console.log("");
         console.log("PhlimboEA Configuration:");
         console.log("  - Depletion window: 2629746 seconds (1 month / 30.44 days)");
@@ -1104,6 +1808,8 @@ contract DeployMocksSepolia is Script {
         console.log("  - Pauser contract deployed with MockEYE token");
         console.log("  - PhusdStableMinter registered with Pauser");
         console.log("  - PhlimboEA registered with Pauser");
+        console.log("  - StableYieldAccumulator registered with Pauser");
+        console.log("  - NFTMinter registered with Pauser");
         console.log("  - Burn 1000 EYE to trigger global pause");
         console.log("");
         console.log("Initial Seeding:");
@@ -1114,7 +1820,7 @@ contract DeployMocksSepolia is Script {
         console.log("DOLA Yield Seeding:");
         console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
         console.log("  - This increases share value for YieldStrategyDola");
-        console.log("  - AutoDolaYieldStrategy can claim this yield");
+        console.log("  - AutoDolaYieldStrategy can claim this yield via StableYieldAccumulator");
         console.log("");
         console.log("USDC Seeding:");
         console.log("  - 5000 USDC deposited to YieldStrategyUSDC via minter.mint()");
@@ -1124,6 +1830,17 @@ contract DeployMocksSepolia is Script {
         console.log("USDC Yield Seeding:");
         console.log("  - 1000 USDC deposited directly to MockAutoUSDC vault");
         console.log("  - This increases share value for YieldStrategyUSDC");
-        console.log("  - AutoPoolYieldStrategy can claim this yield");
+        console.log("  - AutoPoolYieldStrategy can claim this yield via StableYieldAccumulator");
+        console.log("");
+        console.log("NFTMinter Infrastructure:");
+        console.log("  - NFTMinter (ERC1155) deployed for claim gating");
+        console.log("  - BurnRecorder tracks token burns across dispatchers");
+        console.log("  - BurnerEYE dispatcher (index 1: burns EYE tokens)");
+        console.log("  - BurnerSCX dispatcher (index 2: burns SCX tokens)");
+        console.log("  - BurnerFlax dispatcher (index 3: burns Flax tokens)");
+        console.log("  - BalancerPooler dispatcher (index 4: sUSDS single-sided add to phUSD/sUSDS pool)");
+        console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
+        console.log("  - StableYieldAccumulator authorized as NFT burner");
+        console.log("  - NFTMinter registered with Global Pauser");
     }
 }
