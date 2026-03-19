@@ -1,8 +1,5 @@
 // Generated from mainnet.json on 2026-01-29
-// Updated 2026-03-19 for NFT infrastructure deployment (story-033)
 // Chain ID: 1 (mainnet)
-// NOTE: NFT contract addresses are placeholders until broadcast is executed.
-//       Replace with actual addresses from progress.1.json after deployment.
 import { ContractAddresses } from './addresses';
 
 export const mainnetAddresses: ContractAddresses = {
@@ -11,7 +8,7 @@ export const mainnetAddresses: ContractAddresses = {
   YieldStrategyDola: "0x01d34d7EF3988C5b981ee06bF0Ba4485Bd8eA20C",
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
   PhlimboEA: "0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4",
-  StableYieldAccumulator: "0x0000000000000000000000000000000000000000", // PLACEHOLDER: new accumulator replaces 0xFc88cE7Ca2f4D2A78b2f96F6d1c34691960A9027
+  StableYieldAccumulator: "0xFc88cE7Ca2f4D2A78b2f96F6d1c34691960A9027",
   DepositView: "0x2Fdf77d4Ea75eFd48922B8E521612197FFbB564c",
   // External protocol contracts
   PhUSD: "0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605",
@@ -20,23 +17,22 @@ export const mainnetAddresses: ContractAddresses = {
   AutoDOLA: "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",
   EYE: "0x155ff1A85F440EE0A382eA949f24CE4E0b751c65",
 
+
   YieldStrategyUSDC: "0xf5F91E8240a0320CAC40b799B25F944a61090E5B",
   AutoUSDC: "0xa7569A44f348d3D70d8ad5889e50F78E33d80D35",
   MainRewarder: "0x0000000000000000000000000000000000000000",
   MainRewarderUSDC: "0x726104cfbd7ece2d1f5b3654a19109a9e2b6c27b",
 
-  // External tokens
+
+  //Currently Unused
   USDS: "0x0000000000000000000000000000000000000000",
   Toke: "0x0000000000000000000000000000000000000000",
   SCX: "0x1B8568FbB47708E9E9D31Ff303254f748805bF21",
   Flax: "0x0cf758D4303295C43CD95e1232f0101ADb3DA9E8",
-  WBTC: "0x2260FAC5E5542a773Aa44fBCfeDd86a3D015C766",
+  WBTC: "0x0000000000000000000000000000000000000000",
 
-  // Balancer V3 infrastructure
-  BalancerPool: "0x5b26d938f0be6357c39e936cc9c2277b9334ea58",
-  BalancerVault: "0xbA1333333333a1BA1108E8412f11850A5C319bA9",
-
-  // NFT infrastructure (PLACEHOLDER: replace after broadcast)
+  BalancerPool: "0x0000000000000000000000000000000000000000",
+  BalancerVault: "0x0000000000000000000000000000000000000000",
   NFTMinter: "0x0000000000000000000000000000000000000000",
   BurnRecorder: "0x0000000000000000000000000000000000000000",
   BurnerEYE: "0x0000000000000000000000000000000000000000",
@@ -44,13 +40,10 @@ export const mainnetAddresses: ContractAddresses = {
   BurnerFlax: "0x0000000000000000000000000000000000000000",
   BalancerPooler: "0x0000000000000000000000000000000000000000",
   GatherWBTC: "0x0000000000000000000000000000000000000000",
-
-  // View contracts (PLACEHOLDER: replace after broadcast)
   ViewRouter: "0x0000000000000000000000000000000000000000",
   DepositPageView: "0x0000000000000000000000000000000000000000",
   MintPageView: "0x0000000000000000000000000000000000000000",
-
-  SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD"
+  SUSDS:'0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD'
 };
 
 export type MainnetContractName = keyof ContractAddresses;
