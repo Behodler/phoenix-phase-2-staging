@@ -89,13 +89,20 @@ contract DeployMainnetNFT is Script {
     //         CONFIGURATION CONSTANTS
     // ==========================================
 
-    uint256 public constant DISCOUNT_RATE_BPS = 200; // 2% discount
-    uint256 public constant INITIAL_PRICE = 100e18;
+    uint256 public constant DISCOUNT_RATE_BPS = 2000; // 20% discount
+
+    // Per-token initial prices: $5 worth of each token, except sUSDS at $4 (discounted to encourage early minting)
+    // WBTC uses 8 decimals; all others use 18 decimals
+    uint256 public constant INITIAL_PRICE_EYE = 179e18;      // ~$5 at $0.027932/EYE
+    uint256 public constant INITIAL_PRICE_SCX = 81037e13;     // ~$5 at $6.17/SCX
+    uint256 public constant INITIAL_PRICE_FLAX = 6024e18;     // ~$5 at $0.00083/FLAX
+    uint256 public constant INITIAL_PRICE_SUSDS = 3706e15;    // ~$4 at $1.07918/sUSDS (discounted)
+    uint256 public constant INITIAL_PRICE_WBTC = 712;         // ~$5 at $702,331/WBTC (8 decimals)
 
     // Dispatcher growth rates (basis points)
-    uint256 public constant GROWTH_BURNER = 200;          // 2%
-    uint256 public constant GROWTH_BALANCER_POOLER = 10;   // 0.1%
-    uint256 public constant GROWTH_GATHER_WBTC = 1000;     // 10%
+    uint256 public constant GROWTH_BURNER = 1000;          // 10%
+    uint256 public constant GROWTH_BALANCER_POOLER = 500;   // 5%
+    uint256 public constant GROWTH_GATHER_WBTC = 1200;     // 12%
 
     // ==========================================
     //         DEPLOYMENT STATE
@@ -442,9 +449,9 @@ contract DeployMainnetNFT is Script {
         sya.addYieldStrategy(YIELD_STRATEGY_USDC, USDC);
         console.log("Added YieldStrategyUSDC:", YIELD_STRATEGY_USDC);
 
-        // Step 8: setDiscountRate(200) - 2%
+        // Step 8: setDiscountRate(2000) - 20%
         sya.setDiscountRate(DISCOUNT_RATE_BPS);
-        console.log("Set discount rate:", DISCOUNT_RATE_BPS, "bps (2%)");
+        console.log("Set discount rate:", DISCOUNT_RATE_BPS, "bps (20%)");
 
         // Step 9: approvePhlimbo(max)
         sya.approvePhlimbo(type(uint256).max);
@@ -508,25 +515,25 @@ contract DeployMainnetNFT is Script {
 
         uint256 gasBefore = gasleft();
 
-        // Index 1: BurnerEYE (EYE, 100e18, 2%)
-        NFTMinter(nftMinter).registerDispatcher(burnerEYE, INITIAL_PRICE, GROWTH_BURNER);
-        console.log("Registered BurnerEYE (index 1, 2% growth)");
+        // Index 1: BurnerEYE (EYE, ~$5 worth, 10% growth)
+        NFTMinter(nftMinter).registerDispatcher(burnerEYE, INITIAL_PRICE_EYE, GROWTH_BURNER);
+        console.log("Registered BurnerEYE (index 1, 10% growth)");
 
-        // Index 2: BurnerSCX (SCX, 100e18, 2%)
-        NFTMinter(nftMinter).registerDispatcher(burnerSCX, INITIAL_PRICE, GROWTH_BURNER);
-        console.log("Registered BurnerSCX (index 2, 2% growth)");
+        // Index 2: BurnerSCX (SCX, ~$5 worth, 10% growth)
+        NFTMinter(nftMinter).registerDispatcher(burnerSCX, INITIAL_PRICE_SCX, GROWTH_BURNER);
+        console.log("Registered BurnerSCX (index 2, 10% growth)");
 
-        // Index 3: BurnerFlax (Flax, 100e18, 2%)
-        NFTMinter(nftMinter).registerDispatcher(burnerFlax, INITIAL_PRICE, GROWTH_BURNER);
-        console.log("Registered BurnerFlax (index 3, 2% growth)");
+        // Index 3: BurnerFlax (Flax, ~$5 worth, 10% growth)
+        NFTMinter(nftMinter).registerDispatcher(burnerFlax, INITIAL_PRICE_FLAX, GROWTH_BURNER);
+        console.log("Registered BurnerFlax (index 3, 10% growth)");
 
-        // Index 4: BalancerPooler (sUSDS, 100e18, 0.1%)
-        NFTMinter(nftMinter).registerDispatcher(balancerPooler, INITIAL_PRICE, GROWTH_BALANCER_POOLER);
-        console.log("Registered BalancerPooler (index 4, 0.1% growth)");
+        // Index 4: BalancerPooler (sUSDS, ~$4 worth discounted, 5% growth)
+        NFTMinter(nftMinter).registerDispatcher(balancerPooler, INITIAL_PRICE_SUSDS, GROWTH_BALANCER_POOLER);
+        console.log("Registered BalancerPooler (index 4, 5% growth)");
 
-        // Index 5: GatherWBTC (WBTC, 100e18, 10%)
-        NFTMinter(nftMinter).registerDispatcher(gatherWBTC, INITIAL_PRICE, GROWTH_GATHER_WBTC);
-        console.log("Registered GatherWBTC (index 5, 10% growth)");
+        // Index 5: GatherWBTC (WBTC, ~$5 worth, 12% growth)
+        NFTMinter(nftMinter).registerDispatcher(gatherWBTC, INITIAL_PRICE_WBTC, GROWTH_GATHER_WBTC);
+        console.log("Registered GatherWBTC (index 5, 12% growth)");
 
         uint256 gasUsed = gasBefore - gasleft();
         _trackDeployment("NFTMinterDispatchers", address(0), 0);
@@ -961,7 +968,7 @@ contract DeployMainnetNFT is Script {
         console.log("  - Reward Token: USDC (", USDC, ")");
         console.log("  - Phlimbo:      ", PHLIMBO_EA);
         console.log("  - Minter:       ", PHUSD_STABLE_MINTER);
-        console.log("  - Discount Rate: 200 bps (2%)");
+        console.log("  - Discount Rate: 2000 bps (20%)");
         console.log("  - YieldStrategies: DOLA + USDC");
         console.log("  - NFTMinter linked for gated claiming");
         console.log("");
@@ -970,11 +977,11 @@ contract DeployMainnetNFT is Script {
         console.log("  - New accumulator AUTHORIZED on both YieldStrategies");
         console.log("");
         console.log("Dispatcher Registration (indices 1-5):");
-        console.log("  1: BurnerEYE     (EYE,   2% growth)");
-        console.log("  2: BurnerSCX     (SCX,   2% growth)");
-        console.log("  3: BurnerFlax    (Flax,  2% growth)");
-        console.log("  4: BalancerPooler(sUSDS, 0.1% growth)");
-        console.log("  5: GatherWBTC    (WBTC,  10% growth)");
+        console.log("  1: BurnerEYE     (EYE,   10% growth)");
+        console.log("  2: BurnerSCX     (SCX,   10% growth)");
+        console.log("  3: BurnerFlax    (Flax,  10% growth)");
+        console.log("  4: BalancerPooler(sUSDS, 5% growth)");
+        console.log("  5: GatherWBTC    (WBTC,  12% growth)");
         console.log("");
         console.log("Pauser Registration:");
         console.log("  - NewAccumulator registered with Pauser");
