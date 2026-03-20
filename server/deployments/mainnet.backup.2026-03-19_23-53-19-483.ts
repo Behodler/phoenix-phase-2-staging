@@ -1,7 +1,8 @@
 // Generated from mainnet.json on 2026-01-29
 // Updated 2026-03-20 for NFT infrastructure redeployment (WBTC address fix)
 // Chain ID: 1 (mainnet)
-// Updated 2026-03-20: NFT addresses patched from progress.1.json after broadcast
+// NOTE: NFT contract addresses are placeholders until broadcast is executed.
+//       Replace with actual addresses from progress.1.json after deployment.
 import { ContractAddresses } from './addresses';
 
 export const mainnetAddresses: ContractAddresses = {
@@ -10,7 +11,7 @@ export const mainnetAddresses: ContractAddresses = {
   YieldStrategyDola: "0x01d34d7EF3988C5b981ee06bF0Ba4485Bd8eA20C",
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
   PhlimboEA: "0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4",
-  StableYieldAccumulator: "0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E",
+  StableYieldAccumulator: "0x0000000000000000000000000000000000000000", // PLACEHOLDER: new accumulator replaces old ones
   DepositView: "0x2Fdf77d4Ea75eFd48922B8E521612197FFbB564c",
   // External protocol contracts
   PhUSD: "0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605",
@@ -36,18 +37,18 @@ export const mainnetAddresses: ContractAddresses = {
   BalancerVault: "0xbA1333333333a1BA1108E8412f11850A5C319bA9",
 
   // NFT infrastructure (PLACEHOLDER: replace after broadcast)
-  NFTMinter: "0xd936461f1C15eA9f34Ca1F20ecD54A0819068811",
-  BurnRecorder: "0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F",
-  BurnerEYE: "0xA592e074f990c87E10b3Bba1DACFB9187899575b",
-  BurnerSCX: "0xbe2fbBb49b26C20E3aEE3b0608cB5116aeD5d297",
-  BurnerFlax: "0xD3B630cBA76AEA5Aadb4cB71732227E073C8338C",
-  BalancerPooler: "0xC2d1a82C66Fd535ae218b59F77a1B716919a46C3",
-  GatherWBTC: "0xb304e2E63820D4f7B41219D2C39123E20444D0C9",
+  NFTMinter: "0x0000000000000000000000000000000000000000",
+  BurnRecorder: "0x0000000000000000000000000000000000000000",
+  BurnerEYE: "0x0000000000000000000000000000000000000000",
+  BurnerSCX: "0x0000000000000000000000000000000000000000",
+  BurnerFlax: "0x0000000000000000000000000000000000000000",
+  BalancerPooler: "0x0000000000000000000000000000000000000000",
+  GatherWBTC: "0x0000000000000000000000000000000000000000",
 
   // View contracts (PLACEHOLDER: replace after broadcast)
-  ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
-  DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
-  MintPageView: "0x5122cb32aE42AcC2aD5C2071e977C95c08F70141",
+  ViewRouter: "0x0000000000000000000000000000000000000000",
+  DepositPageView: "0x0000000000000000000000000000000000000000",
+  MintPageView: "0x0000000000000000000000000000000000000000",
 
   SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD"
 };
