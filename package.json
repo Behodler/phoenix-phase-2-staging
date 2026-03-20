@@ -64,7 +64,11 @@
     "mainnet:verify-eclp-fork": "forge test --fork-url $RPC_MAINNET --match-contract VerifyECLPSymmetry -vvv",
     "mainnet:init-eclp-dry": "forge script script/interactions/InitializeBalancerECLPPool.s.sol:InitializeBalancerECLPPool --rpc-url $RPC_MAINNET --sender 0x20D567D039cFC0174a3887F427BE54D418f7C274 -vvv",
     "mainnet:init-eclp": "forge script script/interactions/InitializeBalancerECLPPool.s.sol:InitializeBalancerECLPPool --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/44'/0/0\" -vvv",
-    "mainnet:phusd-amm-balances": "bash scripts/check-phusd-amm-balances.sh"
+    "mainnet:phusd-amm-balances": "bash scripts/check-phusd-amm-balances.sh",
+    "FixBalancerPooler:preview": "PREVIEW_MODE=true forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET -vvv",
+    "FixBalancerPooler": "forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "RedeployMintPageView:preview": "PREVIEW_MODE=true forge script script/RedeployMintPageView.s.sol:RedeployMintPageView --rpc-url $RPC_MAINNET -vvv",
+    "RedeployMintPageView": "forge script script/RedeployMintPageView.s.sol:RedeployMintPageView --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",

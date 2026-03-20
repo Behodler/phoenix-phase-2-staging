@@ -117,8 +117,8 @@ contract MintPageView is IPageView {
         // Flax (dispatcher index 3)
         _fillTokenData(data, 12, flax, 3, user);
 
-        // sUSDS (dispatcher index 4)
-        _fillTokenData(data, 18, susds, 4, user);
+        // sUSDS (dispatcher index 6 — redeployed BalancerPooler)
+        _fillTokenData(data, 18, susds, 6, user);
 
         // WBTC (dispatcher index 5)
         _fillTokenData(data, 24, wbtc, 5, user);

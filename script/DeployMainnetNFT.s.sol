@@ -57,6 +57,7 @@ contract DeployMainnetNFT is Script {
     address public constant PHUSD_STABLE_MINTER = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
     address public constant PHLIMBO_EA = 0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4;
     address public constant OLD_ACCUMULATOR = 0xFc88cE7Ca2f4D2A78b2f96F6d1c34691960A9027;
+    address public constant FIRST_RUN_ACCUMULATOR = 0xdd8cE46ea31d51f38279886a81cFc4c1a90d5E19; // First NFT deploy had wrong WBTC
     address public constant DEPOSIT_VIEW = 0x2Fdf77d4Ea75eFd48922B8E521612197FFbB564c;
 
     // ==========================================
@@ -70,7 +71,7 @@ contract DeployMainnetNFT is Script {
     address public constant SCX = 0x1B8568FbB47708E9E9D31Ff303254f748805bF21;
     address public constant FLAX = 0x0cf758D4303295C43CD95e1232f0101ADb3DA9E8;
     address public constant SUSDS = 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD;
-    address public constant WBTC = 0x2260FAc5E5542A773aA44FBcfeDD86a3D015c766;
+    address public constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
 
     // ==========================================
     //         BALANCER V3 ADDRESSES
@@ -235,6 +236,11 @@ contract DeployMainnetNFT is Script {
         } else {
             vm.stopBroadcast();
         }
+
+        // ====== Sanity Check: MintPageView.getData() ======
+        console.log("\n=== Sanity Check: MintPageView.getData() ===");
+        MintPageView(mintPageView).getData(OWNER_ADDRESS);
+        console.log("MintPageView.getData() succeeded (no revert)");
 
         // ====== Phase 8: Final Steps ======
         console.log("\n=== Phase 8: Final Steps ===");
@@ -482,6 +488,13 @@ contract DeployMainnetNFT is Script {
 
         AYieldStrategy(YIELD_STRATEGY_USDC).setWithdrawer(OLD_ACCUMULATOR, false);
         console.log("Revoked old accumulator as withdrawer on YieldStrategyUSDC");
+
+        // Revoke first-run accumulator (deployed with wrong WBTC address)
+        AYieldStrategy(YIELD_STRATEGY_DOLA).setWithdrawer(FIRST_RUN_ACCUMULATOR, false);
+        console.log("Revoked first-run accumulator as withdrawer on YieldStrategyDola");
+
+        AYieldStrategy(YIELD_STRATEGY_USDC).setWithdrawer(FIRST_RUN_ACCUMULATOR, false);
+        console.log("Revoked first-run accumulator as withdrawer on YieldStrategyUSDC");
 
         // Authorize new accumulator as withdrawer on both YieldStrategies
         AYieldStrategy(YIELD_STRATEGY_DOLA).setWithdrawer(newAccumulator, true);
