@@ -68,7 +68,12 @@
     "FixBalancerPooler:preview": "PREVIEW_MODE=true forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET -vvv",
     "FixBalancerPooler": "forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "RedeployMintPageView:preview": "PREVIEW_MODE=true forge script script/RedeployMintPageView.s.sol:RedeployMintPageView --rpc-url $RPC_MAINNET -vvv",
-    "RedeployMintPageView": "forge script script/RedeployMintPageView.s.sol:RedeployMintPageView --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "RedeployMintPageView": "forge script script/RedeployMintPageView.s.sol:RedeployMintPageView --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "sim:eclp-rebalance": "forge test --fork-url $RPC_MAINNET --match-test testSimulateRebalance -vvv",
+    "mainnet:buy-phusd-dry": "forge script script/interactions/governance/BuyPhUSDWithSUSDS.s.sol:BuyPhUSDWithSUSDS --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:buy-phusd": "forge script script/interactions/governance/BuyPhUSDWithSUSDS.s.sol:BuyPhUSDWithSUSDS --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:rebalance-tvl-dry": "forge script script/interactions/governance/RebalanceTVL.s.sol:RebalanceTVL --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:rebalance-tvl": "forge script script/interactions/governance/RebalanceTVL.s.sol:RebalanceTVL --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
