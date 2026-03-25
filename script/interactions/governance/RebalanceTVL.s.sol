@@ -70,6 +70,7 @@ contract RebalanceTVL is Script {
     address constant MAIN_REWARDER    = 0xDC39C67b38ecdA8a1974336c89B00F68667c91B7;
 
     // Accounts
+    address constant OWNER              = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
     address constant BALANCER_LP_ACCOUNT = 0x64d3CbAB6100782a7839fC1af791027a2f1908D2;
 
     // Amount to extract
@@ -96,23 +97,23 @@ contract RebalanceTVL is Script {
 
         require(tvlBefore >= EXTRACT_AMOUNT, "TVL less than extract amount");
 
-        vm.startBroadcast();
+        vm.startBroadcast(OWNER);
 
         // ============================================================
         // PHASE 1: Emergency withdraw from old YS (bypasses client accounting)
         // ============================================================
 
         // 1. Swap pauser to owner on old YS (to unpause without EYE burn)
-        oldYS.setPauser(msg.sender);
+        oldYS.setPauser(OWNER);
 
         // 2. Unpause old YS
         oldYS.unpause();
 
         // 3. Emergency withdraw all DOLA from old YS directly to owner
         //    This bypasses clientBalances lookup — sends to owner() directly
-        uint256 dolaBalanceBefore = IERC20(DOLA).balanceOf(msg.sender);
+        uint256 dolaBalanceBefore = IERC20(DOLA).balanceOf(OWNER);
         oldYS.emergencyWithdraw(tvlBefore);
-        uint256 totalWithdrawn = IERC20(DOLA).balanceOf(msg.sender) - dolaBalanceBefore;
+        uint256 totalWithdrawn = IERC20(DOLA).balanceOf(OWNER) - dolaBalanceBefore;
         console.log("Total withdrawn:            ", totalWithdrawn);
 
         // 4. Pause old YS (owner is pauser). Leave pauser as owner — old YS is discarded.
@@ -126,12 +127,12 @@ contract RebalanceTVL is Script {
         // ============================================================
 
         // 6. Swap pauser to owner on minter and unpause (needed for noMintDeposit)
-        minter.setPauser(msg.sender);
+        minter.setPauser(OWNER);
         minter.unpause();
 
         // 7. Deploy new AutoPoolYieldStrategy
         AutoPoolYieldStrategy newYS = new AutoPoolYieldStrategy(
-            msg.sender,
+            OWNER,
             DOLA,
             TOKE,
             AUTO_DOLA_VAULT,
@@ -150,7 +151,7 @@ contract RebalanceTVL is Script {
         minter.approveYS(DOLA, newYSAddr);
 
         // 11. Redeposit all remaining DOLA into new YS via noMintDeposit
-        uint256 remainder = IERC20(DOLA).balanceOf(msg.sender) - dolaBalanceBefore;
+        uint256 remainder = IERC20(DOLA).balanceOf(OWNER) - dolaBalanceBefore;
         console.log("Remainder to redeposit:     ", remainder);
         IERC20(DOLA).approve(PHUSD_STABLE_MINTER, remainder);
         minter.noMintDeposit(newYSAddr, DOLA, remainder);
@@ -171,7 +172,7 @@ contract RebalanceTVL is Script {
         // ============================================================
 
         // 14. Set owner as pauser on new YS (constructor leaves _pauser as address(0))
-        IYieldStrategyPausable(newYSAddr).setPauser(msg.sender);
+        IYieldStrategyPausable(newYSAddr).setPauser(OWNER);
 
         // 15. Pause new YS
         IYieldStrategyPausable(newYSAddr).pause();

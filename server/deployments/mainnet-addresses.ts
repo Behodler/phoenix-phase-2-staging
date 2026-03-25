@@ -7,7 +7,7 @@ import { ContractAddresses } from './addresses';
 export const mainnetAddresses: ContractAddresses = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
-  YieldStrategyDola: "0x01d34d7EF3988C5b981ee06bF0Ba4485Bd8eA20C",
+  YieldStrategyDola: "0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4",
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
   PhlimboEA: "0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4",
   StableYieldAccumulator: "0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E",
