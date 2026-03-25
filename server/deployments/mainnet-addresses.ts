@@ -49,7 +49,11 @@ export const mainnetAddresses: ContractAddresses = {
   DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
   MintPageView: "0x5122cb32aE42AcC2aD5C2071e977C95c08F70141",
 
-  SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD"
+  SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD",
+
+  // ERC4626 YieldStrategy for DOLA (wraps autoDOLA vault directly, no MainRewarder)
+  // PLACEHOLDER: replace after PartialMigrationExecute broadcast
+  YieldStrategyDolaERC4626: "0x0000000000000000000000000000000000000000"
 };
 
 export type MainnetContractName = keyof ContractAddresses;

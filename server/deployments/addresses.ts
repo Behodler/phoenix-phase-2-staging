@@ -36,4 +36,5 @@ export interface ContractAddresses {
   ViewRouter: string;
   DepositPageView: string;
   MintPageView: string;
+  YieldStrategyDolaERC4626?: string;
 }
