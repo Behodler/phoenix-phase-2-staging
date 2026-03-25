@@ -73,7 +73,11 @@
     "mainnet:buy-phusd-dry": "forge script script/interactions/governance/BuyPhUSDWithSUSDS.s.sol:BuyPhUSDWithSUSDS --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
     "mainnet:buy-phusd": "forge script script/interactions/governance/BuyPhUSDWithSUSDS.s.sol:BuyPhUSDWithSUSDS --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "mainnet:rebalance-tvl-dry": "forge script script/interactions/governance/RebalanceTVL.s.sol:RebalanceTVL --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
-    "mainnet:rebalance-tvl": "forge script script/interactions/governance/RebalanceTVL.s.sol:RebalanceTVL --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "mainnet:rebalance-tvl": "forge script script/interactions/governance/RebalanceTVL.s.sol:RebalanceTVL --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:partial-migrate-initiate-dry": "forge script script/interactions/governance/PartialMigrationInitiate.s.sol:PartialMigrationInitiate --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:partial-migrate-initiate": "forge script script/interactions/governance/PartialMigrationInitiate.s.sol:PartialMigrationInitiate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:partial-migrate-execute-dry": "forge script script/interactions/governance/PartialMigrationExecute.s.sol:PartialMigrationExecute --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:partial-migrate-execute": "forge script script/interactions/governance/PartialMigrationExecute.s.sol:PartialMigrationExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
