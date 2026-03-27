@@ -23,10 +23,12 @@ interface IYieldStrategyView {
  *
  *         Steps:
  *         1. Log pre-flight state (minter's principal and totalBalance on AutoPool YS)
- *         2. Temporarily swap AutoPool YS pauser to owner and unpause (totalWithdrawal requires whenNotPaused)
- *         3. Call totalWithdrawal(DOLA, PHUSD_STABLE_MINTER) to initiate Phase 1
- *         4. Re-pause AutoPool YS and restore pauser to global pauser
- *         5. Log confirmation and execution window timestamp
+ *         2. Call totalWithdrawal(DOLA, PHUSD_STABLE_MINTER) to initiate Phase 1
+ *            (contract is unpaused, so no pause manipulation needed)
+ *         3. Log confirmation and execution window timestamp
+ *
+ *         Note: Pausing of minter and AutoPool YS happens in PartialMigrationExecute,
+ *         not here. The system remains unpaused during the 24h waiting period.
  */
 contract PartialMigrationInitiate is Script {
     // Mainnet addresses
@@ -63,20 +65,10 @@ contract PartialMigrationInitiate is Script {
 
         vm.startBroadcast(OWNER);
 
-        // 1. Temporarily swap pauser to owner on AutoPool YS (to unpause for totalWithdrawal)
-        autoPoolYS.setPauser(OWNER);
-
-        // 2. Unpause AutoPool YS (totalWithdrawal has whenNotPaused modifier)
-        autoPoolYS.unpause();
-
-        // 3. Call totalWithdrawal to initiate Phase 1 (24h waiting period)
+        // Call totalWithdrawal to initiate Phase 1 (24h waiting period)
+        // Contract is unpaused, so no pause manipulation needed here.
+        // Pausing happens in PartialMigrationExecute.
         autoPoolYS.totalWithdrawal(DOLA, PHUSD_STABLE_MINTER);
-
-        // 4. Re-pause AutoPool YS
-        autoPoolYS.pause();
-
-        // 5. Restore pauser to global pauser
-        autoPoolYS.setPauser(GLOBAL_PAUSER);
 
         vm.stopBroadcast();
 
