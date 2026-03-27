@@ -52,7 +52,9 @@ export const mainnetAddresses: ContractAddresses = {
   SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD",
 
   // ERC4626 YieldStrategy for DOLA (wraps autoDOLA vault directly, no MainRewarder)
-  // PLACEHOLDER: replace after PartialMigrationExecute broadcast
+  // PLACEHOLDER: replace after running `mainnet:partial-migrate-execute`.
+  // The deployed address is logged to console as: "New ERC4626 YS deployed at: <address>"
+  // Also available in the broadcast JSON at: broadcast/PartialMigrationExecute.s.sol/1/run-latest.json
   YieldStrategyDolaERC4626: "0x0000000000000000000000000000000000000000"
 };
 
