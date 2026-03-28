@@ -79,7 +79,17 @@
     "mainnet:partial-migrate-execute-dry": "forge script script/interactions/governance/PartialMigrationExecute.s.sol:PartialMigrationExecute --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
     "mainnet:partial-migrate-execute": "forge script script/interactions/governance/PartialMigrationExecute.s.sol:PartialMigrationExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "mainnet:activate-erc4626-dry": "forge script script/interactions/governance/ActivateERC4626YieldStrategy.s.sol:ActivateERC4626YieldStrategy --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
-    "mainnet:activate-erc4626": "forge script script/interactions/governance/ActivateERC4626YieldStrategy.s.sol:ActivateERC4626YieldStrategy --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "mainnet:activate-erc4626": "forge script script/interactions/governance/ActivateERC4626YieldStrategy.s.sol:ActivateERC4626YieldStrategy --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:activate-erc4626-usdc-dry": "forge script script/interactions/governance/ActivateERC4626YieldStrategyUSDC.s.sol:ActivateERC4626YieldStrategyUSDC --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:activate-erc4626-usdc": "forge script script/interactions/governance/ActivateERC4626YieldStrategyUSDC.s.sol:ActivateERC4626YieldStrategyUSDC --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:autousdc-migrate-initiate-dry": "forge script script/interactions/governance/AutoUSDC/FullMigrationInitiate.s.sol:FullMigrationInitiate --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:autousdc-migrate-initiate": "forge script script/interactions/governance/AutoUSDC/FullMigrationInitiate.s.sol:FullMigrationInitiate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:autousdc-migrate-execute-dry": "forge script script/interactions/governance/AutoUSDC/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:autousdc-migrate-execute": "forge script script/interactions/governance/AutoUSDC/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:autodola-migrate-initiate-dry": "forge script script/interactions/governance/AutoDOLA/FullMigrationInitiate.s.sol:FullMigrationInitiate --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:autodola-migrate-initiate": "forge script script/interactions/governance/AutoDOLA/FullMigrationInitiate.s.sol:FullMigrationInitiate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:autodola-migrate-execute-dry": "forge script script/interactions/governance/AutoDOLA/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:autodola-migrate-execute": "forge script script/interactions/governance/AutoDOLA/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
