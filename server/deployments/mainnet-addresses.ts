@@ -4,10 +4,15 @@
 // Updated 2026-03-20: NFT addresses patched from progress.1.json after broadcast
 import { ContractAddresses } from './addresses';
 
+
+/*
+  Old YieldStrategyDola: 0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4
+  New YieldStrategyDola: 0xE7aEC21BF6420FF483107adCB9360C4b31d69D78
+*/
 export const mainnetAddresses: ContractAddresses = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
-  YieldStrategyDola: "0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4",
+  YieldStrategyDola: "0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4",// new ERC4626YieldStrategy 0xE7aEC21BF6420FF483107adCB9360C4b31d69D78
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
   PhlimboEA: "0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4",
   StableYieldAccumulator: "0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E",
@@ -19,7 +24,7 @@ export const mainnetAddresses: ContractAddresses = {
   AutoDOLA: "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",
   EYE: "0x155ff1A85F440EE0A382eA949f24CE4E0b751c65",
 
-  YieldStrategyUSDC: "0xf5F91E8240a0320CAC40b799B25F944a61090E5B",// new ERC4626YieldStrategy 0xE7aEC21BF6420FF483107adCB9360C4b31d69D78
+  YieldStrategyUSDC: "0xf5F91E8240a0320CAC40b799B25F944a61090E5B",
   AutoUSDC: "0xa7569A44f348d3D70d8ad5889e50F78E33d80D35",
   MainRewarder: "0x0000000000000000000000000000000000000000",
   MainRewarderUSDC: "0x726104cfbd7ece2d1f5b3654a19109a9e2b6c27b",
