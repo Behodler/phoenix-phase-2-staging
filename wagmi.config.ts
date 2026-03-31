@@ -34,6 +34,7 @@ export default defineConfig({
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',
         'AutoPoolYieldStrategy.sol/AutoPoolYieldStrategy.json',
+        'ERC4626YieldStrategy.sol/ERC4626YieldStrategy.json',
         'Pauser.sol/Pauser.json',
 
         // View contracts for UI polling
