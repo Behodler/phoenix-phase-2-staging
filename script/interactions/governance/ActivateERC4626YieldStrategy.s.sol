@@ -48,7 +48,7 @@ contract ActivateERC4626YieldStrategy is Script {
     // TODO: Fill from PartialMigrationExecute broadcast output.
     // Run `mainnet:partial-migrate-execute` and look for console log:
     // "New ERC4626 YS deployed at: <address>"
-    address constant ERC4626_YS = address(0);
+    address constant ERC4626_YS = 0xE7aEC21BF6420FF483107adCB9360C4b31d69D78;
 
     function run() external {
         // --- Guard: ERC4626_YS must be set before running ---

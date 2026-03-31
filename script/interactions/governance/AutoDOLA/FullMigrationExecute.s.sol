@@ -12,6 +12,7 @@ interface IYieldStrategyPausable {
     function pauser() external view returns (address);
     function totalBalanceOf(address token, address account) external view returns (uint256);
     function principalOf(address token, address account) external view returns (uint256);
+    function paused() external view returns (bool);
     function setClient(address client, bool _auth) external;
     function totalWithdrawal(address token, address client) external;
 }
@@ -22,6 +23,7 @@ interface IMinterPausable {
     function unpause() external;
     function noMintDeposit(address yieldStrategy, address inputToken, uint256 amount) external;
     function approveYS(address token, address yieldStrategy) external;
+    function paused() external view returns (bool);
     function pauser() external view returns (address);
 }
 
@@ -29,6 +31,7 @@ interface IAccumulatorPausable {
     function setPauser(address newPauser) external;
     function pause() external;
     function unpause() external;
+    function paused() external view returns (bool);
     function pauser() external view returns (address);
 }
 
@@ -78,7 +81,7 @@ contract FullMigrationExecute is Script {
     // TODO: Fill from PartialMigrationExecute broadcast output.
     // Run `mainnet:partial-migrate-execute` and look for console log:
     // "New ERC4626 YS deployed at: <address>"
-    address constant ERC4626_YS = address(0);
+    address constant ERC4626_YS = 0xE7aEC21BF6420FF483107adCB9360C4b31d69D78;
 
     function run() external {
         // --- Guard: ERC4626_YS must be set before running ---
@@ -134,7 +137,7 @@ contract FullMigrationExecute is Script {
         // ============================================================
 
         // Unpause AutoPool YS for totalWithdrawal (requires whenNotPaused)
-        autoPoolYS.unpause();
+        if (autoPoolYS.paused()) autoPoolYS.unpause();
 
         // Record owner's DOLA balance before withdrawal
         uint256 dolaBalanceBefore = IERC20(DOLA).balanceOf(OWNER);
@@ -149,21 +152,19 @@ contract FullMigrationExecute is Script {
 
         require(totalReceived > 0, "No DOLA received from withdrawal");
 
-        // Pause AutoPool YS — it is now empty and being retired
-        autoPoolYS.pause();
+        // Restore AutoPool YS pauser
         autoPoolYS.setPauser(originalAutoPoolPauser);
 
         // ============================================================
         // DEPOSIT ALL DOLA INTO EXISTING ERC4626 YS
         // ============================================================
 
-        // ERC4626 YS is paused (from PartialMigrationExecute pauser setup).
-        // Take pauser ownership and unpause for deposit.
+        // Take pauser ownership and unpause for deposit if currently paused.
         erc4626YS.setPauser(OWNER);
-        erc4626YS.unpause();
+        if (erc4626YS.paused()) erc4626YS.unpause();
 
         // Unpause minter for noMintDeposit
-        minter.unpause();
+        if (minter.paused()) minter.unpause();
 
         // Approve DOLA to minter for full deposit
         IERC20(DOLA).approve(PHUSD_STABLE_MINTER, totalReceived);
@@ -176,15 +177,14 @@ contract FullMigrationExecute is Script {
         // RESTORE PAUSE STATES AND PAUSERS
         // ============================================================
 
-        // Re-pause ERC4626 YS and restore its pauser
-        erc4626YS.pause();
+        // Restore ERC4626 YS pauser
         erc4626YS.setPauser(originalERC4626Pauser);
 
         // Minter is already unpaused — restore its pauser
         minter.setPauser(originalMinterPauser);
 
-        // Unpause accumulator and restore its pauser
-        accumulator.unpause();
+        // Unpause accumulator (if paused) and restore its pauser
+        if (accumulator.paused()) accumulator.unpause();
         accumulator.setPauser(originalAccumulatorPauser);
 
         vm.stopBroadcast();

@@ -76,17 +76,9 @@ contract FullMigrationInitiate is Script {
 
         vm.startBroadcast(OWNER);
 
-        // AutoPool YS is paused (from PartialMigrationExecute).
-        // Take pauser ownership and unpause for totalWithdrawal.
-        autoPoolYS.setPauser(OWNER);
-        autoPoolYS.unpause();
-
         // Call totalWithdrawal to initiate Phase 1 (24h waiting period)
+        // AutoPool YS already unpaused manually — no pause management needed.
         autoPoolYS.totalWithdrawal(DOLA, PHUSD_STABLE_MINTER);
-
-        // Restore pauser. Leave unpaused during 24h wait — minter routes
-        // new DOLA deposits to ERC4626 YS, so AutoPool is inactive.
-        autoPoolYS.setPauser(originalPauser);
 
         vm.stopBroadcast();
 
