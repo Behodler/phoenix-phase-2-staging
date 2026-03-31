@@ -89,7 +89,9 @@
     "mainnet:autodola-migrate-initiate-dry": "forge script script/interactions/governance/AutoDOLA/FullMigrationInitiate.s.sol:FullMigrationInitiate --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
     "mainnet:autodola-migrate-initiate": "forge script script/interactions/governance/AutoDOLA/FullMigrationInitiate.s.sol:FullMigrationInitiate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "mainnet:autodola-migrate-execute-dry": "forge script script/interactions/governance/AutoDOLA/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
-    "mainnet:autodola-migrate-execute": "forge script script/interactions/governance/AutoDOLA/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "mainnet:autodola-migrate-execute": "forge script script/interactions/governance/AutoDOLA/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:unpause-ys-dola-dry": "forge script script/interactions/governance/UnPauseYS_Dola.s.sol:UnPauseYS_Dola --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:unpause-ys-dola": "forge script script/interactions/governance/UnPauseYS_Dola.s.sol:UnPauseYS_Dola --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
