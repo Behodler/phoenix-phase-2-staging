@@ -56,7 +56,7 @@ interface IPauser {
  *         4. Deploy new ERC4626YieldStrategy wrapping AutoUSDC vault
  *         5. Configure new YS (client, approveYS) and deposit ALL received USDC via noMintDeposit
  *         6. Leave AutoFinance YS paused (now empty), restore minter and accumulator
- *         7. Set up pauser on new YS and register with global pauser
+ *         7. Set up pauser on new YS, register with global pauser, and unpause
  *         8. Log post-flight verification
  */
 contract FullMigrationExecute is Script {
@@ -184,6 +184,11 @@ contract FullMigrationExecute is Script {
 
         // 16. Register new YS with global pauser (requires newYS.pauser() == GLOBAL_PAUSER)
         IPauser(GLOBAL_PAUSER).register(newYSAddr);
+
+        // 17. Unpause new YS: take pauser ownership, unpause, restore to GLOBAL_PAUSER
+        IYieldStrategyPausable(newYSAddr).setPauser(OWNER);
+        IYieldStrategyPausable(newYSAddr).unpause();
+        IYieldStrategyPausable(newYSAddr).setPauser(GLOBAL_PAUSER);
 
         vm.stopBroadcast();
 
