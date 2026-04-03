@@ -8,6 +8,8 @@ import { ContractAddresses } from './addresses';
 /*
   Old YieldStrategyDola: 0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4
   New YieldStrategyDola: 0xE7aEC21BF6420FF483107adCB9360C4b31d69D78
+  New YieldStrategyUSD: 0x8b4A75290A1C4935eC1dfd990374AC4BD4D33952
+  Old YieldStrategyUSD: 0xf5F91E8240a0320CAC40b799B25F944a61090E5B
 
   note as of 30/03/2026, old is still mapped.
 */
@@ -26,14 +28,11 @@ export const mainnetAddresses: ContractAddresses = {
   AutoDOLA: "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",
   EYE: "0x155ff1A85F440EE0A382eA949f24CE4E0b751c65",
 
-  YieldStrategyUSDC: "0xf5F91E8240a0320CAC40b799B25F944a61090E5B",
+  YieldStrategyUSDC: "0x8b4A75290A1C4935eC1dfd990374AC4BD4D33952",
   AutoUSDC: "0xa7569A44f348d3D70d8ad5889e50F78E33d80D35",
-  MainRewarder: "0x0000000000000000000000000000000000000000",
-  MainRewarderUSDC: "0x726104cfbd7ece2d1f5b3654a19109a9e2b6c27b",
 
   // External tokens
-  USDS: "0x0000000000000000000000000000000000000000",
-  Toke: "0x0000000000000000000000000000000000000000",
+  USDS: "0xdC035D45d973E3EC169d2276DDab16f1e407384F",
   SCX: "0x1B8568FbB47708E9E9D31Ff303254f748805bF21",
   Flax: "0x0cf758D4303295C43CD95e1232f0101ADb3DA9E8",
   WBTC: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
@@ -57,12 +56,6 @@ export const mainnetAddresses: ContractAddresses = {
   MintPageView: "0x5122cb32aE42AcC2aD5C2071e977C95c08F70141",
 
   SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD",
-
-  // ERC4626 YieldStrategy for DOLA (wraps autoDOLA vault directly, no MainRewarder)
-  // PLACEHOLDER: replace after running `mainnet:partial-migrate-execute`.
-  // The deployed address is logged to console as: "New ERC4626 YS deployed at: <address>"
-  // Also available in the broadcast JSON at: broadcast/PartialMigrationExecute.s.sol/1/run-latest.json
-  YieldStrategyDolaERC4626: "0x0000000000000000000000000000000000000000"
 };
 
 export type MainnetContractName = keyof ContractAddresses;

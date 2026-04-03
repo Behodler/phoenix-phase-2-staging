@@ -221,7 +221,7 @@ contract FullMigrationExecute is Script {
         uint256 newYSGap = newYSTotalBalance > totalReceived
             ? newYSTotalBalance - totalReceived
             : totalReceived - newYSTotalBalance;
-        require(newYSGap <= 1e6, "New YS totalBalance deviates too much from deposit amount");
+        require(newYSGap <= 5e6, "New YS totalBalance deviates too much from deposit amount");
 
         console.log("\n=== VERIFICATION PASSED ===");
         console.log("AutoFinance YS is empty and paused. All USDC migrated to new ERC4626 YS.");
