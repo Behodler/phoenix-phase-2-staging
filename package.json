@@ -91,7 +91,11 @@
     "mainnet:autodola-migrate-execute-dry": "forge script script/interactions/governance/AutoDOLA/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
     "mainnet:autodola-migrate-execute": "forge script script/interactions/governance/AutoDOLA/FullMigrationExecute.s.sol:FullMigrationExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "mainnet:unpause-ys-dola-dry": "forge script script/interactions/governance/UnPauseYS_Dola.s.sol:UnPauseYS_Dola --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
-    "mainnet:unpause-ys-dola": "forge script script/interactions/governance/UnPauseYS_Dola.s.sol:UnPauseYS_Dola --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "mainnet:unpause-ys-dola": "forge script script/interactions/governance/UnPauseYS_Dola.s.sol:UnPauseYS_Dola --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:set-discount-rate-dry": "forge script script/interactions/SetDiscountRate.s.sol:SetDiscountRate --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:set-discount-rate": "forge script script/interactions/SetDiscountRate.s.sol:SetDiscountRate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:autousdc-swap-accumulator-dry": "forge script script/interactions/governance/AutoUSDC/SwapAccumulatorUSDCStrategy.s.sol:SwapAccumulatorUSDCStrategy --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:autousdc-swap-accumulator": "forge script script/interactions/governance/AutoUSDC/SwapAccumulatorUSDCStrategy.s.sol:SwapAccumulatorUSDCStrategy --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",

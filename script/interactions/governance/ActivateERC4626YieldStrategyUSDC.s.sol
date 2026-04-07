@@ -48,7 +48,7 @@ contract ActivateERC4626YieldStrategyUSDC is Script {
     // TODO: Fill from FullMigrationExecute (AutoUSDC) broadcast output.
     // Run `mainnet:autousdc-migrate-execute` and look for console log:
     // "New ERC4626 YS deployed at: <address>"
-    address constant ERC4626_YS = address(0);
+    address constant ERC4626_YS = 0x8b4A75290A1C4935eC1dfd990374AC4BD4D33952;
 
     function run() external {
         // --- Guard: ERC4626_YS must be set before running ---
