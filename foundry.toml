@@ -43,3 +43,6 @@ remappings = [
 
 [lint]
 lint_on_build = false
+
+[etherscan]
+mainnet = { key = "${ETHERSCAN_API_KEY}", chain = 1 }
