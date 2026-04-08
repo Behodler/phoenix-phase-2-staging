@@ -7,6 +7,9 @@ export interface ContractAddresses {
   USDC: string;
   USDS: string;
   SUSDS: string;
+    USDe:string;
+    SUSDe:string;
+    YieldStrategyUSDe:string
   Dola: string;
   EYE: string;
   SCX: string;
