@@ -210,7 +210,6 @@ contract RebalanceUSDeExecute is Script {
         usdcYS.unpause();
         IERC20(USDC).approve(PHUSD_STABLE_MINTER, usdcRedeposit);
         minter.noMintDeposit(USDC_YS, USDC, usdcRedeposit);
-        usdcYS.pause();
         usdcYS.setPauser(originalUsdcYSPauser);
         console.log("\nRe-deposited USDC:           ", usdcRedeposit / 1e6);
 
@@ -218,7 +217,6 @@ contract RebalanceUSDeExecute is Script {
         dolaYS.unpause();
         IERC20(DOLA).approve(PHUSD_STABLE_MINTER, dolaRedeposit);
         minter.noMintDeposit(DOLA_YS, DOLA, dolaRedeposit);
-        dolaYS.pause();
         dolaYS.setPauser(originalDolaYSPauser);
         console.log("Re-deposited DOLA:           ", dolaRedeposit / 1e18);
 
@@ -281,7 +279,6 @@ contract RebalanceUSDeExecute is Script {
         usdeYS.unpause();
         IERC20(USDE).approve(PHUSD_STABLE_MINTER, totalUsde);
         minter.noMintDeposit(USDE_YS, USDE, totalUsde);
-        usdeYS.pause();
         usdeYS.setPauser(originalUsdeYSPauser);
         console.log("\nDeposited USDe into USDeYS:  ", totalUsde);
 
