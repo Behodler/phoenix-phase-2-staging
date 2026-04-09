@@ -102,7 +102,11 @@
     "mainnet:set-discount-rate": "forge script script/interactions/SetDiscountRate.s.sol:SetDiscountRate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "mainnet:autousdc-swap-accumulator-dry": "forge script script/interactions/governance/AutoUSDC/SwapAccumulatorUSDCStrategy.s.sol:SwapAccumulatorUSDCStrategy --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
     "mainnet:autousdc-swap-accumulator": "forge script script/interactions/governance/AutoUSDC/SwapAccumulatorUSDCStrategy.s.sol:SwapAccumulatorUSDCStrategy --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
-    "test:integration-erc4626-market-usde":"forge test --fork-url $RPC_MAINNET --match-contract ERC4626MarketYieldStrategy_USDeFork -vvv"
+    "test:integration-erc4626-market-usde":"forge test --fork-url $RPC_MAINNET --match-contract ERC4626MarketYieldStrategy_USDeFork -vvv",
+    "mainnet:rebalance-usde-initiate-dry": "forge script script/interactions/governance/RebalanceUSDeInitiate.s.sol:RebalanceUSDeInitiate --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:rebalance-usde-initiate": "forge script script/interactions/governance/RebalanceUSDeInitiate.s.sol:RebalanceUSDeInitiate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "mainnet:rebalance-usde-execute-dry": "forge script script/interactions/governance/RebalanceUSDeExecute.s.sol:RebalanceUSDeExecute --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
+    "mainnet:rebalance-usde-execute": "forge script script/interactions/governance/RebalanceUSDeExecute.s.sol:RebalanceUSDeExecute --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
