@@ -10,8 +10,14 @@ interface IYieldStrategy {
     function pause() external;
     function unpause() external;
     function pauser() external view returns (address);
-    function totalBalanceOf(address token, address account) external view returns (uint256);
-    function principalOf(address token, address account) external view returns (uint256);
+    function totalBalanceOf(
+        address token,
+        address account
+    ) external view returns (uint256);
+    function principalOf(
+        address token,
+        address account
+    ) external view returns (uint256);
     function totalWithdrawal(address token, address client) external;
 }
 
@@ -20,7 +26,11 @@ interface IMinter {
     function pause() external;
     function unpause() external;
     function pauser() external view returns (address);
-    function noMintDeposit(address yieldStrategy, address inputToken, uint256 amount) external;
+    function noMintDeposit(
+        address yieldStrategy,
+        address inputToken,
+        uint256 amount
+    ) external;
 }
 
 interface IAccumulator {
@@ -64,9 +74,11 @@ contract RebalanceUSDeExecute is Script {
     address constant USDE_YS = 0xFc629bC5F6339F77635f4F656FBb114A31F7bCB3;
 
     // ── Core Protocol ──
-    address constant PHUSD_STABLE_MINTER     = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
-    address constant STABLE_YIELD_ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
-    address constant GLOBAL_PAUSER           = 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3;
+    address constant PHUSD_STABLE_MINTER =
+        0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
+    address constant STABLE_YIELD_ACCUMULATOR =
+        0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address constant GLOBAL_PAUSER = 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3;
 
     // ── Tokens ──
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // 6 decimals
@@ -76,13 +88,18 @@ contract RebalanceUSDeExecute is Script {
     address constant SUSDS = 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD; // verified on-chain
 
     // ── Curve Infrastructure ──
-    address constant CURVE_ROUTER_NG = 0x16C6521Dff6baB339122a0FE25a9116693265353;
+    address constant CURVE_ROUTER_NG =
+        0x16C6521Dff6baB339122a0FE25a9116693265353;
 
     // Curve Pools
-    address constant POOL_USDC_USDE      = 0x02950460E2b9529D0E00284A5fA2d7bDF3fA4d72; // coin0=USDe, coin1=USDC
-    address constant POOL_DOLA_SUSDS     = 0x8b83c4aA949254895507D09365229BC3a8c7f710; // coin0=DOLA, coin1=sUSDS
-    address constant POOL_SUSDS_USDT     = 0x00836Fe54625BE242BcFA286207795405ca4fD10; // coin0=sUSDS, coin1=USDT
-    address constant POOL_USDT_USDE      = 0x5B03CcCAb7BA3010fA5CAd23746cbf0794938e96; // coin0=USDT, coin1=USDe
+    address constant POOL_USDC_USDE =
+        0x02950460E2b9529D0E00284A5fA2d7bDF3fA4d72; // coin0=USDe, coin1=USDC
+    address constant POOL_DOLA_SUSDS =
+        0x8b83c4aA949254895507D09365229BC3a8c7f710; // coin0=DOLA, coin1=sUSDS
+    address constant POOL_SUSDS_USDT =
+        0x00836Fe54625BE242BcFA286207795405ca4fD10; // coin0=sUSDS, coin1=USDT
+    address constant POOL_USDT_USDE =
+        0x5B03CcCAb7BA3010fA5CAd23746cbf0794938e96; // coin0=USDT, coin1=USDe
 
     // ── Accounts ──
     address constant OWNER = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
@@ -98,12 +115,30 @@ contract RebalanceUSDeExecute is Script {
         // ============================================================
         // PRE-FLIGHT LOGGING
         // ============================================================
-        uint256 usdcPrincipalBefore = usdcYS.principalOf(USDC, PHUSD_STABLE_MINTER);
-        uint256 usdcTotalBalBefore = usdcYS.totalBalanceOf(USDC, PHUSD_STABLE_MINTER);
-        uint256 dolaPrincipalBefore = dolaYS.principalOf(DOLA, PHUSD_STABLE_MINTER);
-        uint256 dolaTotalBalBefore = dolaYS.totalBalanceOf(DOLA, PHUSD_STABLE_MINTER);
-        uint256 usdePrincipalBefore = usdeYS.principalOf(USDE, PHUSD_STABLE_MINTER);
-        uint256 usdeTotalBalBefore = usdeYS.totalBalanceOf(USDE, PHUSD_STABLE_MINTER);
+        uint256 usdcPrincipalBefore = usdcYS.principalOf(
+            USDC,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 usdcTotalBalBefore = usdcYS.totalBalanceOf(
+            USDC,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 dolaPrincipalBefore = dolaYS.principalOf(
+            DOLA,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 dolaTotalBalBefore = dolaYS.totalBalanceOf(
+            DOLA,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 usdePrincipalBefore = usdeYS.principalOf(
+            USDE,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 usdeTotalBalBefore = usdeYS.totalBalanceOf(
+            USDE,
+            PHUSD_STABLE_MINTER
+        );
 
         address originalUsdcYSPauser = usdcYS.pauser();
         address originalDolaYSPauser = dolaYS.pauser();
@@ -174,7 +209,8 @@ contract RebalanceUSDeExecute is Script {
         usdcYS.unpause();
         uint256 usdcBalanceBefore = IERC20(USDC).balanceOf(OWNER);
         usdcYS.totalWithdrawal(USDC, PHUSD_STABLE_MINTER);
-        uint256 usdcReceived = IERC20(USDC).balanceOf(OWNER) - usdcBalanceBefore;
+        uint256 usdcReceived = IERC20(USDC).balanceOf(OWNER) -
+            usdcBalanceBefore;
         usdcYS.pause();
         console.log("\nUSDC received from withdrawal:", usdcReceived);
         console.log("USDC received (USDC):        ", usdcReceived / 1e6);
@@ -183,15 +219,16 @@ contract RebalanceUSDeExecute is Script {
         dolaYS.unpause();
         uint256 dolaBalanceBefore = IERC20(DOLA).balanceOf(OWNER);
         dolaYS.totalWithdrawal(DOLA, PHUSD_STABLE_MINTER);
-        uint256 dolaReceived = IERC20(DOLA).balanceOf(OWNER) - dolaBalanceBefore;
+        uint256 dolaReceived = IERC20(DOLA).balanceOf(OWNER) -
+            dolaBalanceBefore;
         dolaYS.pause();
         console.log("DOLA received from withdrawal:", dolaReceived);
         console.log("DOLA received (DOLA):        ", dolaReceived / 1e18);
 
         // --- Calculate 85%/15% splits ---
-        uint256 usdcRedeposit = usdcReceived * 85 / 100;
+        uint256 usdcRedeposit = (usdcReceived * 85) / 100;
         uint256 usdcToSwap = usdcReceived - usdcRedeposit;
-        uint256 dolaRedeposit = dolaReceived * 85 / 100;
+        uint256 dolaRedeposit = (dolaReceived * 85) / 100;
         uint256 dolaToSwap = dolaReceived - dolaRedeposit;
 
         console.log("\nUSDC redeposit (85%):        ", usdcRedeposit);
@@ -237,11 +274,18 @@ contract RebalanceUSDeExecute is Script {
 
         address[5] memory emptyPools;
 
-        // Slippage: 0.1% with 6->18 decimal conversion
-        uint256 minUsdeFromUsdc = uint256(usdcToSwap) * 1e12 * 999 / 1000;
+        // Slippage: 0.2% with 6->18 decimal conversion (single hop, tight is fine)
+        uint256 minUsdeFromUsdc = (uint256(usdcToSwap) * 1e12 * 998) / 1000;
 
         IERC20(USDC).approve(CURVE_ROUTER_NG, usdcToSwap);
-        uint256 usdeFromUsdc = router.exchange(usdcPath, usdcSwapParams, usdcToSwap, minUsdeFromUsdc, emptyPools, OWNER);
+        uint256 usdeFromUsdc = router.exchange(
+            usdcPath,
+            usdcSwapParams,
+            usdcToSwap,
+            minUsdeFromUsdc,
+            emptyPools,
+            OWNER
+        );
         console.log("\nUSDe from USDC swap:         ", usdeFromUsdc);
 
         // --- DOLA -> USDe (3-hop: DOLA -> sUSDS -> USDT -> USDe) ---
@@ -262,11 +306,18 @@ contract RebalanceUSDeExecute is Script {
         dolaSwapParams[1] = [uint256(0), 1, 1, 10, 2]; // hop 2: sUSDS(0)->USDT(1), exchange, stableswap-ng, 2
         dolaSwapParams[2] = [uint256(0), 1, 1, 10, 2]; // hop 3: USDT(0)->USDe(1), exchange, stableswap-ng, 2
 
-        // Slippage: 0.1% (both 18 decimals)
-        uint256 minUsdeFromDola = dolaToSwap * 999 / 1000;
+        // Slippage: 1% (3-hop route: DOLA->sUSDS->USDT->USDe accumulates ~0.8% in fees/impact)
+        uint256 minUsdeFromDola = (dolaToSwap * 990) / 1000;
 
         IERC20(DOLA).approve(CURVE_ROUTER_NG, dolaToSwap);
-        uint256 usdeFromDola = router.exchange(dolaPath, dolaSwapParams, dolaToSwap, minUsdeFromDola, emptyPools, OWNER);
+        uint256 usdeFromDola = router.exchange(
+            dolaPath,
+            dolaSwapParams,
+            dolaToSwap,
+            minUsdeFromDola,
+            emptyPools,
+            OWNER
+        );
         console.log("USDe from DOLA swap:         ", usdeFromDola);
 
         uint256 totalUsde = usdeFromUsdc + usdeFromDola;
@@ -299,12 +350,30 @@ contract RebalanceUSDeExecute is Script {
         // PHASE G - POST-FLIGHT VERIFICATION
         // ============================================================
 
-        uint256 usdcPrincipalAfter = usdcYS.principalOf(USDC, PHUSD_STABLE_MINTER);
-        uint256 usdcTotalBalAfter = usdcYS.totalBalanceOf(USDC, PHUSD_STABLE_MINTER);
-        uint256 dolaPrincipalAfter = dolaYS.principalOf(DOLA, PHUSD_STABLE_MINTER);
-        uint256 dolaTotalBalAfter = dolaYS.totalBalanceOf(DOLA, PHUSD_STABLE_MINTER);
-        uint256 usdePrincipalAfter = usdeYS.principalOf(USDE, PHUSD_STABLE_MINTER);
-        uint256 usdeTotalBalAfter = usdeYS.totalBalanceOf(USDE, PHUSD_STABLE_MINTER);
+        uint256 usdcPrincipalAfter = usdcYS.principalOf(
+            USDC,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 usdcTotalBalAfter = usdcYS.totalBalanceOf(
+            USDC,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 dolaPrincipalAfter = dolaYS.principalOf(
+            DOLA,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 dolaTotalBalAfter = dolaYS.totalBalanceOf(
+            DOLA,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 usdePrincipalAfter = usdeYS.principalOf(
+            USDE,
+            PHUSD_STABLE_MINTER
+        );
+        uint256 usdeTotalBalAfter = usdeYS.totalBalanceOf(
+            USDE,
+            PHUSD_STABLE_MINTER
+        );
 
         console.log("\n=== Post-flight Verification ===");
 
@@ -325,32 +394,51 @@ contract RebalanceUSDeExecute is Script {
         console.log("TotalBalance after (wei):   ", usdeTotalBalAfter);
 
         // Assert USDC YS principal == usdcRedeposit
-        require(usdcPrincipalAfter == usdcRedeposit, "USDC YS principal mismatch: should be 85% of withdrawn");
+        require(
+            usdcPrincipalAfter == usdcRedeposit,
+            "USDC YS principal mismatch: should be 85% of withdrawn"
+        );
 
         // Assert DOLA YS principal == dolaRedeposit
-        require(dolaPrincipalAfter == dolaRedeposit, "DOLA YS principal mismatch: should be 85% of withdrawn");
+        require(
+            dolaPrincipalAfter == dolaRedeposit,
+            "DOLA YS principal mismatch: should be 85% of withdrawn"
+        );
 
         // Assert USDe YS principal increased
-        require(usdePrincipalAfter > usdePrincipalBefore, "USDe YS principal did not increase");
+        require(
+            usdePrincipalAfter > usdePrincipalBefore,
+            "USDe YS principal did not increase"
+        );
 
         // --- TVL comparison ---
         // Normalize all to 18 decimals for comparison
-        uint256 tvlBefore = uint256(usdcTotalBalBefore) * 1e12 + dolaTotalBalBefore + usdeTotalBalBefore;
-        uint256 tvlAfter = uint256(usdcTotalBalAfter) * 1e12 + dolaTotalBalAfter + usdeTotalBalAfter;
+        uint256 tvlBefore = uint256(usdcTotalBalBefore) *
+            1e12 +
+            dolaTotalBalBefore +
+            usdeTotalBalBefore;
+        uint256 tvlAfter = uint256(usdcTotalBalAfter) *
+            1e12 +
+            dolaTotalBalAfter +
+            usdeTotalBalAfter;
 
         console.log("\n--- TVL Comparison (18-decimal normalized) ---");
         console.log("TVL before:                 ", tvlBefore);
         console.log("TVL after:                  ", tvlAfter);
 
         // 0.3% tolerance
-        uint256 tolerance = tvlBefore * 3 / 1000;
-        uint256 tvlDiff = tvlAfter > tvlBefore ? tvlAfter - tvlBefore : tvlBefore - tvlAfter;
+        uint256 tolerance = (tvlBefore * 3) / 1000;
+        uint256 tvlDiff = tvlAfter > tvlBefore
+            ? tvlAfter - tvlBefore
+            : tvlBefore - tvlAfter;
         console.log("TVL difference:             ", tvlDiff);
         console.log("Tolerance (0.3%):           ", tolerance);
         require(tvlDiff <= tolerance, "TVL drift exceeds 0.3% tolerance");
 
         console.log("\n=== VERIFICATION PASSED ===");
-        console.log("USDC YS re-deposited 85%. DOLA YS re-deposited 85%. USDe deposited into USDeYS.");
+        console.log(
+            "USDC YS re-deposited 85%. DOLA YS re-deposited 85%. USDe deposited into USDeYS."
+        );
         console.log("");
     }
 }

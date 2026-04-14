@@ -11,7 +11,7 @@ interface IStableYieldAccumulator {
 
 /**
  * @title SetDiscountRate
- * @notice Sets the discount rate on the mainnet StableYieldAccumulator from 20% to 30%.
+ * @notice Sets the discount rate on the mainnet StableYieldAccumulator from 30% to 35%.
  *
  * Usage (dry run):
  *   npm run mainnet:set-discount-rate-dry
@@ -23,8 +23,8 @@ contract SetDiscountRate is Script {
     address constant OWNER = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
     address constant STABLE_YIELD_ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
 
-    uint256 constant EXPECTED_CURRENT_RATE = 2000; // 20%
-    uint256 constant NEW_RATE = 3000; // 30%
+    uint256 constant EXPECTED_CURRENT_RATE = 3000; // 30%
+    uint256 constant NEW_RATE = 3500; // 35%
 
     function run() external {
         IStableYieldAccumulator sya = IStableYieldAccumulator(STABLE_YIELD_ACCUMULATOR);
@@ -38,12 +38,12 @@ contract SetDiscountRate is Script {
         console.log("Expected current rate (bps):", EXPECTED_CURRENT_RATE);
         console.log("New discount rate (bps):    ", NEW_RATE);
 
-        require(currentRate == EXPECTED_CURRENT_RATE, "Current discount rate is not 20% (2000 bps) as expected");
+        require(currentRate == EXPECTED_CURRENT_RATE, "Current discount rate is not 30% (3000 bps) as expected");
 
         vm.startBroadcast(OWNER);
 
         sya.setDiscountRate(NEW_RATE);
-        console.log("\n[Step 1] setDiscountRate(3000) called");
+        console.log("\n[Step 1] setDiscountRate(3500) called");
 
         vm.stopBroadcast();
 
@@ -51,9 +51,9 @@ contract SetDiscountRate is Script {
         uint256 updatedRate = sya.discountRate();
         console.log("\n=== Post-flight Verification ===");
         console.log("Updated discount rate (bps):", updatedRate);
-        require(updatedRate == NEW_RATE, "Discount rate was not updated to 30% (3000 bps)");
+        require(updatedRate == NEW_RATE, "Discount rate was not updated to 35% (3500 bps)");
 
         console.log("\n=== SetDiscountRate Complete ===");
-        console.log("Discount rate changed from 20% to 30%.");
+        console.log("Discount rate changed from 30% to 35%.");
     }
 }
