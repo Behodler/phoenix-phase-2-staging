@@ -4,57 +4,22 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import "@vault/imports/Legacy/IAutoDOLA.sol";
 import "./MockDola.sol";
 
 /**
  * @title MockAutoDOLA
- * @notice Mock implementation of IAutoDOLA interface for testing AutoDolaYieldStrategy
- * @dev Implements full IAutoDOLA interface (extends ERC4626) with MainRewarder integration
- *      This mocks Tokemak's AutoDOLA vault for local development and testing
+ * @notice Generic ERC4626 vault mock used to stand in for production AutoDola /
+ *         AutoUSDC-style vaults on Anvil and Sepolia.
+ * @dev Pure ERC4626 with a simple time-based yield simulation. No external
+ *      staking / reward layer — the going-forward ERC4626YieldStrategy wraps
+ *      the vault directly.
  */
-contract MockAutoDOLA is ERC4626, IAutoDOLA {
+contract MockAutoDOLA is ERC4626 {
     // Yield simulation state
     uint256 private lastYieldTimestamp;
 
-    // MainRewarder reference
-    address private _rewarder;
-
     constructor(address _asset) ERC4626(IERC20(_asset)) ERC20("Mock AutoDOLA", "mAutoDOLA") {
         // ERC4626 automatically handles the asset
-    }
-
-    /**
-     * @notice Set the MainRewarder address (called after deployment)
-     * @param rewarderAddress The address of the MockMainRewarder contract
-     */
-    function setRewarder(address rewarderAddress) external {
-        require(_rewarder == address(0), "MockAutoDOLA: rewarder already set");
-        _rewarder = rewarderAddress;
-    }
-
-    // ============ IAutoDOLA Interface Implementation ============
-
-    /**
-     * @notice Returns the MainRewarder contract address for TOKE rewards
-     * @return The address of the MainRewarder contract
-     */
-    function rewarder() external view override returns (address) {
-        return _rewarder;
-    }
-
-    /**
-     * @notice Returns information about the underlying asset and vault
-     * @return assetAddress The underlying DOLA token address
-     * @return vaultSymbol The vault symbol
-     * @return vaultName The vault name
-     */
-    function getVaultInfo() external view override returns (
-        address assetAddress,
-        string memory vaultSymbol,
-        string memory vaultName
-    ) {
-        return (asset(), symbol(), name());
     }
 
     // ============ ERC4626 Overrides for Yield Simulation ============
@@ -63,7 +28,7 @@ contract MockAutoDOLA is ERC4626, IAutoDOLA {
      * @notice Override totalAssets to include yield simulation
      * @dev ERC4626 uses this for share/asset conversions
      */
-    function totalAssets() public view override(ERC4626, IERC4626) returns (uint256) {
+    function totalAssets() public view override returns (uint256) {
         return IERC20(asset()).balanceOf(address(this));
     }
 
