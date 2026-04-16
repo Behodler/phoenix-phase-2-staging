@@ -8,7 +8,7 @@ Design an oracle-free yield strategy that encapsulates a Uniswap V4 stable pool 
 
 Currently on mainnet:
 - StableMinter accepts 1 DOLA → mints 1 phUSD
-- DOLA deposited into AutoDolaYieldStrategy
+- DOLA deposited into ERC4626YieldStrategy (wrapping the AutoDola ERC4626 vault)
 - Yield distributed via StableYieldAccumulator → Phlimbo
 
 This plan explores an alternative yield source using Uniswap V4 LP positions.
@@ -303,8 +303,8 @@ Fees only. No mark-to-market gains/losses reported as yield.
 
 ## Comparison: AutoDola vs UniV4Stable
 
-| Aspect | AutoDolaYieldStrategy | UniV4StableYieldStrategy |
-|--------|----------------------|--------------------------|
+| Aspect | ERC4626YieldStrategy (AutoDola) | UniV4StableYieldStrategy |
+|--------|---------------------------------|--------------------------|
 | Yield source | Lending (Inverse) | LP fees (Uniswap V4) |
 | Risk profile | Lending/liquidation risk | IL risk (minimal for stables) |
 | Oracle dependency | None (vault tracks) | None (stability assumption) |

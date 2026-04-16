@@ -107,7 +107,7 @@ These secondary contracts may already exist on the target chain or may need to b
 - `principalOf(address token, address account)` - Returns deposited principal
 
 **Deployment Decision**:
-- On mainnet: Use real yield strategies (e.g., AutoDolaYieldStrategy for Inverse Finance)
+- On mainnet: Use real yield strategies (e.g., ERC4626YieldStrategy wrapping the AutoDola ERC4626 vault for Inverse Finance)
 - On testnets/local: Deploy mock yield strategies with simulated yield generation
 
 ### Reward Token (e.g., USDC)
