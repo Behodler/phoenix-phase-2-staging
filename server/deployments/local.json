@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-03-19T01:07:53.326Z",
+  "extractedAt": "2026-04-16T15:13:15.467Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -106,7 +106,7 @@
       "address": "0x9A9f2CCfdE556A7E9Ff0848998Aa4a0CFD8863AE",
       "deployed": true,
       "configured": true,
-      "deployGas": 1315539,
+      "deployGas": 1315530,
       "configGas": 0
     },
     "MainRewarderUSDC": {
@@ -158,18 +158,62 @@
       "deployGas": 516864,
       "configGas": 0
     },
-    "NFTMinter": {
-      "address": "0x09635F643e140090A9A8Dcd712eD6285858ceBef",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 2566651,
-      "configGas": 0
-    },
     "BurnRecorder": {
       "address": "0xc5a5C42992dECbae36851359345FE25997F5C42d",
       "deployed": true,
       "configured": true,
-      "deployGas": 368783,
+      "deployGas": 368765,
+      "configGas": 0
+    },
+    "BalancerRouter": {
+      "address": "0xf5059a5D33d5853360D16C683c16e67980206f36",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 191962,
+      "configGas": 0
+    },
+    "NFTMigrator": {
+      "address": "0x7bc06c482DEAd17c0e297aFbC32f6e63d3846650",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 660479,
+      "configGas": 0
+    },
+    "DepositView": {
+      "address": "0xab16A69A5a8c12C732e0DEFF4BE56A70bb64c926",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "ViewRouter": {
+      "address": "0xE3011A37A904aB90C8881a99BD1F6E21401f1522",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 516127,
+      "configGas": 0
+    },
+    "DepositPageView": {
+      "address": "0x1f10F3Ba7ACB61b2F50B9d6DdCf91a6f787C0E82",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 592308,
+      "configGas": 0
+    },
+    "MintPageView": {
+      "address": "0x525C7063E7C20997BaaE9bDa922159152D0e8417",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1722841,
+      "configGas": 0
+    }
+  },
+  "nftsV1": {
+    "NFTMinter": {
+      "address": "0x09635F643e140090A9A8Dcd712eD6285858ceBef",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2584483,
       "configGas": 0
     },
     "BurnerEYE": {
@@ -197,42 +241,58 @@
       "address": "0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB",
       "deployed": true,
       "configured": true,
-      "deployGas": 1337942,
+      "deployGas": 1341124,
       "configGas": 0
     },
     "GatherWBTC": {
       "address": "0x9E545E3C0baAB3E08CdfD552C960A1050f373042",
       "deployed": true,
       "configured": true,
-      "deployGas": 981929,
+      "deployGas": 993752,
       "configGas": 0
-    },
-    "DepositView": {
-      "address": "0x2B0d36FACD61B71CC05ab8F3D2355ec3631C0dd5",
+    }
+  },
+  "nftsV2": {
+    "NFTMinter": {
+      "address": "0x95401dc811bb5740090279Ba06cfA8fcF6113778",
       "deployed": true,
       "configured": true,
-      "deployGas": 0,
+      "deployGas": 2741055,
       "configGas": 0
     },
-    "ViewRouter": {
-      "address": "0xfbC22278A96299D91d41C453234d97b4F5Eb9B2d",
+    "BurnerEYE": {
+      "address": "0x998abeb3E57409262aE5b751f60747921B33613E",
       "deployed": true,
       "configured": true,
-      "deployGas": 516075,
+      "deployGas": 934461,
       "configGas": 0
     },
-    "DepositPageView": {
-      "address": "0x46b142DD1E924FAb83eCc3c08e4D46E82f005e0E",
+    "BurnerSCX": {
+      "address": "0x70e0bA845a1A0F2DA3359C97E0285013525FFC49",
       "deployed": true,
       "configured": true,
-      "deployGas": 592252,
+      "deployGas": 934446,
       "configGas": 0
     },
-    "MintPageView": {
-      "address": "0x1c85638e118b37167e9298c2268758e058DdfDA0",
+    "BurnerFlax": {
+      "address": "0x4826533B4897376654Bb4d4AD88B7faFD0C98528",
       "deployed": true,
       "configured": true,
-      "deployGas": 1722304,
+      "deployGas": 934455,
+      "configGas": 0
+    },
+    "BalancerPooler": {
+      "address": "0x99bbA657f2BbC93c02D617f8bA121cB8Fc104Acf",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1959567,
+      "configGas": 0
+    },
+    "GatherWBTC": {
+      "address": "0x0E801D84Fa97b50751Dbf25036d067dCf18858bF",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 993752,
       "configGas": 0
     }
   }
