@@ -3,9 +3,9 @@
 // Chain ID: 1 (mainnet)
 // NOTE: NFT contract addresses are placeholders until broadcast is executed.
 //       Replace with actual addresses from progress.1.json after deployment.
-import { ContractAddresses } from './addresses';
+// NOTE: Backup file - does not conform to current ContractAddresses interface
 
-export const mainnetAddresses: ContractAddresses = {
+export const mainnetAddressesBackup = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
   YieldStrategyDola: "0x01d34d7EF3988C5b981ee06bF0Ba4485Bd8eA20C",

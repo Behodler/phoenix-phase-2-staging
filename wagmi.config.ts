@@ -26,10 +26,17 @@ export default defineConfig({
         'NFTMinter.sol/NFTMinter.json',
         'BurnRecorder.sol/BurnRecorder.json',
 
-        // Dispatchers
+        // V1 Dispatchers
         'BalancerPooler.sol/BalancerPooler.json',
         'Burner.sol/Burner.json',
         'Gather.sol/Gather.json',
+
+        // V2 NFT Minter infrastructure
+        'NFTMinterV2.sol/NFTMinterV2.json',
+        'BurnerV2.sol/BurnerV2.json',
+        'BalancerPoolerV2.sol/BalancerPoolerV2.json',
+        'GatherV2.sol/GatherV2.json',
+        'NFTMigrator.sol/NFTMigrator.json',
 
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',

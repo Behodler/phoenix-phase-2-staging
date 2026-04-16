@@ -36,7 +36,7 @@ const CHAIN_NAME_MAP = {
     1: 'mainnet'
 };
 
-function generateInterfaceFile(chainId, inputFile, contracts) {
+function generateInterfaceFile(chainId, inputFile, contracts, nftsV1, nftsV2) {
     const interfacePath = path.join(__dirname, 'deployments', 'addresses.ts');
     const networkName = CHAIN_NAME_MAP[chainId];
     const timestamp = new Date().toISOString();
@@ -46,11 +46,29 @@ function generateInterfaceFile(chainId, inputFile, contracts) {
     lines.push(`// Chain ID: ${chainId} (${networkName})`);
     lines.push('// This interface can be copied directly into UI projects');
     lines.push('');
+
+    // Generate YieldNFTAddresses sub-interface from nftsV1 keys (or nftsV2 — same shape)
+    const nftKeys = Object.keys(nftsV1).length > 0 ? Object.keys(nftsV1) : Object.keys(nftsV2);
+    if (nftKeys.length > 0) {
+        lines.push('export interface YieldNFTAddresses {');
+        nftKeys.forEach((name) => {
+            lines.push(`  ${name}: string;`);
+        });
+        lines.push('}');
+        lines.push('');
+    }
+
     lines.push('export interface ContractAddresses {');
 
     contracts.forEach(([name]) => {
         lines.push(`  ${name}: string;`);
     });
+
+    // Add nested nftsV1/nftsV2 fields
+    if (nftKeys.length > 0) {
+        lines.push('  nftsV1: YieldNFTAddresses;');
+        lines.push('  nftsV2: YieldNFTAddresses;');
+    }
 
     lines.push('}');
 
@@ -90,10 +108,12 @@ function generateTsAddresses(chainId) {
     const data = JSON.parse(fs.readFileSync(inputPath, 'utf-8'));
 
     const contracts = Object.entries(data.contracts || {});
+    const nftsV1 = data.nftsV1 || {};
+    const nftsV2 = data.nftsV2 || {};
 
     // For local/anvil, generate the interface file first
     if (chainId === 31337) {
-        generateInterfaceFile(chainId, inputFile, contracts);
+        generateInterfaceFile(chainId, inputFile, contracts, nftsV1, nftsV2);
     }
 
     // Build TypeScript object literal
@@ -111,10 +131,30 @@ function generateTsAddresses(chainId) {
         lines.push(`export const ${networkName}Addresses = {`);
     }
 
-    contracts.forEach(([name, contract], index) => {
-        const comma = index < contracts.length - 1 ? ',' : '';
-        lines.push(`  ${name}: "${contract.address}"${comma}`);
+    // Write flat contracts
+    contracts.forEach(([name, contract]) => {
+        lines.push(`  ${name}: "${contract.address}",`);
     });
+
+    // Write nested nftsV1
+    const v1Entries = Object.entries(nftsV1);
+    if (v1Entries.length > 0) {
+        lines.push('  nftsV1: {');
+        v1Entries.forEach(([name, contract]) => {
+            lines.push(`    ${name}: "${contract.address}",`);
+        });
+        lines.push('  },');
+    }
+
+    // Write nested nftsV2
+    const v2Entries = Object.entries(nftsV2);
+    if (v2Entries.length > 0) {
+        lines.push('  nftsV2: {');
+        v2Entries.forEach(([name, contract]) => {
+            lines.push(`    ${name}: "${contract.address}",`);
+        });
+        lines.push('  },');
+    }
 
     lines.push('};');
     lines.push('');

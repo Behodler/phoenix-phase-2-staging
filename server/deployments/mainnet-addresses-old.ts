@@ -1,8 +1,8 @@
 // Generated from mainnet.json on 2026-01-29
 // Chain ID: 1 (mainnet)
-import { ContractAddresses } from './addresses';
+// NOTE: This is an old backup file - does not conform to current ContractAddresses interface
 
-export const mainnetAddresses: ContractAddresses = {
+export const mainnetAddressesOld = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
   YieldStrategyDola: "0x01d34d7EF3988C5b981ee06bF0Ba4485Bd8eA20C",

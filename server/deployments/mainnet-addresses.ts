@@ -2,6 +2,7 @@
 // Updated 2026-03-20 for NFT infrastructure redeployment (WBTC address fix)
 // Chain ID: 1 (mainnet)
 // Updated 2026-03-20: NFT addresses patched from progress.1.json after broadcast
+// Updated 2026-04-16: Restructured for NFT V2 (nftsV1/nftsV2 sub-objects)
 import { ContractAddresses } from './addresses';
 
 
@@ -30,8 +31,11 @@ export const mainnetAddresses: ContractAddresses = {
   // External protocol contracts
   USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   Dola: "0x865377367054516e17014CcdED1e7d814EDC9ce4",
+  Toke: "0x0000000000000000000000000000000000000000",
   AutoDOLA: "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",
+  MainRewarder: "0x0000000000000000000000000000000000000000",
   AutoUSDC: "0xa7569A44f348d3D70d8ad5889e50F78E33d80D35",
+  MainRewarderUSDC: "0x0000000000000000000000000000000000000000",
 
   // External tokens
   USDS: "0xdC035D45d973E3EC169d2276DDab16f1e407384F",
@@ -46,15 +50,31 @@ export const mainnetAddresses: ContractAddresses = {
   // Balancer V3 infrastructure
   BalancerPool: "0x5b26d938f0be6357c39e936cc9c2277b9334ea58",
   BalancerVault: "0xbA1333333333a1BA1108E8412f11850A5C319bA9",
+  BalancerRouter: "0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd",
 
-  // NFT infrastructure
-  NFTMinter: "0xd936461f1C15eA9f34Ca1F20ecD54A0819068811",
+  // NFT infrastructure — common
   BurnRecorder: "0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F",
-  BurnerEYE: "0xA592e074f990c87E10b3Bba1DACFB9187899575b",
-  BurnerSCX: "0xbe2fbBb49b26C20E3aEE3b0608cB5116aeD5d297",
-  BurnerFlax: "0xD3B630cBA76AEA5Aadb4cB71732227E073C8338C",
-  BalancerPooler: "0xC2d1a82C66Fd535ae218b59F77a1B716919a46C3",
-  GatherWBTC: "0xb304e2E63820D4f7B41219D2C39123E20444D0C9",
+  NFTMigrator: "0x0000000000000000000000000000000000000000",
+
+  // NFT V1
+  nftsV1: {
+    NFTMinter: "0xd936461f1C15eA9f34Ca1F20ecD54A0819068811",
+    BurnerEYE: "0xA592e074f990c87E10b3Bba1DACFB9187899575b",
+    BurnerSCX: "0xbe2fbBb49b26C20E3aEE3b0608cB5116aeD5d297",
+    BurnerFlax: "0xD3B630cBA76AEA5Aadb4cB71732227E073C8338C",
+    BalancerPooler: "0xC2d1a82C66Fd535ae218b59F77a1B716919a46C3",
+    GatherWBTC: "0xb304e2E63820D4f7B41219D2C39123E20444D0C9",
+  },
+
+  // NFT V2 — not yet deployed
+  nftsV2: {
+    NFTMinter: "0x0000000000000000000000000000000000000000",
+    BurnerEYE: "0x0000000000000000000000000000000000000000",
+    BurnerSCX: "0x0000000000000000000000000000000000000000",
+    BurnerFlax: "0x0000000000000000000000000000000000000000",
+    BalancerPooler: "0x0000000000000000000000000000000000000000",
+    GatherWBTC: "0x0000000000000000000000000000000000000000",
+  },
 
   // View contracts
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
