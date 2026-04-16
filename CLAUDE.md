@@ -537,7 +537,7 @@ When integrating with vault-RM or related contracts:
 **YieldStrategy** (Our Adapter Pattern):
 - Interface: `IYieldStrategy`
 - Abstract base: `AYieldStrategy`
-- Concrete implementation: `AutoDolaYieldStrategy`
+- Concrete implementation: `ERC4626YieldStrategy`
 - Purpose: OUR adapter pattern for integrating external yield sources
 
 **Vault** (External ERC4626 Vaults):
@@ -553,7 +553,7 @@ When integrating with vault-RM or related contracts:
 // Correct usage
 IYieldStrategy public yieldStrategy;
 address public autoDolaVault = 0x...;
-AutoDolaYieldStrategy strategy = new AutoDolaYieldStrategy(autoDolaVault);
+ERC4626YieldStrategy strategy = new ERC4626YieldStrategy(owner, underlying, autoDolaVault);
 ```
 
 ## Integration with Phoenix UI
