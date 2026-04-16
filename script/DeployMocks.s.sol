@@ -7,10 +7,8 @@ import "../src/mocks/MockPhUSD.sol";
 import "../src/mocks/MockRewardToken.sol";
 import "../src/mocks/MockUSDS.sol";
 import "../src/mocks/MockDola.sol";
-import "../src/mocks/MockToke.sol";
 import "../src/mocks/MockAutoDOLA.sol";
 import "../src/mocks/MockSUSDS.sol";
-import "../src/mocks/MockMainRewarder.sol";
 import "../src/mocks/MockEYE.sol";
 import "../src/mocks/MockSCX.sol";
 import "../src/mocks/MockFlax.sol";
@@ -21,7 +19,7 @@ import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
-import {AutoPoolYieldStrategy} from "@vault/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
+import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
 import "../src/views/ViewRouter.sol";
@@ -65,13 +63,10 @@ contract DeployMocks is Script {
     MockUSDS public usds; // Underlying USDS stablecoin (plain ERC20)
     MockSUSDS public susds; // ERC4626 savings vault wrapping USDS
     MockDola public dola;
-    MockToke public toke;
     MockAutoDOLA public mockAutoDola;
-    MockMainRewarder public mockMainRewarder;
     MockAutoDOLA public mockAutoUSDC;  // Reusing MockAutoDOLA pattern for USDC
-    MockMainRewarder public mockMainRewarderUSDC;
-    AutoPoolYieldStrategy public yieldStrategyDola;
-    AutoPoolYieldStrategy public yieldStrategyUSDC;
+    ERC4626YieldStrategy public yieldStrategyDola;
+    ERC4626YieldStrategy public yieldStrategyUSDC;
     PhusdStableMinter public minter;
     PhlimboEA public phlimbo;
     MockEYE public eyeToken;
@@ -165,11 +160,6 @@ contract DeployMocks is Script {
         _trackDeployment("MockDola", address(dola), gasBefore - gasleft());
         console.log("MockDola deployed at:", address(dola));
 
-        gasBefore = gasleft();
-        toke = new MockToke();
-        _trackDeployment("MockToke", address(toke), gasBefore - gasleft());
-        console.log("MockToke deployed at:", address(toke));
-
         // ====== PHASE 1.5: EYE Token and Pauser Deployment ======
         console.log("\n=== Phase 1.5: Deploying EYE Token and Pauser ===");
 
@@ -201,8 +191,8 @@ contract DeployMocks is Script {
         // ====== PHASE 2: Yield Strategy Deployment ======
         console.log("\n=== Phase 2: Deploying Yield Strategies ===");
 
-        // ====== PHASE 2.5: AutoDola Infrastructure for DOLA YieldStrategy ======
-        console.log("\n=== Phase 2.5: Deploying AutoDola Infrastructure ===");
+        // ====== PHASE 2.5: AutoDOLA ERC4626 Infrastructure for DOLA YieldStrategy ======
+        console.log("\n=== Phase 2.5: Deploying AutoDOLA ERC4626 Infrastructure ===");
 
         // Deploy MockAutoDOLA (ERC4626 vault wrapper)
         gasBefore = gasleft();
@@ -210,30 +200,18 @@ contract DeployMocks is Script {
         _trackDeployment("MockAutoDOLA", address(mockAutoDola), gasBefore - gasleft());
         console.log("MockAutoDOLA deployed at:", address(mockAutoDola));
 
-        // Deploy MockMainRewarder (staking/rewards contract)
+        // Deploy ERC4626YieldStrategy wrapping the DOLA vault
         gasBefore = gasleft();
-        mockMainRewarder = new MockMainRewarder(address(mockAutoDola), address(toke));
-        _trackDeployment("MockMainRewarder", address(mockMainRewarder), gasBefore - gasleft());
-        console.log("MockMainRewarder deployed at:", address(mockMainRewarder));
-
-        // Wire MockAutoDOLA to use MockMainRewarder
-        mockAutoDola.setRewarder(address(mockMainRewarder));
-        console.log("Wired MockAutoDOLA to use MockMainRewarder");
-
-        // Deploy real AutoPoolYieldStrategy with mocked dependencies (DOLA)
-        gasBefore = gasleft();
-        yieldStrategyDola = new AutoPoolYieldStrategy(
-            deployer,                    // owner
-            address(dola),               // underlyingToken (DOLA)
-            address(toke),               // tokeToken
-            address(mockAutoDola),       // autoPoolVault
-            address(mockMainRewarder)    // mainRewarder
+        yieldStrategyDola = new ERC4626YieldStrategy(
+            deployer,                // owner
+            address(dola),           // underlyingToken (DOLA)
+            address(mockAutoDola)    // erc4626Vault
         );
         _trackDeployment("YieldStrategyDola", address(yieldStrategyDola), gasBefore - gasleft());
-        console.log("YieldStrategyDola (AutoPoolYieldStrategy) deployed at:", address(yieldStrategyDola));
+        console.log("YieldStrategyDola (ERC4626YieldStrategy) deployed at:", address(yieldStrategyDola));
 
-        // ====== PHASE 2.6: AutoPool Infrastructure for USDC YieldStrategy ======
-        console.log("\n=== Phase 2.6: Deploying AutoPool Infrastructure for USDC ===");
+        // ====== PHASE 2.6: AutoUSDC ERC4626 Infrastructure for USDC YieldStrategy ======
+        console.log("\n=== Phase 2.6: Deploying AutoUSDC ERC4626 Infrastructure ===");
 
         // Deploy MockAutoUSDC (ERC4626 vault wrapper for USDC) - reusing MockAutoDOLA pattern
         gasBefore = gasleft();
@@ -241,27 +219,15 @@ contract DeployMocks is Script {
         _trackDeployment("MockAutoUSDC", address(mockAutoUSDC), gasBefore - gasleft());
         console.log("MockAutoUSDC deployed at:", address(mockAutoUSDC));
 
-        // Deploy MockMainRewarder for USDC (staking/rewards contract)
+        // Deploy ERC4626YieldStrategy wrapping the USDC vault
         gasBefore = gasleft();
-        mockMainRewarderUSDC = new MockMainRewarder(address(mockAutoUSDC), address(toke));
-        _trackDeployment("MockMainRewarderUSDC", address(mockMainRewarderUSDC), gasBefore - gasleft());
-        console.log("MockMainRewarderUSDC deployed at:", address(mockMainRewarderUSDC));
-
-        // Wire MockAutoUSDC to use MockMainRewarderUSDC
-        mockAutoUSDC.setRewarder(address(mockMainRewarderUSDC));
-        console.log("Wired MockAutoUSDC to use MockMainRewarderUSDC");
-
-        // Deploy AutoPoolYieldStrategy for USDC
-        gasBefore = gasleft();
-        yieldStrategyUSDC = new AutoPoolYieldStrategy(
-            deployer,                        // owner
-            address(rewardToken),            // underlyingToken (USDC)
-            address(toke),                   // tokeToken
-            address(mockAutoUSDC),           // autoPoolVault
-            address(mockMainRewarderUSDC)    // mainRewarder
+        yieldStrategyUSDC = new ERC4626YieldStrategy(
+            deployer,                // owner
+            address(rewardToken),    // underlyingToken (USDC)
+            address(mockAutoUSDC)    // erc4626Vault
         );
         _trackDeployment("YieldStrategyUSDC", address(yieldStrategyUSDC), gasBefore - gasleft());
-        console.log("YieldStrategyUSDC (AutoPoolYieldStrategy) deployed at:", address(yieldStrategyUSDC));
+        console.log("YieldStrategyUSDC (ERC4626YieldStrategy) deployed at:", address(yieldStrategyUSDC));
 
         // ====== PHASE 3: Core Contract Deployment ======
         console.log("\n=== Phase 3: Deploying Core Contracts ===");
@@ -753,7 +719,7 @@ contract DeployMocks is Script {
         console.log("Minted 1000 DOLA directly to MockAutoDOLA vault as yield");
         console.log("  - totalAssets increased without minting new shares");
         console.log("  - Share price now > 1, creating claimable yield");
-        console.log("  - YieldStrategyDola can claim this yield via AutoPoolYieldStrategy");
+        console.log("  - YieldStrategyDola can claim this yield via ERC4626YieldStrategy");
 
         // ====== PHASE 9.55: Seed YieldStrategyUSDC with PhUSD Minting ======
         console.log("\n=== Phase 9.55: Seed YieldStrategyUSDC with PhUSD Minting ===");
@@ -785,7 +751,7 @@ contract DeployMocks is Script {
         console.log("Minted 1000 USDC directly to MockAutoUSDC vault as yield");
         console.log("  - totalAssets increased without minting new shares");
         console.log("  - Share price now > 1, creating claimable yield");
-        console.log("  - YieldStrategyUSDC can claim this yield via AutoPoolYieldStrategy");
+        console.log("  - YieldStrategyUSDC can claim this yield via ERC4626YieldStrategy");
 
         // ====== PHASE 10: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 10: Deploy DepositView for UI Polling ===");
@@ -840,15 +806,12 @@ contract DeployMocks is Script {
         _markConfigured("MockUSDS", 0);
         _markConfigured("MockSUSDS", 0);
         _markConfigured("MockDola", 0);
-        _markConfigured("MockToke", 0);
         _markConfigured("MockEYE", 0);
         _markConfigured("MockSCX", 0);
         _markConfigured("MockFlax", 0);
         _markConfigured("MockWBTC", 0);
         _markConfigured("MockAutoDOLA", 0);
-        _markConfigured("MockMainRewarder", 0);
         _markConfigured("MockAutoUSDC", 0);
-        _markConfigured("MockMainRewarderUSDC", 0);
         _markConfigured("YieldStrategyDola", 0);
         _markConfigured("YieldStrategyUSDC", 0);
         _markConfigured("PhusdStableMinter", 0);
@@ -895,16 +858,10 @@ contract DeployMocks is Script {
         console.log("All contracts deployed and configured successfully!");
         console.log("");
         console.log("Architecture Summary:");
-        console.log("  - DOLA -> YieldStrategyDola (AutoPoolYieldStrategy) -> PhusdStableMinter");
-        console.log("    \\-> AutoPoolYieldStrategy uses real contract with mocked dependencies:");
-        console.log("        - MockAutoDOLA (ERC4626 vault)");
-        console.log("        - MockMainRewarder (TOKE rewards)");
-        console.log("        - MockToke (reward token)");
-        console.log("  - USDC -> YieldStrategyUSDC (AutoPoolYieldStrategy) -> PhusdStableMinter");
-        console.log("    \\-> AutoPoolYieldStrategy uses real contract with mocked dependencies:");
-        console.log("        - MockAutoUSDC (ERC4626 vault)");
-        console.log("        - MockMainRewarderUSDC (TOKE rewards)");
-        console.log("        - MockToke (reward token)");
+        console.log("  - DOLA -> YieldStrategyDola (ERC4626YieldStrategy) -> PhusdStableMinter");
+        console.log("    \\-> ERC4626YieldStrategy wraps MockAutoDOLA (ERC4626 vault)");
+        console.log("  - USDC -> YieldStrategyUSDC (ERC4626YieldStrategy) -> PhusdStableMinter");
+        console.log("    \\-> ERC4626YieldStrategy wraps MockAutoUSDC (ERC4626 vault)");
         console.log("");
         console.log("StableYieldAccumulator Configuration:");
         console.log("  - Reward token: USDC (MockRewardToken)");
@@ -935,7 +892,7 @@ contract DeployMocks is Script {
         console.log("DOLA Yield Seeding:");
         console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
         console.log("  - This increases share value for YieldStrategyDola");
-        console.log("  - AutoDolaYieldStrategy can claim this yield via StableYieldAccumulator");
+        console.log("  - ERC4626YieldStrategy can claim this yield via StableYieldAccumulator");
         console.log("");
         console.log("USDC Seeding:");
         console.log("  - 5000 USDC deposited to YieldStrategyUSDC via minter.mint()");
@@ -945,7 +902,7 @@ contract DeployMocks is Script {
         console.log("USDC Yield Seeding:");
         console.log("  - 1000 USDC deposited directly to MockAutoUSDC vault");
         console.log("  - This increases share value for YieldStrategyUSDC");
-        console.log("  - AutoPoolYieldStrategy can claim this yield via StableYieldAccumulator");
+        console.log("  - ERC4626YieldStrategy can claim this yield via StableYieldAccumulator");
         console.log("");
         console.log("NFTMinter Infrastructure:");
         console.log("  - NFTMinter (ERC1155) deployed for claim gating");
