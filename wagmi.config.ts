@@ -11,7 +11,6 @@ export default defineConfig({
         // Mock contracts for testing
         'MockPhUSD.sol/MockPhUSD.json',
         'MockRewardToken.sol/MockRewardToken.json',
-        'MockYieldStrategy.sol/MockYieldStrategy.json',
 
         // Main Phase 2 contracts
         'PhusdStableMinter.sol/PhusdStableMinter.json',
@@ -40,7 +39,6 @@ export default defineConfig({
 
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',
-        'AutoPoolYieldStrategy.sol/AutoPoolYieldStrategy.json',
         'ERC4626YieldStrategy.sol/ERC4626YieldStrategy.json',
         'Pauser.sol/Pauser.json',
 
