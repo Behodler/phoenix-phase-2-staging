@@ -1,7 +1,6 @@
-// Generated interface — union of all deployment targets (anvil, sepolia, mainnet)
+// Generated interface from local.json on 2026-04-17T13:50:56.096Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
-// NOTE: Some fields may have zero-address placeholders on certain networks
 
 export interface YieldNFTAddresses {
   NFTMinter: string;
@@ -19,7 +18,6 @@ export interface ContractAddresses {
   SUSDS: string;
   USDe: string;
   SUSDe: string;
-  YieldStrategyUSDe: string;
   Dola: string;
   EYE: string;
   SCX: string;
@@ -30,6 +28,7 @@ export interface ContractAddresses {
   YieldStrategyDola: string;
   AutoUSDC: string;
   YieldStrategyUSDC: string;
+  YieldStrategyUSDe: string;
   PhusdStableMinter: string;
   PhlimboEA: string;
   StableYieldAccumulator: string;
@@ -38,10 +37,10 @@ export interface ContractAddresses {
   BurnRecorder: string;
   BalancerRouter: string;
   NFTMigrator: string;
-  nftsV1: YieldNFTAddresses;
-  nftsV2: YieldNFTAddresses;
   DepositView: string;
   ViewRouter: string;
   DepositPageView: string;
   MintPageView: string;
+  nftsV1: YieldNFTAddresses;
+  nftsV2: YieldNFTAddresses;
 }
