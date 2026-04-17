@@ -821,12 +821,12 @@ contract DeployMocks is Script {
 
         gasBefore = gasleft();
         mintPageView = new MintPageView(
-            INFTMinterView(address(nftMinter)),
+            INFTMinterView(address(nftMinterV2)),
             burnRecorder,
             address(eyeToken),
             address(mockSCX),
             address(mockFlax),
-            address(susds),
+            address(usds),
             address(mockWBTC)
         );
         _trackDeployment("MintPageView", address(mintPageView), gasBefore - gasleft());

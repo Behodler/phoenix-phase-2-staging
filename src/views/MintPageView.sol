@@ -15,7 +15,7 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 ///        Index 1: EYE   - Burner
 ///        Index 2: SCX   - Burner
 ///        Index 3: Flax  - Burner
-///        Index 4: sUSDS - BalancerPooler
+///        Index 4: USDS  - BalancerPoolerV2
 ///        Index 5: WBTC  - Gather
 ///
 ///      Returns 33 fields total (6 per token + 3 burn totals).
@@ -26,7 +26,7 @@ contract MintPageView is IPageView {
     IERC20 public immutable eye;
     IERC20 public immutable scx;
     IERC20 public immutable flax;
-    IERC20 public immutable susds;
+    IERC20 public immutable usds;
     IERC20 public immutable wbtc;
 
     /// @notice Number of NFT configurations.
@@ -44,7 +44,7 @@ contract MintPageView is IPageView {
         address _eye,
         address _scx,
         address _flax,
-        address _susds,
+        address _usds,
         address _wbtc
     ) {
         nftMinter = _nftMinter;
@@ -52,7 +52,7 @@ contract MintPageView is IPageView {
         eye = IERC20(_eye);
         scx = IERC20(_scx);
         flax = IERC20(_flax);
-        susds = IERC20(_susds);
+        usds = IERC20(_usds);
         wbtc = IERC20(_wbtc);
     }
 
@@ -83,13 +83,13 @@ contract MintPageView is IPageView {
         names[16] = "Flax-nftBalance";
         names[17] = "Flax-dispatcherIndex";
 
-        // sUSDS fields (index 18-23)
-        names[18] = "sUSDS-allowance";
-        names[19] = "sUSDS-price";
-        names[20] = "sUSDS-growthBasisPoints";
-        names[21] = "sUSDS-balance";
-        names[22] = "sUSDS-nftBalance";
-        names[23] = "sUSDS-dispatcherIndex";
+        // USDS fields (index 18-23)
+        names[18] = "USDS-allowance";
+        names[19] = "USDS-price";
+        names[20] = "USDS-growthBasisPoints";
+        names[21] = "USDS-balance";
+        names[22] = "USDS-nftBalance";
+        names[23] = "USDS-dispatcherIndex";
 
         // WBTC fields (index 24-29)
         names[24] = "WBTC-allowance";
@@ -117,8 +117,8 @@ contract MintPageView is IPageView {
         // Flax (dispatcher index 3)
         _fillTokenData(data, 12, flax, 3, user);
 
-        // sUSDS (dispatcher index 6 — redeployed BalancerPooler)
-        _fillTokenData(data, 18, susds, 6, user);
+        // USDS (dispatcher index 4 — BalancerPoolerV2 on NFTMinterV2)
+        _fillTokenData(data, 18, usds, 4, user);
 
         // WBTC (dispatcher index 5)
         _fillTokenData(data, 24, wbtc, 5, user);
