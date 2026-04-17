@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-04-17T13:50:56.096Z
+// Generated interface from local.json on 2026-04-17T14:59:57.110Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 

@@ -2806,7 +2806,7 @@ export const mintPageViewAbi = [
       { name: '_eye', internalType: 'address', type: 'address' },
       { name: '_scx', internalType: 'address', type: 'address' },
       { name: '_flax', internalType: 'address', type: 'address' },
-      { name: '_susds', internalType: 'address', type: 'address' },
+      { name: '_usds', internalType: 'address', type: 'address' },
       { name: '_wbtc', internalType: 'address', type: 'address' },
     ],
     stateMutability: 'nonpayable',
@@ -2867,7 +2867,7 @@ export const mintPageViewAbi = [
   {
     type: 'function',
     inputs: [],
-    name: 'susds',
+    name: 'usds',
     outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
     stateMutability: 'view',
   },
