@@ -6,6 +6,8 @@ import "@forge-std/console.sol";
 import "../src/mocks/MockPhUSD.sol";
 import "../src/mocks/MockRewardToken.sol";
 import "../src/mocks/MockUSDS.sol";
+import "../src/mocks/MockUSDe.sol";
+import "../src/mocks/MockSUSDe.sol";
 import "../src/mocks/MockDola.sol";
 import "../src/mocks/MockAutoDOLA.sol";
 import "../src/mocks/MockSUSDS.sol";
@@ -62,11 +64,14 @@ contract DeployMocks is Script {
     MockRewardToken public rewardToken; // USDC - the consolidated reward token
     MockUSDS public usds; // Underlying USDS stablecoin (plain ERC20)
     MockSUSDS public susds; // ERC4626 savings vault wrapping USDS
+    MockUSDe public usde; // Underlying USDe stablecoin (plain ERC20)
+    MockSUSDe public susde; // ERC4626 savings vault wrapping USDe
     MockDola public dola;
     MockAutoDOLA public mockAutoDola;
     MockAutoDOLA public mockAutoUSDC;  // Reusing MockAutoDOLA pattern for USDC
     ERC4626YieldStrategy public yieldStrategyDola;
     ERC4626YieldStrategy public yieldStrategyUSDC;
+    ERC4626YieldStrategy public yieldStrategyUSDe;
     PhusdStableMinter public minter;
     PhlimboEA public phlimbo;
     MockEYE public eyeToken;
@@ -155,6 +160,24 @@ contract DeployMocks is Script {
         susds.deposit(initialSusdsDeposit, deployer);
         console.log("Deposited 10,000 USDS into MockSUSDS (baseline shares established)");
 
+        // Deploy MockUSDe (ERC20, 18 decimals) — mirrors mainnet Ethena USDe
+        gasBefore = gasleft();
+        usde = new MockUSDe();
+        _trackDeployment("USDe", address(usde), gasBefore - gasleft());
+        console.log("MockUSDe deployed at:", address(usde));
+
+        // Deploy MockSUSDe (ERC4626 savings vault wrapping USDe)
+        gasBefore = gasleft();
+        susde = new MockSUSDe(address(usde));
+        _trackDeployment("SUSDe", address(susde), gasBefore - gasleft());
+        console.log("MockSUSDe deployed at:", address(susde));
+
+        // Deposit initial USDe into MockSUSDe to establish baseline shares
+        uint256 initialSusdeDeposit = 10_000 * 10**18; // 10,000 USDe
+        usde.approve(address(susde), initialSusdeDeposit);
+        susde.deposit(initialSusdeDeposit, deployer);
+        console.log("Deposited 10,000 USDe into MockSUSDe (baseline shares established)");
+
         gasBefore = gasleft();
         dola = new MockDola();
         _trackDeployment("MockDola", address(dola), gasBefore - gasleft());
@@ -228,6 +251,19 @@ contract DeployMocks is Script {
         );
         _trackDeployment("YieldStrategyUSDC", address(yieldStrategyUSDC), gasBefore - gasleft());
         console.log("YieldStrategyUSDC (ERC4626YieldStrategy) deployed at:", address(yieldStrategyUSDC));
+
+        // ====== PHASE 2.7: USDe ERC4626 Infrastructure for USDe YieldStrategy ======
+        console.log("\n=== Phase 2.7: Deploying USDe ERC4626 Infrastructure ===");
+
+        // Deploy ERC4626YieldStrategy wrapping the USDe vault (MockSUSDe)
+        gasBefore = gasleft();
+        yieldStrategyUSDe = new ERC4626YieldStrategy(
+            deployer,           // owner
+            address(usde),      // underlyingToken (USDe)
+            address(susde)      // erc4626Vault (MockSUSDe)
+        );
+        _trackDeployment("YieldStrategyUSDe", address(yieldStrategyUSDe), gasBefore - gasleft());
+        console.log("YieldStrategyUSDe (ERC4626YieldStrategy) deployed at:", address(yieldStrategyUSDe));
 
         // ====== PHASE 3: Core Contract Deployment ======
         console.log("\n=== Phase 3: Deploying Core Contracts ===");
@@ -805,6 +841,8 @@ contract DeployMocks is Script {
         _markConfigured("MockUSDC", 0);
         _markConfigured("MockUSDS", 0);
         _markConfigured("MockSUSDS", 0);
+        _markConfigured("USDe", 0);
+        _markConfigured("SUSDe", 0);
         _markConfigured("MockDola", 0);
         _markConfigured("MockEYE", 0);
         _markConfigured("MockSCX", 0);
@@ -814,6 +852,7 @@ contract DeployMocks is Script {
         _markConfigured("MockAutoUSDC", 0);
         _markConfigured("YieldStrategyDola", 0);
         _markConfigured("YieldStrategyUSDC", 0);
+        _markConfigured("YieldStrategyUSDe", 0);
         _markConfigured("PhusdStableMinter", 0);
         _markConfigured("PhlimboEA", 0);
         _markConfigured("StableYieldAccumulator", 0);
