@@ -250,9 +250,9 @@ export const balancerPoolerV2Abi = [
   {
     type: 'function',
     inputs: [
-      { name: '', internalType: 'address', type: 'address' },
+      { name: 'minter', internalType: 'address', type: 'address' },
       { name: 'amount', internalType: 'uint256', type: 'uint256' },
-      { name: '', internalType: 'bytes', type: 'bytes' },
+      { name: 'extraData', internalType: 'bytes', type: 'bytes' },
     ],
     name: 'dispatch',
     outputs: [],
@@ -266,6 +266,15 @@ export const balancerPoolerV2Abi = [
       { name: 'bptAmountOut', internalType: 'uint256', type: 'uint256' },
     ],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'hook',
+    outputs: [
+      { name: '', internalType: 'contract IDispatchHook', type: 'address' },
+    ],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -375,6 +384,19 @@ export const balancerPoolerV2Abi = [
   {
     type: 'function',
     inputs: [
+      {
+        name: 'newHook',
+        internalType: 'contract IDispatchHook',
+        type: 'address',
+      },
+    ],
+    name: 'setHook',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
       { name: 'name_', internalType: 'string', type: 'string' },
       { name: 'image_', internalType: 'string', type: 'string' },
       { name: 'description_', internalType: 'string', type: 'string' },
@@ -447,6 +469,25 @@ export const balancerPoolerV2Abi = [
       },
     ],
     name: 'AuthVersionIncremented',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'oldHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'HookUpdated',
   },
   {
     type: 'event',
@@ -583,6 +624,7 @@ export const balancerPoolerV2Abi = [
     inputs: [{ name: 'account', internalType: 'address', type: 'address' }],
     name: 'OwnableUnauthorizedAccount',
   },
+  { type: 'error', inputs: [], name: 'ReentrancyGuardReentrantCall' },
   {
     type: 'error',
     inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
@@ -938,13 +980,22 @@ export const burnerV2Abi = [
   {
     type: 'function',
     inputs: [
-      { name: '', internalType: 'address', type: 'address' },
+      { name: 'minter', internalType: 'address', type: 'address' },
       { name: 'amount', internalType: 'uint256', type: 'uint256' },
-      { name: '', internalType: 'bytes', type: 'bytes' },
+      { name: 'extraData', internalType: 'bytes', type: 'bytes' },
     ],
     name: 'dispatch',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'hook',
+    outputs: [
+      { name: '', internalType: 'contract IDispatchHook', type: 'address' },
+    ],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -998,6 +1049,19 @@ export const burnerV2Abi = [
   {
     type: 'function',
     inputs: [
+      {
+        name: 'newHook',
+        internalType: 'contract IDispatchHook',
+        type: 'address',
+      },
+    ],
+    name: 'setHook',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
       { name: 'name_', internalType: 'string', type: 'string' },
       { name: 'image_', internalType: 'string', type: 'string' },
       { name: 'description_', internalType: 'string', type: 'string' },
@@ -1026,6 +1090,25 @@ export const burnerV2Abi = [
     name: 'unpause',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'oldHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'HookUpdated',
   },
   {
     type: 'event',
@@ -1098,6 +1181,25 @@ export const burnerV2Abi = [
     type: 'error',
     inputs: [{ name: 'account', internalType: 'address', type: 'address' }],
     name: 'OwnableUnauthorizedAccount',
+  },
+  { type: 'error', inputs: [], name: 'ReentrancyGuardReentrantCall' },
+] as const
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// DefaultDispatchHook
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const defaultDispatchHookAbi = [
+  {
+    type: 'function',
+    inputs: [
+      { name: '', internalType: 'address', type: 'address' },
+      { name: '', internalType: 'uint256', type: 'uint256' },
+      { name: '', internalType: 'bytes', type: 'bytes' },
+    ],
+    name: 'onDispatch',
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
 ] as const
 
@@ -2067,13 +2169,22 @@ export const gatherV2Abi = [
   {
     type: 'function',
     inputs: [
-      { name: '', internalType: 'address', type: 'address' },
+      { name: 'minter', internalType: 'address', type: 'address' },
       { name: 'amount', internalType: 'uint256', type: 'uint256' },
-      { name: '', internalType: 'bytes', type: 'bytes' },
+      { name: 'extraData', internalType: 'bytes', type: 'bytes' },
     ],
     name: 'dispatch',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'hook',
+    outputs: [
+      { name: '', internalType: 'contract IDispatchHook', type: 'address' },
+    ],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -2134,6 +2245,19 @@ export const gatherV2Abi = [
   {
     type: 'function',
     inputs: [
+      {
+        name: 'newHook',
+        internalType: 'contract IDispatchHook',
+        type: 'address',
+      },
+    ],
+    name: 'setHook',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
       { name: 'name_', internalType: 'string', type: 'string' },
       { name: 'image_', internalType: 'string', type: 'string' },
       { name: 'description_', internalType: 'string', type: 'string' },
@@ -2171,6 +2295,25 @@ export const gatherV2Abi = [
     name: 'unpause',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'oldHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'HookUpdated',
   },
   {
     type: 'event',
@@ -2263,10 +2406,29 @@ export const gatherV2Abi = [
     inputs: [{ name: 'account', internalType: 'address', type: 'address' }],
     name: 'OwnableUnauthorizedAccount',
   },
+  { type: 'error', inputs: [], name: 'ReentrancyGuardReentrantCall' },
   {
     type: 'error',
     inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
     name: 'SafeERC20FailedOperation',
+  },
+] as const
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// IDispatchHook
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const iDispatchHookAbi = [
+  {
+    type: 'function',
+    inputs: [
+      { name: 'minter', internalType: 'address', type: 'address' },
+      { name: 'amount', internalType: 'uint256', type: 'uint256' },
+      { name: 'extraData', internalType: 'bytes', type: 'bytes' },
+    ],
+    name: 'onDispatch',
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
 ] as const
 
