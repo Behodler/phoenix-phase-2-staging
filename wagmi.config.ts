@@ -37,6 +37,10 @@ export default defineConfig({
         'GatherV2.sol/GatherV2.json',
         'NFTMigrator.sol/NFTMigrator.json',
 
+        // V2 Dispatch hooks
+        'IDispatchHook.sol/IDispatchHook.json',
+        'DefaultDispatchHook.sol/DefaultDispatchHook.json',
+
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',
         'ERC4626YieldStrategy.sol/ERC4626YieldStrategy.json',
