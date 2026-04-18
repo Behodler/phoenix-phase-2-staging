@@ -1,0 +1,32 @@
+{
+  "transactions": [
+    {
+      "hash": null,
+      "transactionType": "CALL",
+      "contractName": "PhlimboEA",
+      "contractAddress": "0x3984ebc84d45a889ddac595d13dc0ac2e54819f4",
+      "function": "setDesiredAPY(uint256)",
+      "arguments": [
+        "0"
+      ],
+      "transaction": {
+        "from": "0xcad1a7864a108dbff67f4b8af71fab0c7a86d0b6",
+        "to": "0x3984ebc84d45a889ddac595d13dc0ac2e54819f4",
+        "gas": "0x17090",
+        "value": "0x0",
+        "input": "0x0310ba8b0000000000000000000000000000000000000000000000000000000000000000",
+        "nonce": "0x173",
+        "chainId": "0x1"
+      },
+      "additionalContracts": [],
+      "isFixedGasLimit": false
+    }
+  ],
+  "receipts": [],
+  "libraries": [],
+  "pending": [],
+  "returns": {},
+  "timestamp": 1776554195261,
+  "chain": 1,
+  "commit": "1128a52"
+}
