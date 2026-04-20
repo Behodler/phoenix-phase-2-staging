@@ -77,7 +77,7 @@ export const mainnetAddresses: ContractAddresses = {
   // View contracts
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
   DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
-  MintPageView: "0x5122cb32aE42AcC2aD5C2071e977C95c08F70141",
+  MintPageView: "0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119",
 
 
 };
