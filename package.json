@@ -69,6 +69,8 @@
     "mainnet:phusd-amm-balances": "bash scripts/check-phusd-amm-balances.sh",
     "FixBalancerPooler:preview": "PREVIEW_MODE=true forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET -vvv",
     "FixBalancerPooler": "forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "RedeployMintPageViewV2:preview": "PREVIEW_MODE=true forge script script/RedeployMintPageViewV2.s.sol:RedeployMintPageViewV2 --rpc-url $RPC_MAINNET -vvv",
+    "RedeployMintPageViewV2": "forge script script/RedeployMintPageViewV2.s.sol:RedeployMintPageViewV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "sim:eclp-rebalance": "forge test --fork-url $RPC_MAINNET --match-test testSimulateRebalance -vvv",
     "mainnet:buy-phusd-dry": "forge script script/interactions/governance/BuyPhUSDWithSUSDS.s.sol:BuyPhUSDWithSUSDS --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
     "mainnet:buy-phusd": "forge script script/interactions/governance/BuyPhUSDWithSUSDS.s.sol:BuyPhUSDWithSUSDS --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
