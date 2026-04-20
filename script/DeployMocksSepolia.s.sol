@@ -965,15 +965,15 @@ contract DeployMocksSepolia is Script {
 
         PhlimboEA p = PhlimboEA(phlimbo);
 
-        // Set desired APY (5% = 500 basis points) - two-step process
+        // Desired APY = 0: no phUSD minted by phlimbo, yield comes only from the yield funnel
         // Step 1: Preview the APY change
-        p.setDesiredAPY(500);
-        console.log("Set desired APY (preview): 500 bps");
+        p.setDesiredAPY(0);
+        console.log("Set desired APY (preview): 0 bps");
 
         // Step 2: Commit the APY change
         // On real networks, each transaction is in a separate block
-        p.setDesiredAPY(500);
-        console.log("Set desired APY (commit): 500 bps");
+        p.setDesiredAPY(0);
+        console.log("Set desired APY (commit): 0 bps");
 
         uint256 gasUsed = gasBefore - gasleft();
         _markConfigured("PhlimboEA", gasUsed);
@@ -1122,6 +1122,7 @@ contract DeployMocksSepolia is Script {
         uint256 gasBefore = gasleft();
 
         uint256 initialPrice = 100 * 10 ** 18;
+        uint256 wbtcInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
 
         NFTMinter(nftMinter).registerDispatcher(burnerEYE, initialPrice, 200); // 2% growth
         console.log("Registered BurnerEYE dispatcher with NFTMinter (index 1, 2% growth)");
@@ -1135,7 +1136,7 @@ contract DeployMocksSepolia is Script {
         NFTMinter(nftMinter).registerDispatcher(balancerPooler, initialPrice, 10); // 0.1% growth
         console.log("Registered BalancerPooler dispatcher with NFTMinter (index 4, 0.1% growth)");
 
-        NFTMinter(nftMinter).registerDispatcher(gatherWBTC, initialPrice, 1000); // 10% growth
+        NFTMinter(nftMinter).registerDispatcher(gatherWBTC, wbtcInitialPrice, 1000); // 10% growth
         console.log("Registered GatherWBTC dispatcher with NFTMinter (index 5, 10% growth)");
 
         uint256 gasUsed = gasBefore - gasleft();

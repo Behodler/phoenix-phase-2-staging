@@ -430,6 +430,7 @@ contract DeployMocks is Script {
 
         // 4. Register V2 dispatchers with NFTMinterV2
         uint256 v2InitialPrice = 100 * 10 ** 18;
+        uint256 v2WBTCInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
 
         nftMinterV2.registerDispatcher(address(burnerEYEV2), v2InitialPrice, 200); // 2% growth
         console.log("Registered BurnerEYEV2 dispatcher with NFTMinterV2 (index 1, 2% growth)");
@@ -443,7 +444,7 @@ contract DeployMocks is Script {
         nftMinterV2.registerDispatcher(address(balancerPoolerV2), v2InitialPrice, 10); // 0.1% growth
         console.log("Registered BalancerPoolerV2 dispatcher with NFTMinterV2 (index 4, 0.1% growth)");
 
-        nftMinterV2.registerDispatcher(address(gatherWBTCV2), v2InitialPrice, 1000); // 10% growth
+        nftMinterV2.registerDispatcher(address(gatherWBTCV2), v2WBTCInitialPrice, 1000); // 10% growth
         console.log("Registered GatherWBTCV2 dispatcher with NFTMinterV2 (index 5, 10% growth)");
 
         // 5. Set minter on each V2 dispatcher
@@ -542,16 +543,16 @@ contract DeployMocks is Script {
         // ====== PHASE 7: Phlimbo Configuration ======
         console.log("\n=== Phase 7: Phlimbo Configuration ===");
 
-        // Set desired APY (5% = 500 basis points) - two-step process
-        phlimbo.setDesiredAPY(500);
-        console.log("Set desired APY (preview): 500 bps");
+        // Desired APY = 0: no phUSD minted by phlimbo, yield comes only from the yield funnel
+        phlimbo.setDesiredAPY(0);
+        console.log("Set desired APY (preview): 0 bps");
 
         // Wait for next block (simulate block advancement)
         vm.roll(block.number + 1);
 
         // Commit APY change
-        phlimbo.setDesiredAPY(500);
-        console.log("Set desired APY (commit): 500 bps");
+        phlimbo.setDesiredAPY(0);
+        console.log("Set desired APY (commit): 0 bps");
 
         // ====== PHASE 7.5: StableYieldAccumulator Configuration ======
         console.log("\n=== Phase 7.5: StableYieldAccumulator Configuration ===");
@@ -646,6 +647,7 @@ contract DeployMocks is Script {
 
         // Register each dispatcher with NFTMinter (initialPrice = 100e18, varying growthBps)
         uint256 initialPrice = 100 * 10 ** 18;
+        uint256 wbtcInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
 
         nftMinter.registerDispatcher(address(burnerEYE), initialPrice, 200); // 2% growth
         console.log("Registered BurnerEYE dispatcher with NFTMinter (index 1, 2% growth)");
@@ -659,7 +661,7 @@ contract DeployMocks is Script {
         nftMinter.registerDispatcher(address(balancerPooler), initialPrice, 10); // 0.1% growth
         console.log("Registered BalancerPooler dispatcher with NFTMinter (index 4, 0.1% growth)");
 
-        nftMinter.registerDispatcher(address(gatherWBTC), initialPrice, 1000); // 10% growth
+        nftMinter.registerDispatcher(address(gatherWBTC), wbtcInitialPrice, 1000); // 10% growth
         console.log("Registered GatherWBTC dispatcher with NFTMinter (index 5, 10% growth)");
 
         // Set minter on each dispatcher
@@ -700,10 +702,9 @@ contract DeployMocks is Script {
         nftMinter.mint(address(mockFlax), 3, deployer);
         console.log("Minted V1 NFT index 3 (BurnerFlax) for deployer");
 
-        // Index 5: GatherWBTC — WBTC has 8 decimals but NFT price is 100e18,
-        // so mint extra WBTC for the deployer first
-        mockWBTC.mint(deployer, initialPrice);
-        mockWBTC.approve(address(nftMinter), initialPrice);
+        // Index 5: GatherWBTC — priced in 8-decimal WBTC
+        mockWBTC.mint(deployer, wbtcInitialPrice);
+        mockWBTC.approve(address(nftMinter), wbtcInitialPrice);
         nftMinter.mint(address(mockWBTC), 5, deployer);
         console.log("Minted V1 NFT index 5 (GatherWBTC) for deployer");
 

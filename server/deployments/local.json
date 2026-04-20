@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-04-20T18:41:58.946Z",
+  "extractedAt": "2026-04-20T20:08:20.992Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -190,7 +190,7 @@
       "address": "0xE3011A37A904aB90C8881a99BD1F6E21401f1522",
       "deployed": true,
       "configured": true,
-      "deployGas": 516128,
+      "deployGas": 516127,
       "configGas": 0
     },
     "DepositPageView": {
@@ -204,7 +204,7 @@
       "address": "0x525C7063E7C20997BaaE9bDa922159152D0e8417",
       "deployed": true,
       "configured": true,
-      "deployGas": 1722645,
+      "deployGas": 1722641,
       "configGas": 0
     }
   },

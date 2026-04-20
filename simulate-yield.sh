@@ -9,9 +9,18 @@
 
 set -e
 
-# Configuration - addresses from local Anvil deployment
-MOCK_DOLA="0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
-MOCK_AUTODOLA="0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
+# Configuration - addresses read from deployment progress file
+PROGRESS_JSON="$(dirname "$0")/server/deployments/progress.31337.json"
+if [ ! -f "$PROGRESS_JSON" ]; then
+    echo "Error: $PROGRESS_JSON not found. Run deploy:local first." >&2
+    exit 1
+fi
+MOCK_DOLA=$(jq -r '.contracts.MockDola.address' "$PROGRESS_JSON")
+MOCK_AUTODOLA=$(jq -r '.contracts.MockAutoDOLA.address' "$PROGRESS_JSON")
+if [ -z "$MOCK_DOLA" ] || [ "$MOCK_DOLA" = "null" ] || [ -z "$MOCK_AUTODOLA" ] || [ "$MOCK_AUTODOLA" = "null" ]; then
+    echo "Error: Could not read MockDola/MockAutoDOLA addresses from $PROGRESS_JSON" >&2
+    exit 1
+fi
 RPC_URL="http://localhost:8545"
 PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
