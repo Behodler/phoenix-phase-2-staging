@@ -56,6 +56,8 @@
     "deploy:new-accumulator-mainnet": "forge script script/DeployNewAccumulator.s.sol:DeployNewAccumulator --rpc-url $RPC_MAINNET --broadcast --verify --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvvv",
     "deploy:nft-mainnet-preview": "PREVIEW_MODE=true forge script script/DeployMainnetNFT.s.sol:DeployMainnetNFT --rpc-url $RPC_MAINNET --slow -vvv",
     "deploy:nft-mainnet": "node scripts/backup-mainnet-addresses.js && forge script script/DeployMainnetNFT.s.sol:DeployMainnetNFT --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses.js",
+    "deploy:nft-v2-mainnet-preview": "PREVIEW_MODE=true forge script script/DeployMainnetNFTV2.s.sol:DeployMainnetNFTV2 --rpc-url $RPC_MAINNET --slow -vvv",
+    "deploy:nft-v2-mainnet": "node scripts/backup-mainnet-addresses.js && forge script script/DeployMainnetNFTV2.s.sol:DeployMainnetNFTV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-v2.js",
     "mainnet:mint-phusd-dry": "forge script script/interactions/MintPhUSDMainnet.s.sol:MintPhUSDMainnet --sig \"run(uint256)\" 1 --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 -vvv",
     "mint-phusd": "bash scripts/mint-phusd.sh",
     "mainnet:create-eclp-dry": "forge script script/interactions/CreateBalancerECLPPool.s.sol:CreateBalancerECLPPool --rpc-url $RPC_MAINNET --sender 0x20D567D039cFC0174a3887F427BE54D418f7C274 -vvv && forge test --fork-url $RPC_MAINNET --match-contract VerifyECLPSymmetry -vvv",
