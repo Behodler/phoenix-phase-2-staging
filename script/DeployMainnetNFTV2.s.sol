@@ -12,6 +12,7 @@ import {BurnerV2} from "@yield-claim-nft/V2/dispatchers/BurnerV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/V2/dispatchers/GatherV2.sol";
 import {BalancerPooler as V1BalancerPooler} from "@yield-claim-nft/dispatchers/BalancerPooler.sol";
+import {ITokenDispatcher} from "@yield-claim-nft/interfaces/ITokenDispatcher.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
@@ -49,6 +50,8 @@ interface IYieldNFTMinter {
         external
         view
         returns (address dispatcher, uint256 price, uint256 growthBasisPoints, bool disabled);
+    function nextIndex() external view returns (uint256);
+    function dispatcherToIndex(address dispatcher) external view returns (uint256);
 }
 
 contract DeployMainnetNFTV2 is Script {
@@ -233,19 +236,30 @@ contract DeployMainnetNFTV2 is Script {
 
     function _readV1Prices() internal {
         IYieldNFTMinter v1 = IYieldNFTMinter(V1_NFT_MINTER);
-        for (uint256 i = 1; i <= 5; i++) {
+        // Indices 1, 2, 3, 5 are the original Burner/Gather dispatchers — still active.
+        // Index 4 on mainnet is a *disabled* old BalancerPooler (superseded by the one at a later index).
+        // V2 index 4 must be seeded from the active V1 BalancerPooler at V1_BALANCER_POOLER (dynamic index).
+        uint256[5] memory v1ReadIdx = [uint256(1), 2, 3, 0, 5];
+        v1ReadIdx[3] = v1.dispatcherToIndex(V1_BALANCER_POOLER);
+        require(v1ReadIdx[3] != 0, "Active V1 BalancerPooler not registered in V1 NFTMinter");
+
+        for (uint256 slot = 0; slot < 5; slot++) {
+            uint256 i = v1ReadIdx[slot];
             uint256 price = v1.getPrice(i);
-            (, , uint256 g, ) = v1.configs(i);
-            v1Prices[i - 1] = price;
-            v1Growth[i - 1] = g;
-            console.log("V1 index", i);
+            (, , uint256 g, bool disabled) = v1.configs(i);
+            v1Prices[slot] = price;
+            v1Growth[slot] = g;
+            console.log("V2 index", slot + 1);
+            console.log("  read from V1 index:", i);
             console.log("  price: ", price);
             console.log("  growth (bps):", g);
+            console.log("  V1 disabled:", disabled);
         }
 
         // Convert sUSDS price -> USDS price for V2 index 4.
         balancerV2UsdsPrice = IERC4626(SUSDS).convertToAssets(v1Prices[3]);
         console.log("Index 4 (BalancerPooler) conversion:");
+        console.log("  source V1 index:    ", v1ReadIdx[3]);
         console.log("  V1 sUSDS price:     ", v1Prices[3]);
         console.log("  V2 USDS price:      ", balancerV2UsdsPrice);
         console.log("  V2 growth (bps):    ", BALANCER_POOLER_V2_GROWTH_BPS);
@@ -458,15 +472,18 @@ contract DeployMainnetNFTV2 is Script {
         NFTMinterV2(nftMinterV2).setAuthorizedMinter(nftMigrator, true);
         console.log("NFTMinterV2.setAuthorizedMinter(NFTMigrator, true)");
 
-        // 1:1 mapping for indices 1-5
-        uint256[] memory v1Indexes = new uint256[](5);
-        uint256[] memory v2Indexes = new uint256[](5);
-        for (uint256 i = 0; i < 5; i++) {
-            v1Indexes[i] = i + 1;
-            v2Indexes[i] = i + 1;
-        }
+        // Build mapping dynamically: iterate every V1 dispatcher (including any disabled
+        // legacy dispatchers) and route each to its V2 counterpart by primeToken.
+        // Live mainnet state: V1 has 6 dispatchers (index 4 is a disabled old BalancerPooler,
+        // index 6 is the active one). Both map to V2 index 4. setInitialized() requires
+        // every V1 index up to nextIndex-1 to have a non-zero mapping.
+        (uint256[] memory v1Indexes, uint256[] memory v2Indexes) = _buildMigratorMapping();
         NFTMigrator(nftMigrator).setMappings(v1Indexes, v2Indexes);
-        console.log("NFTMigrator mappings set (1:1 for indices 1-5)");
+        console.log("NFTMigrator mappings set; entries:", v1Indexes.length);
+        for (uint256 k = 0; k < v1Indexes.length; k++) {
+            console.log("  V1", v1Indexes[k]);
+            console.log("    -> V2", v2Indexes[k]);
+        }
 
         NFTMigrator(nftMigrator).setInitialized();
         console.log("NFTMigrator initialized");
@@ -474,6 +491,41 @@ contract DeployMainnetNFTV2 is Script {
         _trackDeployment("NFTMigratorConfig", address(0), 0);
         _markConfigured("NFTMigratorConfig", gasBefore - gasleft());
         if (!isPreview) _writeProgressFile();
+    }
+
+    function _buildMigratorMapping()
+        internal
+        view
+        returns (uint256[] memory v1Indexes, uint256[] memory v2Indexes)
+    {
+        IYieldNFTMinter v1 = IYieldNFTMinter(V1_NFT_MINTER);
+        uint256 upper = v1.nextIndex(); // exclusive
+        require(upper > 1, "V1 has no registered dispatchers");
+        uint256 count = upper - 1;
+        v1Indexes = new uint256[](count);
+        v2Indexes = new uint256[](count);
+
+        for (uint256 i = 1; i < upper; i++) {
+            (address dispatcher, , , ) = v1.configs(i);
+            require(dispatcher != address(0), "V1 has unregistered gap (unexpected)");
+            address primeToken = ITokenDispatcher(dispatcher).primeToken();
+            uint256 v2Index = _v2IndexForPrimeToken(primeToken);
+            require(v2Index != 0, "No V2 counterpart for V1 dispatcher's primeToken");
+            v1Indexes[i - 1] = i;
+            v2Indexes[i - 1] = v2Index;
+        }
+    }
+
+    function _v2IndexForPrimeToken(address primeToken) internal pure returns (uint256) {
+        if (primeToken == EYE) return 1;
+        if (primeToken == SCX) return 2;
+        if (primeToken == FLAX) return 3;
+        // Both the legacy V1 BalancerPooler (sUSDS primeToken) and the active one
+        // map to V2 BalancerPoolerV2 at index 4. V2 also accepts USDS directly.
+        if (primeToken == SUSDS) return 4;
+        if (primeToken == USDS) return 4;
+        if (primeToken == WBTC) return 5;
+        return 0;
     }
 
     // ========================================
