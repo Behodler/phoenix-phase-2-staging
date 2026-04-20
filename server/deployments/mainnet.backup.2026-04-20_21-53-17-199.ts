@@ -3,7 +3,6 @@
 // Chain ID: 1 (mainnet)
 // Updated 2026-03-20: NFT addresses patched from progress.1.json after broadcast
 // Updated 2026-04-16: Restructured for NFT V2 (nftsV1/nftsV2 sub-objects)
-// Updated 2026-04-20: NFT V2 addresses patched from broadcast
 import { ContractAddresses } from './addresses';
 
 
@@ -52,7 +51,7 @@ export const mainnetAddresses: ContractAddresses = {
 
   // NFT infrastructure — common
   BurnRecorder: "0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F",
-  NFTMigrator: "0x22c0fc1aae66873abd029448eaf15a2fd7eed140",
+  NFTMigrator: "0x0000000000000000000000000000000000000000",
 
   // NFT V1
   nftsV1: {
@@ -66,12 +65,12 @@ export const mainnetAddresses: ContractAddresses = {
 
   // NFT V2 — not yet deployed
   nftsV2: {
-    NFTMinter: "0x39af088408e815844c567037c157b31d48d2e10f",
-    BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
-    BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
-    BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
-    BalancerPooler: "0x6e957842afbcd01ce9db296d173f39134b362771",
-    GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
+    NFTMinter: "0x0000000000000000000000000000000000000000",
+    BurnerEYE: "0x0000000000000000000000000000000000000000",
+    BurnerSCX: "0x0000000000000000000000000000000000000000",
+    BurnerFlax: "0x0000000000000000000000000000000000000000",
+    BalancerPooler: "0x0000000000000000000000000000000000000000",
+    GatherWBTC: "0x0000000000000000000000000000000000000000",
   },
 
   // View contracts
