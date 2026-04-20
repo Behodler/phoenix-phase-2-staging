@@ -805,6 +805,31 @@ contract DeployMainnetNFTV2 is Script {
         console.log("SYA discount rate:");
         console.log("  prior:", priorDiscountRate);
         console.log("  new:  ", DISCOUNT_RATE_BPS);
+        console.log("");
+        _printGasSummary();
         console.log("=========================================");
+    }
+
+    function _printGasSummary() internal view {
+        console.log("--- Gas consumption (per step) ---");
+        uint256 totalDeployGas;
+        uint256 totalConfigGas;
+        for (uint256 i = 0; i < contractNames.length; i++) {
+            ContractDeployment memory d = deployments[contractNames[i]];
+            if (d.deployGas > 0) {
+                console.log("  deploy ", d.name);
+                console.log("    gas:", d.deployGas);
+                totalDeployGas += d.deployGas;
+            }
+            if (d.configGas > 0) {
+                console.log("  config ", d.name);
+                console.log("    gas:", d.configGas);
+                totalConfigGas += d.configGas;
+            }
+        }
+        console.log("");
+        console.log("Total deploy gas:", totalDeployGas);
+        console.log("Total config gas:", totalConfigGas);
+        console.log("TOTAL GAS:       ", totalDeployGas + totalConfigGas);
     }
 }
