@@ -79,6 +79,10 @@ export const mainnetAddresses: ContractAddresses = {
   DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
   MintPageView: "0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119",
 
+  // NFT staking — not yet deployed
+  BalancerPoolerMintDebtHook: "0x0000000000000000000000000000000000000000",
+  NFTStaker: "0x0000000000000000000000000000000000000000",
+  BatchNFTMinter: "0x0000000000000000000000000000000000000000",
 
 };
 
