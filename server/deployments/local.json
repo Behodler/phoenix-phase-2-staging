@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-04-20T20:08:20.992Z",
+  "extractedAt": "2026-04-27T15:32:44.460Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -179,32 +179,53 @@
       "deployGas": 660479,
       "configGas": 0
     },
+    "BalancerPoolerMintDebtHook": {
+      "address": "0xB0D4afd8879eD9F52b28595d31B441D079B2Ca07",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 605804,
+      "configGas": 0
+    },
+    "NFTStaker": {
+      "address": "0x922D6956C99E12DFeB3224DEA977D0939758A1Fe",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2394607,
+      "configGas": 0
+    },
+    "BatchNFTMinter": {
+      "address": "0x4C4a2f8c81640e47606d3fd77B353E87Ba015584",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 398319,
+      "configGas": 0
+    },
     "DepositView": {
-      "address": "0xab16A69A5a8c12C732e0DEFF4BE56A70bb64c926",
+      "address": "0x8A93d247134d91e0de6f96547cB0204e5BE8e5D8",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "ViewRouter": {
-      "address": "0xE3011A37A904aB90C8881a99BD1F6E21401f1522",
+      "address": "0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849",
       "deployed": true,
       "configured": true,
-      "deployGas": 516127,
+      "deployGas": 516144,
       "configGas": 0
     },
     "DepositPageView": {
-      "address": "0x1f10F3Ba7ACB61b2F50B9d6DdCf91a6f787C0E82",
+      "address": "0xF32D39ff9f6Aa7a7A64d7a4F00a54826Ef791a55",
       "deployed": true,
       "configured": true,
-      "deployGas": 592308,
+      "deployGas": 592324,
       "configGas": 0
     },
     "MintPageView": {
-      "address": "0x525C7063E7C20997BaaE9bDa922159152D0e8417",
+      "address": "0x99dBE4AEa58E518C50a1c04aE9b48C9F6354612f",
       "deployed": true,
       "configured": true,
-      "deployGas": 1722641,
+      "deployGas": 1722742,
       "configGas": 0
     }
   },
