@@ -40,6 +40,11 @@ export default defineConfig({
         // V2 Dispatch hooks
         'IDispatchHook.sol/IDispatchHook.json',
         'DefaultDispatchHook.sol/DefaultDispatchHook.json',
+        'BalancerPoolerMintDebtHook.sol/BalancerPoolerMintDebtHook.json',
+
+        // NFT Staking
+        'NFTStaker.sol/NFTStaker.json',
+        'BatchNFTMinter.sol/BatchNFTMinter.json',
 
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',
