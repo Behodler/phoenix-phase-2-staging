@@ -39,6 +39,14 @@ import {BurnerV2} from "@yield-claim-nft/V2/dispatchers/BurnerV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/V2/dispatchers/GatherV2.sol";
 import {NFTMigrator} from "@yield-claim-nft/V2/NFTMigrator.sol";
+import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPoolerMintDebtHook.sol";
+import {IDispatchHook} from "@yield-claim-nft/V2/interfaces/IDispatchHook.sol";
+import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalancerPoolerMintDebtHook.sol";
+import {NFTStaker} from "nft-staking/NFTStaker.sol";
+import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
+import {INFTSupply} from "nft-staking/INFTSupply.sol";
+import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title DeployMocks
@@ -105,6 +113,11 @@ contract DeployMocks is Script {
     BalancerPoolerV2 public balancerPoolerV2;
     GatherV2 public gatherWBTCV2;
     NFTMigrator public nftMigrator;
+
+    // NFT Staking infrastructure
+    BalancerPoolerMintDebtHook public balancerPoolerHook;
+    NFTStaker public nftStaker;
+    BatchNFTMinter public batchNFTMinter;
 
     // Progress tracking structure
     struct ContractDeployment {
@@ -495,6 +508,58 @@ contract DeployMocks is Script {
         nftMigrator.setInitialized();
         console.log("NFTMigrator index mappings set and initialized (1:1 for indices 1-5)");
 
+        // ====== PHASE 3.7: NFT Staking Stack ======
+        console.log("\n=== Phase 3.7: NFT Staking Stack ===");
+
+        // 1. Deploy BalancerPoolerMintDebtHook (replaces the default no-op DispatchHook)
+        gasBefore = gasleft();
+        balancerPoolerHook = new BalancerPoolerMintDebtHook(
+            deployer,
+            address(balancerPoolerV2),
+            address(phUSD)
+        );
+        _trackDeployment("BalancerPoolerMintDebtHook", address(balancerPoolerHook), gasBefore - gasleft());
+        console.log("BalancerPoolerMintDebtHook deployed at:", address(balancerPoolerHook));
+
+        // 2. Install the hook on BalancerPoolerV2 (swaps out the constructor-installed DefaultDispatchHook)
+        balancerPoolerV2.setHook(IDispatchHook(address(balancerPoolerHook)));
+        console.log("BalancerPoolerV2.setHook -> BalancerPoolerMintDebtHook");
+
+        // 3. Deploy NFTStaker (BalancerPoolerV2 NFT id = 4, phUSD as reward, dispatcher index 4)
+        gasBefore = gasleft();
+        nftStaker = new NFTStaker(
+            IERC1155(address(nftMinterV2)),
+            4,
+            IERC20(address(phUSD)),
+            deployer,
+            INFTSupply(address(nftMinterV2)),
+            4
+        );
+        _trackDeployment("NFTStaker", address(nftStaker), gasBefore - gasleft());
+        console.log("NFTStaker deployed at:", address(nftStaker));
+
+        // 4. Wire NFTStaker -> hook
+        nftStaker.setDispatcherHook(IBalancerPoolerMintDebtHook(address(balancerPoolerHook)));
+        console.log("NFTStaker.setDispatcherHook -> BalancerPoolerMintDebtHook");
+
+        // 5. Wire hook recipient -> NFTStaker
+        balancerPoolerHook.setRecipient(address(nftStaker));
+        console.log("BalancerPoolerMintDebtHook.setRecipient -> NFTStaker");
+
+        // 6. Authorize the hook to mint phUSD (so pull() can realise mint debt)
+        phUSD.setMinter(address(balancerPoolerHook), true);
+        console.log("Authorized BalancerPoolerMintDebtHook as phUSD minter");
+
+        // 7. Set the target APY (30% — bounded by MAX_TARGET_APY = 50%)
+        nftStaker.setTargetAPY(0.3e18);
+        console.log("NFTStaker.setTargetAPY -> 0.3e18 (30%)");
+
+        // 8. Deploy BatchNFTMinter (stateless helper, no constructor args)
+        gasBefore = gasleft();
+        batchNFTMinter = new BatchNFTMinter();
+        _trackDeployment("BatchNFTMinter", address(batchNFTMinter), gasBefore - gasleft());
+        console.log("BatchNFTMinter deployed at:", address(batchNFTMinter));
+
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
 
@@ -639,6 +704,12 @@ contract DeployMocks is Script {
         console.log("NFTMinterV2.setPauser() called");
         pauser.register(address(nftMinterV2));
         console.log("Pauser.register(NFTMinterV2) completed");
+
+        // Register NFTStaker with Pauser
+        nftStaker.setPauser(address(pauser));
+        console.log("NFTStaker.setPauser() called");
+        pauser.register(address(nftStaker));
+        console.log("Pauser.register(NFTStaker) completed");
 
         console.log("All protocol contracts registered with Pauser");
 
@@ -875,6 +946,9 @@ contract DeployMocks is Script {
         _markConfigured("BalancerPoolerV2", 0);
         _markConfigured("GatherWBTCV2", 0);
         _markConfigured("NFTMigrator", 0);
+        _markConfigured("BalancerPoolerMintDebtHook", 0);
+        _markConfigured("NFTStaker", 0);
+        _markConfigured("BatchNFTMinter", 0);
         _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
         _markConfigured("DepositPageView", 0);
