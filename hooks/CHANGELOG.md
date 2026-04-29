@@ -5,6 +5,13 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-29
+
+### Added
+- NFTStaker hooks (Masterchef-style staking pool over BalancerPoolerV2 NFT id 4, paying phUSD rewards sized off targetAPY)
+- BalancerPoolerMintDebtHook hooks (dispatch hook that accrues phUSD mint debt on BalancerPoolerV2 mints; owner/recipient can call pull())
+- BatchNFTMinter hooks (stateless helper that loops ITokenMinterV2.mint() and refunds dust)
+
 ## [0.2.0] - 2026-01-24
 
 ### Removed

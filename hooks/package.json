@@ -1,7 +1,7 @@
 {
   "name": "@behodler/phase2-wagmi-hooks",
-  "version": "0.4.3",
-  "description": "Type-safe Wagmi hooks for Phoenix Phase 2 protocol contracts (MockPhUSD, MockRewardToken, MockYieldStrategy, PhusdStableMinter, PhlimboEA, DepositView, MintPageView)",
+  "version": "0.5.0",
+  "description": "Type-safe Wagmi hooks for Phoenix Phase 2 protocol contracts (MockPhUSD, MockRewardToken, MockYieldStrategy, PhusdStableMinter, PhlimboEA, DepositView, MintPageView, NFTStaker, BalancerPoolerMintDebtHook, BatchNFTMinter)",
   "main": "generated.ts",
   "types": "generated.ts",
   "type": "module",
@@ -27,7 +27,8 @@
     "stable-minter",
     "typescript",
     "phase2",
-    "deposit-view"
+    "deposit-view",
+    "nft-staking"
   ],
   "author": "Behodler",
   "license": "MIT",
