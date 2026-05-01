@@ -473,6 +473,9 @@ contract DeployMocks is Script {
         balancerPoolerV2.setMinter(address(nftMinterV2));
         console.log("BalancerPoolerV2.setMinter -> NFTMinterV2");
 
+        balancerPoolerV2.setAuthorizedPooler(deployer, true);
+        console.log("BalancerPoolerV2.setAuthorizedPooler(deployer, true)");
+
         gatherWBTCV2.setMinter(address(nftMinterV2));
         console.log("GatherWBTCV2.setMinter -> NFTMinterV2");
 

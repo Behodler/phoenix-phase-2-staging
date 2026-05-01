@@ -35,7 +35,12 @@ contract MockBalancerVault is IBalancerVault {
      * @return result The bytes returned from unlockCallback
      */
     function unlock(bytes calldata data) external override returns (bytes memory result) {
-        result = IUnlockCallback(msg.sender).unlockCallback(data);
+        // Real Balancer V3 forwards `data` as raw calldata. BalancerPoolerV2.pool()
+        // pre-encodes `data` as `unlockCallback.selector + abi.encode(innerData)`, so
+        // we must call back via low-level call to avoid double-wrapping the bytes.
+        (bool success, bytes memory returnData) = msg.sender.call(data);
+        require(success, "MockBalancerVault: unlock callback failed");
+        result = returnData;
     }
 
     /**
