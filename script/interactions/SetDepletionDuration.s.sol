@@ -7,7 +7,7 @@ import "@phlimbo-ea/Phlimbo.sol";
 
 /**
  * @title SetDepletionDuration
- * @notice Sets PhlimboEA depletion duration to 2 weeks
+ * @notice Sets PhlimboEA depletion duration to 10 days
  *
  * Usage (dry run):
  *   npm run mainnet:set-depletion-dry
@@ -23,7 +23,7 @@ contract SetDepletionDuration is Script {
     address public constant OWNER_ADDRESS = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
 
     // Parameters
-    uint256 public constant DEPLETION_DURATION = 14 days; // 2 weeks
+    uint256 public constant DEPLETION_DURATION = 10 days;
 
     function run() external {
         console.log("=========================================");
@@ -53,7 +53,7 @@ contract SetDepletionDuration is Script {
         vm.startBroadcast();
 
         phlimbo.setDepletionDuration(DEPLETION_DURATION);
-        console.log("Depletion duration set to 2 weeks");
+        console.log("Depletion duration set to 10 days");
 
         vm.stopBroadcast();
 
