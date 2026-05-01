@@ -4,7 +4,6 @@
 // Updated 2026-03-20: NFT addresses patched from progress.1.json after broadcast
 // Updated 2026-04-16: Restructured for NFT V2 (nftsV1/nftsV2 sub-objects)
 // Updated 2026-04-20: NFT V2 addresses patched from broadcast
-// Updated 2026-05-01: NFT staking addresses patched from broadcast
 import { ContractAddresses } from './addresses';
 
 
@@ -79,10 +78,11 @@ export const mainnetAddresses: ContractAddresses = {
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
   DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
   MintPageView: "0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119",
-  // NFT staking
-  BalancerPoolerMintDebtHook: "0xbe79dc2c302165025166f09193d9905ef262c064",
-  NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
-  BatchNFTMinter: "0xd3104a6e6d53b37061856fe1f31296d8962f9e01",
+
+  // NFT staking — not yet deployed
+  BalancerPoolerMintDebtHook: "0x0000000000000000000000000000000000000000",
+  NFTStaker: "0x0000000000000000000000000000000000000000",
+  BatchNFTMinter: "0x0000000000000000000000000000000000000000",
 
 };
 
