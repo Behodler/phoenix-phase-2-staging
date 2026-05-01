@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-05-01T00:15:24.816Z",
+  "extractedAt": "2026-05-01T00:56:41.197Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
