@@ -69,6 +69,8 @@
     "mainnet:phusd-amm-balances": "bash scripts/check-phusd-amm-balances.sh",
     "FixBalancerPooler:preview": "PREVIEW_MODE=true forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET -vvv",
     "FixBalancerPooler": "forge script script/FixBalancerPoolerMainnet.s.sol:FixBalancerPoolerMainnet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "MigrateBalancerPoolerV2Pool:preview": "PREVIEW_MODE=true forge script script/MigrateBalancerPoolerV2Pool.s.sol:MigrateBalancerPoolerV2Pool --rpc-url $RPC_MAINNET -vvv",
+    "MigrateBalancerPoolerV2Pool": "forge script script/MigrateBalancerPoolerV2Pool.s.sol:MigrateBalancerPoolerV2Pool --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-balancer-pool-mainnet.js",
     "RedeployMintPageViewV2:preview": "PREVIEW_MODE=true forge script script/RedeployMintPageViewV2.s.sol:RedeployMintPageViewV2 --rpc-url $RPC_MAINNET -vvv",
     "RedeployMintPageViewV2": "forge script script/RedeployMintPageViewV2.s.sol:RedeployMintPageViewV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "sim:eclp-rebalance": "forge test --fork-url $RPC_MAINNET --match-test testSimulateRebalance -vvv",
