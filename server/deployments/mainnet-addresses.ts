@@ -4,6 +4,7 @@
 // Updated 2026-03-20: NFT addresses patched from progress.1.json after broadcast
 // Updated 2026-04-16: Restructured for NFT V2 (nftsV1/nftsV2 sub-objects)
 // Updated 2026-04-20: NFT V2 addresses patched from broadcast
+// Updated 2026-05-02: BalancerPool repointed to phUSD/sUSDS 50/50 pool
 import { ContractAddresses } from './addresses';
 
 
@@ -46,7 +47,7 @@ export const mainnetAddresses: ContractAddresses = {
   SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD",
 
   // Balancer V3 infrastructure
-  BalancerPool: "0x5b26d938f0be6357c39e936cc9c2277b9334ea58",
+  BalancerPool: "0x642BB6860b4776CC10b26B8f361Fd139E7f0db04",
   BalancerVault: "0xbA1333333333a1BA1108E8412f11850A5C319bA9",
   BalancerRouter: "0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd",
 
