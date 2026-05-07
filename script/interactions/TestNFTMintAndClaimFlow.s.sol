@@ -118,7 +118,7 @@ contract TestNFTMintAndClaimFlow is Script {
 
         // Check pending yield
         uint256 totalYield = accumulator.getTotalYield();
-        uint256 claimAmount = accumulator.calculateClaimAmount();
+        uint256 claimAmount = accumulator.calculateClaimAmount(new address[](0));
         console.log("Total normalized yield:", totalYield);
         console.log("Claim amount (USDC to pay):", claimAmount);
 
@@ -135,7 +135,7 @@ contract TestNFTMintAndClaimFlow is Script {
         // Claim yield - this burns 1 NFT and withdraws yield
         // nftIndex is the dispatcher config index (3 for BalancerPooler)
         // minRewardTokenSupplied = 0 for testing (no slippage protection)
-        accumulator.claim(balancerPoolerIndex, 0);
+        accumulator.claim(balancerPoolerIndex, 0, new address[](0));
         console.log("Called claim() on StableYieldAccumulator");
 
         vm.stopBroadcast();

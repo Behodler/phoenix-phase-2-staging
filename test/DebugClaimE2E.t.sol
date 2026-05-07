@@ -23,7 +23,7 @@ contract DebugClaimE2E is Test {
         // Confirm claim reverts before fix
         vm.prank(CALLER);
         vm.expectRevert();
-        acc.claim(5, 0);
+        acc.claim(5, 0, new address[](0));
 
         // Owner removes the paused strategy
         vm.prank(OWNER);
@@ -37,7 +37,7 @@ contract DebugClaimE2E is Test {
         // Claim should now succeed
         uint256 usdcBefore = IERC20(USDC).balanceOf(CALLER);
         vm.prank(CALLER);
-        acc.claim(5, 0);
+        acc.claim(5, 0, new address[](0));
         uint256 usdcAfter = IERC20(USDC).balanceOf(CALLER);
 
         // Caller paid USDC (balance decreased)

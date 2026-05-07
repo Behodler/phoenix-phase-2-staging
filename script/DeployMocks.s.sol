@@ -557,9 +557,9 @@ contract DeployMocks is Script {
         nftStaker.setTargetAPY(0.3e18);
         console.log("NFTStaker.setTargetAPY -> 0.3e18 (30%)");
 
-        // 8. Deploy BatchNFTMinter (stateless helper, no constructor args)
+        // 8. Deploy BatchNFTMinter (owner-administered nudge, deployer is initial owner)
         gasBefore = gasleft();
-        batchNFTMinter = new BatchNFTMinter();
+        batchNFTMinter = new BatchNFTMinter(deployer);
         _trackDeployment("BatchNFTMinter", address(batchNFTMinter), gasBefore - gasleft());
         console.log("BatchNFTMinter deployed at:", address(batchNFTMinter));
 

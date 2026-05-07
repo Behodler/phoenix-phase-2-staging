@@ -122,7 +122,7 @@ contract DebugClaimYield is Script {
         uint256 totalYield = acc.getTotalYield();
         console.log("\n  getTotalYield() (18 dec):", totalYield);
 
-        uint256 claimAmount = acc.calculateClaimAmount();
+        uint256 claimAmount = acc.calculateClaimAmount(new address[](0));
         console.log("  calculateClaimAmount():  ", claimAmount);
         if (claimAmount > 0) {
             console.log("  (claim payment ~", claimAmount / 1e6, "USDC)");
@@ -194,7 +194,7 @@ contract DebugClaimYieldSim is Script {
         console.log("Caller:", CALLER);
 
         vm.startBroadcast(CALLER);
-        acc.claim(nftIndex, 0);
+        acc.claim(nftIndex, 0, new address[](0));
         vm.stopBroadcast();
 
         console.log("Claim succeeded!");
