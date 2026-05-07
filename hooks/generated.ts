@@ -882,6 +882,13 @@ export const balancerPoolerV2Abi = [
 
 export const batchNftMinterAbi = [
   {
+    type: 'constructor',
+    inputs: [
+      { name: 'initialOwner', internalType: 'address', type: 'address' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
     type: 'function',
     inputs: [
       {
@@ -903,8 +910,142 @@ export const batchNftMinterAbi = [
     outputs: [{ name: 'totalPaid', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'nonpayable',
   },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'nudgePaymentToken',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'nudgeSize',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'owner',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'renounceOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newToken', internalType: 'address', type: 'address' }],
+    name: 'setNudgePaymentToken',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newSize', internalType: 'uint256', type: 'uint256' }],
+    name: 'setNudgeSize',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
+    name: 'transferOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'recipient',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'token',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'amount',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'NudgePaid',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newToken',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'NudgePaymentTokenChanged',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newSize',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'NudgeSizeChanged',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'previousOwner',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newOwner',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'OwnershipTransferred',
+  },
+  {
+    type: 'error',
+    inputs: [],
+    name: 'BatchMint__NudgeTokenMatchesPaymentToken',
+  },
   { type: 'error', inputs: [], name: 'BatchMint__ZeroCount' },
   { type: 'error', inputs: [], name: 'BatchMint__ZeroRecipient' },
+  {
+    type: 'error',
+    inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
+    name: 'OwnableInvalidOwner',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'account', internalType: 'address', type: 'address' }],
+    name: 'OwnableUnauthorizedAccount',
+  },
   {
     type: 'error',
     inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
@@ -7475,7 +7616,13 @@ export const stableYieldAccumulatorAbi = [
   },
   {
     type: 'function',
-    inputs: [],
+    inputs: [
+      {
+        name: 'exemptStrategies',
+        internalType: 'address[]',
+        type: 'address[]',
+      },
+    ],
     name: 'calculateClaimAmount',
     outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
@@ -7495,6 +7642,11 @@ export const stableYieldAccumulatorAbi = [
         name: 'minRewardTokenSupplied',
         internalType: 'uint256',
         type: 'uint256',
+      },
+      {
+        name: 'exemptStrategies',
+        internalType: 'address[]',
+        type: 'address[]',
       },
     ],
     name: 'claim',
@@ -7582,6 +7734,20 @@ export const stableYieldAccumulatorAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'nudge',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'nudgeSplit',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'owner',
     outputs: [{ name: '', internalType: 'address', type: 'address' }],
     stateMutability: 'view',
@@ -7660,6 +7826,20 @@ export const stableYieldAccumulatorAbi = [
     type: 'function',
     inputs: [{ name: '_nftMinter', internalType: 'address', type: 'address' }],
     name: 'setNFTMinter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '_nudge', internalType: 'address', type: 'address' }],
+    name: 'setNudgeAddress',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '_split', internalType: 'uint256', type: 'uint256' }],
+    name: 'setNudgeSplit',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -7807,6 +7987,44 @@ export const stableYieldAccumulatorAbi = [
       },
     ],
     name: 'NFTMinterUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'oldSplit',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'newSplit',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'NudgeSplitUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'oldNudge',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newNudge',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'NudgeUpdated',
   },
   {
     type: 'event',
@@ -8014,12 +8232,15 @@ export const stableYieldAccumulatorAbi = [
   },
   { type: 'error', inputs: [], name: 'EnforcedPause' },
   { type: 'error', inputs: [], name: 'ExceedsMaxDiscount' },
+  { type: 'error', inputs: [], name: 'ExemptStrategyNotRegistered' },
   { type: 'error', inputs: [], name: 'ExpectedPause' },
   { type: 'error', inputs: [], name: 'InsufficientPending' },
   { type: 'error', inputs: [], name: 'InsufficientYield' },
   { type: 'error', inputs: [], name: 'InvalidDecimals' },
+  { type: 'error', inputs: [], name: 'InvalidNudgeSplit' },
   { type: 'error', inputs: [], name: 'NoValidNFT' },
   { type: 'error', inputs: [], name: 'NotImplemented' },
+  { type: 'error', inputs: [], name: 'NudgeNotConfigured' },
   {
     type: 'error',
     inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
