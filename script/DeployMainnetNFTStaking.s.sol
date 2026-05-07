@@ -339,7 +339,7 @@ contract DeployMainnetNFTStaking is Script {
             return;
         }
         uint256 gasBefore = gasleft();
-        BatchNFTMinter b = new BatchNFTMinter();
+        BatchNFTMinter b = new BatchNFTMinter(OWNER_ADDRESS);
         batchNFTMinter = address(b);
         _trackDeployment("BatchNFTMinter", batchNFTMinter, gasBefore - gasleft());
         if (!isPreview) _writeProgressFile();
