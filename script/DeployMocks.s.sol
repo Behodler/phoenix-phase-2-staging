@@ -67,6 +67,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * - Phlimbo contract integration for yield distribution
  */
 contract DeployMocks is Script {
+    // Mock-vs-mainnet parity constants for nudge feature (story 045.5)
+    // - MOCK_NUDGE_SPLIT matches mainnet (story 046)
+    // - MOCK_NUDGE_SIZE is lowered from mainnet's 40 for dev ergonomics
+    uint256 constant MOCK_NUDGE_SPLIT = 30;
+    uint256 constant MOCK_NUDGE_SIZE = 3;
+
     // Deployment addresses
     MockPhUSD public phUSD;
     MockRewardToken public rewardToken; // USDC - the consolidated reward token
@@ -563,6 +569,17 @@ contract DeployMocks is Script {
         _trackDeployment("BatchNFTMinter", address(batchNFTMinter), gasBefore - gasleft());
         console.log("BatchNFTMinter deployed at:", address(batchNFTMinter));
 
+        // 9. Wire nudge config on BatchNFTMinter (story 045.5)
+        //    nudgePaymentToken first, then nudgeSize (mirrors story 046 mainnet sequence).
+        //    The runtime guard (BatchNFTMinter.sol:122-126) requires
+        //    nudgePaymentToken != paymentToken at batchMint time. The mock V2 mint flow
+        //    uses non-USDC prime tokens (EYE/SCX/Flax/USDS), so the constraint holds.
+        batchNFTMinter.setNudgePaymentToken(address(rewardToken)); // USDC
+        console.log("BatchNFTMinter.setNudgePaymentToken -> USDC");
+
+        batchNFTMinter.setNudgeSize(MOCK_NUDGE_SIZE);
+        console.log("BatchNFTMinter.setNudgeSize ->", MOCK_NUDGE_SIZE);
+
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
 
@@ -668,6 +685,16 @@ contract DeployMocks is Script {
 
         yieldStrategyUSDC.setWithdrawer(address(stableYieldAccumulator), true);
         console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDC");
+
+        // Wire nudge config on StableYieldAccumulator (story 045.5)
+        //   nudge address first, then split (mirrors mainnet sequence in story 046).
+        //   When claim() runs, nudgeSplit% of the discounted USDC payment is forwarded
+        //   to the BatchNFTMinter; the remainder goes to Phlimbo as before.
+        stableYieldAccumulator.setNudgeAddress(address(batchNFTMinter));
+        console.log("SYA.setNudgeAddress ->", address(batchNFTMinter));
+
+        stableYieldAccumulator.setNudgeSplit(MOCK_NUDGE_SPLIT);
+        console.log("SYA.setNudgeSplit ->", MOCK_NUDGE_SPLIT);
 
         // ====== PHASE 8: Pauser Registration ======
         console.log("\n=== Phase 8: Pauser Registration ===");
