@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-05-01T00:56:41.384Z
+// Generated interface from local.json on 2026-05-09T21:46:25.680Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -36,6 +36,7 @@ export interface ContractAddresses {
   BalancerVault: string;
   BurnRecorder: string;
   BalancerRouter: string;
+  WaUSDC: string;
   NFTMigrator: string;
   BalancerPoolerMintDebtHook: string;
   NFTStaker: string;
