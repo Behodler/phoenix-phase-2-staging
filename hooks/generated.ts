@@ -487,6 +487,20 @@ export const balancerPoolerV2Abi = [
   {
     type: 'function',
     inputs: [],
+    name: 'batchDonationSize',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'batchMinter',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'description',
     outputs: [{ name: '', internalType: 'string', type: 'string' }],
     stateMutability: 'view',
@@ -571,7 +585,10 @@ export const balancerPoolerV2Abi = [
   },
   {
     type: 'function',
-    inputs: [{ name: 'minBPT', internalType: 'uint256', type: 'uint256' }],
+    inputs: [
+      { name: 'minBPT', internalType: 'uint256', type: 'uint256' },
+      { name: 'minUSDC', internalType: 'uint256', type: 'uint256' },
+    ],
     name: 'pool',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -627,6 +644,22 @@ export const balancerPoolerV2Abi = [
   },
   {
     type: 'function',
+    inputs: [{ name: 'newSize', internalType: 'uint256', type: 'uint256' }],
+    name: 'setBatchDonationSize',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'newBatchMinter', internalType: 'address', type: 'address' },
+    ],
+    name: 'setBatchMinter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [
       {
         name: 'newHook',
@@ -665,6 +698,24 @@ export const balancerPoolerV2Abi = [
   },
   {
     type: 'function',
+    inputs: [
+      { name: 'swapPool_', internalType: 'address', type: 'address' },
+      { name: 'waUsdc_', internalType: 'address', type: 'address' },
+      { name: 'usdc_', internalType: 'address', type: 'address' },
+    ],
+    name: 'setSwapConfig',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'swapPool',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
     name: 'transferOwnership',
     outputs: [],
@@ -687,7 +738,21 @@ export const balancerPoolerV2Abi = [
   {
     type: 'function',
     inputs: [],
+    name: 'usdc',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'vault',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'waUsdc',
     outputs: [{ name: '', internalType: 'address', type: 'address' }],
     stateMutability: 'view',
   },
@@ -713,6 +778,69 @@ export const balancerPoolerV2Abi = [
       },
     ],
     name: 'AuthVersionIncremented',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'pooler',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'sUSDSSwapped',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'waUsdcReceived',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'usdcSent',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'batchMinter',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'BatchDonated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newSize',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'BatchDonationSizeSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newBatchMinter',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'BatchMinterSet',
   },
   {
     type: 'event',
@@ -842,6 +970,31 @@ export const balancerPoolerV2Abi = [
       },
     ],
     name: 'PoolerDeauthorized',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'swapPool',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+      {
+        name: 'waUsdc',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+      {
+        name: 'usdc',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'SwapConfigSet',
   },
   {
     type: 'event',
