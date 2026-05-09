@@ -17,6 +17,7 @@ import "../src/mocks/MockFlax.sol";
 import "../src/mocks/MockWBTC.sol";
 import "../src/mocks/MockBalancerPool.sol";
 import "../src/mocks/MockBalancerVault.sol";
+import "../src/mocks/MockERC4626Wrapper.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
@@ -72,6 +73,10 @@ contract DeployMocks is Script {
     // - MOCK_NUDGE_SIZE is lowered from mainnet's 40 for dev ergonomics
     uint256 constant MOCK_NUDGE_SPLIT = 30;
     uint256 constant MOCK_NUDGE_SIZE = 3;
+    // Story 045.5 Phase 7 — BalancerPoolerV2 batch-donation phase
+    // Percent of sUSDS share balance diverted to the donation phase on each pool() call.
+    // Mirrors MOCK_NUDGE_SPLIT for mental-model parity; LP path still receives 70%.
+    uint256 constant MOCK_BATCH_DONATION_SIZE = 30;
 
     // Deployment addresses
     MockPhUSD public phUSD;
@@ -124,6 +129,10 @@ contract DeployMocks is Script {
     BalancerPoolerMintDebtHook public balancerPoolerHook;
     NFTStaker public nftStaker;
     BatchNFTMinter public batchNFTMinter;
+
+    // Story 045.5 Phase 7 — BalancerPoolerV2 donation-phase mocks
+    // waUSDC mock = ERC4626 wrapper over the existing USDC `rewardToken`.
+    MockERC4626Wrapper public mockWaUsdc;
 
     // Progress tracking structure
     struct ContractDeployment {
@@ -482,6 +491,41 @@ contract DeployMocks is Script {
         balancerPoolerV2.setAuthorizedPooler(deployer, true);
         console.log("BalancerPoolerV2.setAuthorizedPooler(deployer, true)");
 
+        // ---- Story 045.5 Phase 7: BalancerPoolerV2 swap-config + waUSDC ----
+        // (setBatchMinter and setBatchDonationSize land in Phase 3.7 below, after
+        // BatchNFTMinter is deployed.)
+        // Deploy waUSDC mock (ERC4626 wrapper over the existing USDC reward token).
+        // 6 decimals to match real USDC; default rate 10000 bps (1:1 redeem).
+        gasBefore = gasleft();
+        mockWaUsdc = new MockERC4626Wrapper(
+            "Mock Wrapped Aave USDC",
+            "mwaUSDC",
+            address(rewardToken),
+            6,
+            10000
+        );
+        _trackDeployment("MockWaUSDC", address(mockWaUsdc), gasBefore - gasleft());
+        console.log("MockWaUSDC deployed at:", address(mockWaUsdc));
+
+        // Configure mock swap rate sUSDS -> waUSDC.
+        // sUSDS has 18 decimals (MockSUSDS uses ERC4626's default), waUSDC has 6 decimals.
+        // 1 sUSDS share -> 1 waUSDC share (decimal scale-down): num = 1, den = 1e12.
+        // This means donationSUSDS / 1e12 waUSDC shares are minted, then redeemed 1:1
+        // for USDC at 6 decimals — preserving USD value across the swap+unwrap.
+        mockBalancerVault.setSwapRate(address(susds), address(mockWaUsdc), 1, 1e12);
+        console.log("MockBalancerVault.setSwapRate(sUSDS -> waUSDC) -> 1 / 1e12 (decimal scale)");
+
+        // Wire swap config on BalancerPoolerV2 (recipient comes later in Phase 3.7).
+        // Note: the swap-pool address is opaque to MockBalancerVault.swap (which
+        // keys off (tokenIn, tokenOut)), so we reuse mockBalancerPool as the
+        // placeholder identifier rather than deploying a separate stub.
+        balancerPoolerV2.setSwapConfig(
+            address(mockBalancerPool), // swapPool placeholder identifier (opaque to mock)
+            address(mockWaUsdc),       // waUsdc
+            address(rewardToken)       // usdc
+        );
+        console.log("BalancerPoolerV2.setSwapConfig(mockBalancerPool, mockWaUsdc, USDC)");
+
         gatherWBTCV2.setMinter(address(nftMinterV2));
         console.log("GatherWBTCV2.setMinter -> NFTMinterV2");
 
@@ -579,6 +623,17 @@ contract DeployMocks is Script {
 
         batchNFTMinter.setNudgeSize(MOCK_NUDGE_SIZE);
         console.log("BatchNFTMinter.setNudgeSize ->", MOCK_NUDGE_SIZE);
+
+        // ---- Story 045.5 Phase 7: Finalise BalancerPoolerV2 batch-donation wiring ----
+        // BatchNFTMinter is now deployed — point the donation recipient at it and
+        // turn the donation phase on. Order: setBatchMinter (recipient) BEFORE
+        // setBatchDonationSize (the activator). Swap config was already wired in
+        // Phase 3.6 above.
+        balancerPoolerV2.setBatchMinter(address(batchNFTMinter));
+        console.log("BalancerPoolerV2.setBatchMinter -> BatchNFTMinter");
+
+        balancerPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
+        console.log("BalancerPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
 
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
@@ -974,6 +1029,7 @@ contract DeployMocks is Script {
         _markConfigured("BurnerSCXV2", 0);
         _markConfigured("BurnerFlaxV2", 0);
         _markConfigured("BalancerPoolerV2", 0);
+        _markConfigured("MockWaUSDC", 0);
         _markConfigured("GatherWBTCV2", 0);
         _markConfigured("NFTMigrator", 0);
         _markConfigured("BalancerPoolerMintDebtHook", 0);
