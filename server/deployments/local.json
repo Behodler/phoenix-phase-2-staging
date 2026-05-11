@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-05-09T21:46:25.573Z",
+  "extractedAt": "2026-05-11T12:20:50.285Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -180,59 +180,59 @@
       "configGas": 0
     },
     "NFTMigrator": {
-      "address": "0x1429859428C0aBc9C2C47C8Ee9FBaf82cFA0F20f",
+      "address": "0xB0D4afd8879eD9F52b28595d31B441D079B2Ca07",
       "deployed": true,
       "configured": true,
       "deployGas": 660479,
       "configGas": 0
     },
     "BalancerPoolerMintDebtHook": {
-      "address": "0x1fA02b2d6A771842690194Cf62D91bdd92BfE28d",
+      "address": "0xdbC43Ba45381e02825b14322cDdd15eC4B3164E6",
       "deployed": true,
       "configured": true,
       "deployGas": 605804,
       "configGas": 0
     },
     "NFTStaker": {
-      "address": "0x04C89607413713Ec9775E14b954286519d836FEf",
+      "address": "0x4C4a2f8c81640e47606d3fd77B353E87Ba015584",
       "deployed": true,
       "configured": true,
-      "deployGas": 2394646,
+      "deployGas": 2394722,
       "configGas": 0
     },
     "BatchNFTMinter": {
-      "address": "0xDC11f7E700A4c898AE5CAddB1082cFfa76512aDD",
+      "address": "0x51A1ceB83B83F1985a81C295d1fF28Afef186E02",
       "deployed": true,
       "configured": true,
       "deployGas": 677912,
       "configGas": 0
     },
     "DepositView": {
-      "address": "0x19cEcCd6942ad38562Ee10bAfd44776ceB67e923",
+      "address": "0xD42912755319665397FF090fBB63B1a31aE87Cee",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "ViewRouter": {
-      "address": "0xD42912755319665397FF090fBB63B1a31aE87Cee",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 516156,
-      "configGas": 0
-    },
-    "DepositPageView": {
       "address": "0xfcDB4564c18A9134002b9771816092C9693622e3",
       "deployed": true,
       "configured": true,
-      "deployGas": 592338,
+      "deployGas": 516158,
+      "configGas": 0
+    },
+    "DepositPageView": {
+      "address": "0x927b167526bAbB9be047421db732C663a0b77B11",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 592339,
       "configGas": 0
     },
     "MintPageView": {
-      "address": "0x32EEce76C2C2e8758584A83Ee2F522D4788feA0f",
+      "address": "0x01c1DeF3b91672704716159C9041Aeca392DdFfb",
       "deployed": true,
       "configured": true,
-      "deployGas": 1722825,
+      "deployGas": 1722833,
       "configGas": 0
     }
   },

@@ -507,6 +507,14 @@ contract DeployMocks is Script {
         _trackDeployment("MockWaUSDC", address(mockWaUsdc), gasBefore - gasleft());
         console.log("MockWaUSDC deployed at:", address(mockWaUsdc));
 
+        // Pre-fund the waUSDC wrapper with underlying USDC so `redeem` payouts
+        // succeed during BalancerPoolerV2 donation-phase unwraps. The mock
+        // wrapper mints shares without taking deposits, so it has no USDC
+        // backing unless we seed it here. See src/mocks/MockERC4626Wrapper.sol
+        // ("Tests/dev scripts pre-fund the wrapper directly").
+        rewardToken.mint(address(mockWaUsdc), 1_000_000 * 10 ** 6);
+        console.log("Pre-funded MockWaUSDC with 1,000,000 USDC for redeem backing");
+
         // Configure mock swap rate sUSDS -> waUSDC.
         // sUSDS has 18 decimals (MockSUSDS uses ERC4626's default), waUSDC has 6 decimals.
         // 1 sUSDS share -> 1 waUSDC share (decimal scale-down): num = 1, den = 1e12.
