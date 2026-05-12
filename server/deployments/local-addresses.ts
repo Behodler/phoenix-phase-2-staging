@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-05-11T12:20:50.437Z
+// Generated from local.json on 2026-05-12T22:25:49.261Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';

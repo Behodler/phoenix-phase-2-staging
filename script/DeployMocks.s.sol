@@ -72,7 +72,7 @@ contract DeployMocks is Script {
     // - MOCK_NUDGE_SPLIT matches mainnet (story 046)
     // - MOCK_NUDGE_SIZE is lowered from mainnet's 40 for dev ergonomics
     uint256 constant MOCK_NUDGE_SPLIT = 30;
-    uint256 constant MOCK_NUDGE_SIZE = 3;
+    uint256 constant MOCK_NUDGE_SIZE = 25;
     // Story 045.5 Phase 7 — BalancerPoolerV2 batch-donation phase
     // Percent of sUSDS share balance diverted to the donation phase on each pool() call.
     // Mirrors MOCK_NUDGE_SPLIT for mental-model parity; LP path still receives 70%.
