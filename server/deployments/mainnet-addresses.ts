@@ -83,7 +83,7 @@ export const mainnetAddresses: ContractAddresses = {
   // NFT staking
   BalancerPoolerMintDebtHook: "0xbe79dc2c302165025166f09193d9905ef262c064",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
-  WaUSDC: "0x0",
+  WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
   BatchNFTMinter: "0xd3104a6e6d53b37061856fe1f31296d8962f9e01",
 
 };
