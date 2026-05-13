@@ -68,6 +68,12 @@ import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2
  *   30. NFTMinterV2.registerDispatcher(newPooler, oldInitialPrice, oldGrowthBps)
  *   31. NFTMinterV2.setDispatcherDisabled(oldIndex, true)
  *
+ *   Old-pooler BPT eject + handoff (atomic within the broadcast):
+ *   32a. read IERC20(LP_POOL).balanceOf(OLD_POOLER); if 0, skip 32b-d
+ *   32b. OLD_POOLER.withdrawBPT(deployer, balance)   — drains BPT to deployer EOA
+ *   32c. IERC20(LP_POOL).transfer(newPooler, balance) — hand off LP position to new pooler
+ *   32d. assert OLD==0 && NEW==balance — verify clean migration
+ *
  *   Pauser register:
  *   33. Pauser.register(newAcc)
  *   34. Pauser.register(newPooler)
@@ -96,6 +102,20 @@ interface INFTMinterV2View {
         returns (address dispatcher, uint256 price, uint256 growthBasisPoints, bool disabled);
 
     function dispatcherToIndex(address dispatcher) external view returns (uint256);
+}
+
+/// @notice Minimal IERC20 interface — only the methods needed to drain BPT from the old pooler.
+interface IERC20Min {
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address to, uint256 amount) external returns (bool);
+}
+
+/// @notice Minimal interface for the deployed OLD BalancerPoolerV2 — the only method
+///         this script calls on it is the owner-only `withdrawBPT(address,uint256)`
+///         (selector 0xc580a540, verified present in the on-chain bytecode at
+///         0x6e957842AFBCD01cE9DB296D173F39134b362771).
+interface IOldBalancerPoolerV2 {
+    function withdrawBPT(address recipient, uint256 amount) external;
 }
 
 contract DeployMainnetNudgePoolerV2 is Script {
@@ -300,6 +320,10 @@ contract DeployMainnetNudgePoolerV2 is Script {
         // ====== Steps 30-31: Register new pooler + disable old pooler ======
         console.log("\n=== Steps 30-31: Register new BalancerPoolerV2 dispatcher + disable old ===");
         _rewireDispatcher();
+
+        // ====== Step 32: Drain OLD pooler BPT, hand off to NEW pooler ======
+        console.log("\n=== Step 32: Eject OLD BalancerPoolerV2 BPT to deployer, hand off to new pooler ===");
+        _ejectOldPoolerBPT();
 
         // ====== Steps 33-34: Pauser registration ======
         console.log("\n=== Steps 33-34: Register accumulator + new pooler with Pauser ===");
@@ -792,6 +816,67 @@ contract DeployMainnetNudgePoolerV2 is Script {
     }
 
     // ========================================
+    // Step 32: Eject OLD pooler BPT, hand off to NEW pooler
+    // ========================================
+
+    /// @dev Drains BPT from the OLD BalancerPoolerV2 to the deployer (which is its `owner()`),
+    ///      then transfers it to the new pooler. Must run AFTER the dispatcher rewire so the
+    ///      old pooler is no longer routing live traffic. No-op (with log) if old balance is 0.
+    ///      Assertions guarantee atomic clean migration: old goes to 0, new gains exact amount.
+    function _ejectOldPoolerBPT() internal {
+        if (_isConfigured("OldPoolerEject")) {
+            console.log("Old pooler BPT eject already done");
+            return;
+        }
+        require(newPooler != address(0), "BalancerPoolerV2 must be deployed");
+
+        uint256 gasBefore = gasleft();
+        IERC20Min bpt = IERC20Min(LP_POOL);
+
+        uint256 oldBalance = bpt.balanceOf(OLD_BALANCER_POOLER_V2);
+        console.log("Step 32a: read OLD pooler BPT balance");
+        console.log("  OLD pooler:", OLD_BALANCER_POOLER_V2);
+        console.log("  BPT balance:", oldBalance);
+
+        if (oldBalance == 0) {
+            console.log("Step 32: SKIP - OLD pooler already drained (balance == 0)");
+        } else {
+            address deployer = OWNER_ADDRESS;
+            uint256 deployerBefore = bpt.balanceOf(deployer);
+            uint256 newPoolerBefore = bpt.balanceOf(newPooler);
+
+            // Step 32b: withdraw BPT from OLD pooler to deployer EOA
+            IOldBalancerPoolerV2(OLD_BALANCER_POOLER_V2).withdrawBPT(deployer, oldBalance);
+            console.log("Step 32b: OLD_POOLER.withdrawBPT(deployer, balance)");
+            console.log("  recipient (deployer):", deployer);
+            console.log("  amount:", oldBalance);
+
+            // Step 32c: deployer transfers the BPT to the new pooler
+            require(bpt.transfer(newPooler, oldBalance), "BPT transfer to new pooler failed");
+            console.log("Step 32c: IERC20(LP_POOL).transfer(newPooler, balance)");
+            console.log("  recipient (newPooler):", newPooler);
+            console.log("  amount:", oldBalance);
+
+            // Step 32d: atomicity assertions
+            uint256 oldAfter = bpt.balanceOf(OLD_BALANCER_POOLER_V2);
+            uint256 newAfter = bpt.balanceOf(newPooler);
+            require(oldAfter == 0, "OLD pooler not fully drained");
+            require(newAfter == newPoolerBefore + oldBalance, "NEW pooler did not receive expected BPT");
+            // Deployer should net zero (received + transferred out) — guards against any pull/transferFrom side-effects.
+            require(bpt.balanceOf(deployer) == deployerBefore, "Deployer BPT balance changed unexpectedly");
+            console.log("Step 32d: post-handoff balances verified");
+            console.log("  OLD pooler now: ", oldAfter);
+            console.log("  NEW pooler now: ", newAfter);
+        }
+
+        uint256 gasUsed = gasBefore - gasleft();
+        _trackDeployment("OldPoolerEject", address(0), 0);
+        _markConfigured("OldPoolerEject", gasUsed);
+        if (!isPreview) _writeProgressFile();
+        console.log("  gas: ", gasUsed);
+    }
+
+    // ========================================
     // Steps 33-34: Pauser registration
     // ========================================
 
@@ -845,7 +930,7 @@ contract DeployMainnetNudgePoolerV2 is Script {
     }
 
     function _parseProgressJson(string memory json) internal {
-        string[16] memory names = [
+        string[17] memory names = [
             "OldDispatcherSnapshot",
             "BatchNFTMinter",
             "StableYieldAccumulator",
@@ -861,6 +946,7 @@ contract DeployMainnetNudgePoolerV2 is Script {
             "YieldStrategyRewire",
             "NFTMinterV2Rewire",
             "DispatcherRewire",
+            "OldPoolerEject",
             "PauserRegister"
         ];
         for (uint256 i = 0; i < names.length; i++) {
@@ -1045,6 +1131,7 @@ contract DeployMainnetNudgePoolerV2 is Script {
         console.log("  NFTMinterV2.setAuthorizedBurner(OLD_ACCUMULATOR, false)");
         console.log("  NFTMinterV2.registerDispatcher(newPooler, ...)");
         console.log("  NFTMinterV2.setDispatcherDisabled(oldIndex, true)");
+        console.log("  OLD_POOLER.withdrawBPT(deployer, balance) -> IERC20.transfer(newPooler, balance)");
         console.log("  Pauser.register(newAcc)");
         console.log("  (skipped) Pauser.register(newPooler) - dispatcher pause routes via NFTMinterV2");
         console.log("");
