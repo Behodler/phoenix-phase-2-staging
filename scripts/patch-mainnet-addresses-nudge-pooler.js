@@ -1,39 +1,25 @@
 #!/usr/bin/env node
 /**
- * patch-mainnet-addresses-nudge-accumulator.js
+ * patch-mainnet-addresses-nudge-pooler.js
  *
- * After broadcasting DeployMainnetNudgeAccumulator.s.sol, this script patches
+ * After broadcasting DeployMainnetNudgePoolerV2.s.sol, this script patches
  * mainnet-addresses.ts with the real deployed addresses read from
- * broadcast/DeployMainnetNudgeAccumulator.s.sol/1/run-latest.json.
+ * broadcast/DeployMainnetNudgePoolerV2.s.sol/1/run-latest.json.
  *
- * DIVERGENCE FROM patch-mainnet-addresses-v2.js:
- *   The two prior patchers (v2, nft-staking) refused to overwrite a non-zero
- *   address — they target zero-address placeholders. This patcher must
- *   overwrite the LIVE addresses for `StableYieldAccumulator` and
- *   `BatchNFTMinter`. To stay safe against re-runs and stale broadcasts, the
- *   patcher uses SELF-VALIDATION: it will only overwrite if the existing
- *   address matches the deploy-script's OLD_ACCUMULATOR / OLD_BATCH_MINTER
- *   constant. Any other existing value (already-patched new address, or an
- *   unexpected third-party mutation) triggers exit code 4.
+ * Patches three fields (all self-validating — refuses to overwrite anything
+ * other than the deploy script's OLD_* constants):
  *
- * Rules:
- *   1. Reads broadcast/DeployMainnetNudgeAccumulator.s.sol/1/run-latest.json.
- *   2. Filters transactionType === "CREATE", maps two CREATE txs by contractName:
- *        - BatchNFTMinter
- *        - StableYieldAccumulator
- *   3. Verifies progress.nudge-accumulator.1.json has deploymentStatus
- *      === "completed" (exit 2 otherwise).
- *   4. Self-validating overwrite for both top-level fields:
- *        - existing field must equal OLD_* constant; otherwise exit 4.
- *   5. Strips any trailing `// not yet deployed` / `// placeholder` /
- *      `// PLACEHOLDER:` comment on patched lines.
- *   6. Adds an `Updated YYYY-MM-DD: nudge accumulator addresses patched`
- *      comment at the top of the file.
+ *   1. StableYieldAccumulator (top-level, line 28)      expected old = OLD_ACCUMULATOR
+ *   2. nftsV2.BalancerPooler  (nested, line 75)         expected old = OLD_BALANCER_POOLER_V2
+ *   3. BatchNFTMinter         (top-level, line 87)      expected old = OLD_BATCH_MINTER
+ *
+ * The WaUSDC field (line 86) is INTENTIONALLY NOT touched — that is set
+ * manually by the agent before broadcast.
  *
  * Exit codes:
  *   0 - Success
  *   1 - broadcast run-latest.json missing or unparseable
- *   2 - progress.nudge-accumulator.1.json missing / not completed
+ *   2 - progress.nudge-pooler.1.json missing or deploymentStatus != "completed"
  *   3 - Expected contract not found in broadcast
  *   4 - Address collision / unexpected old address (self-validation failed)
  */
@@ -43,28 +29,39 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const BROADCAST_FILE = path.join(
-    ROOT, 'broadcast', 'DeployMainnetNudgeAccumulator.s.sol', '1', 'run-latest.json'
+    ROOT, 'broadcast', 'DeployMainnetNudgePoolerV2.s.sol', '1', 'run-latest.json'
 );
-const PROGRESS_FILE = path.join(ROOT, 'server', 'deployments', 'progress.nudge-accumulator.1.json');
+const PROGRESS_FILE = path.join(ROOT, 'server', 'deployments', 'progress.nudge-pooler.1.json');
 const ADDRESSES_FILE = path.join(ROOT, 'server', 'deployments', 'mainnet-addresses.ts');
 
-// Must match the constants in script/DeployMainnetNudgeAccumulator.s.sol
+// Must match the constants in script/DeployMainnetNudgePoolerV2.s.sol
 const OLD_ACCUMULATOR = '0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E';
 const OLD_BATCH_MINTER = '0xD3104A6e6D53b37061856fe1f31296D8962f9e01';
+const OLD_BALANCER_POOLER_V2 = '0x6e957842AFBCD01cE9DB296D173F39134b362771';
 
-// Contracts expected in the broadcast, in deploy order (BatchNFTMinter first,
-// StableYieldAccumulator second; both have unique contractNames so positional
-// disambiguation is not strictly required).
+// Deploy order in the broadcast matches the script's run() ordering:
+//   1. BatchNFTMinter        -> top-level BatchNFTMinter
+//   2. StableYieldAccumulator -> top-level StableYieldAccumulator
+//   3. BalancerPoolerV2       -> nested nftsV2.BalancerPooler
 const DEPLOY_ORDER = [
     {
         contractName: 'BatchNFTMinter',
+        kind: 'flat',
         tsField: 'BatchNFTMinter',
         expectedOld: OLD_BATCH_MINTER,
     },
     {
         contractName: 'StableYieldAccumulator',
+        kind: 'flat',
         tsField: 'StableYieldAccumulator',
         expectedOld: OLD_ACCUMULATOR,
+    },
+    {
+        contractName: 'BalancerPoolerV2',
+        kind: 'nested',
+        parentKey: 'nftsV2',
+        childField: 'BalancerPooler',
+        expectedOld: OLD_BALANCER_POOLER_V2,
     },
 ];
 
@@ -101,9 +98,9 @@ function loadBroadcast() {
 }
 
 /**
- * Walk transactions[] in order, filter transactionType === "CREATE", and map them
- * to our expected deploy order by contractName. Both contracts have unique names,
- * so this is a simple find-by-name match in the order specified by DEPLOY_ORDER.
+ * Walk transactions[], filter transactionType === "CREATE", and map them
+ * to expected deploys by contractName. Each expected contract has a unique
+ * contractName so find-by-name suffices.
  */
 function matchDeploysToExpected(broadcast) {
     const creates = (broadcast.transactions || []).filter(
@@ -117,42 +114,34 @@ function matchDeploysToExpected(broadcast) {
         const cname = expected.contractName;
         const matchedTx = creates.find((tx) => tx.contractName === cname && !seen.has(tx));
         if (!matchedTx) {
-            fail(3, `Expected CREATE tx for ${cname} (target ${expected.tsField}) not found in broadcast`);
+            const labelTarget = expected.kind === 'nested'
+                ? `${expected.parentKey}.${expected.childField}`
+                : expected.tsField;
+            fail(3, `Expected CREATE tx for ${cname} (target ${labelTarget}) not found in broadcast`);
         }
         if (!matchedTx.contractAddress) {
             fail(3, `CREATE tx for ${cname} has no contractAddress`);
         }
         seen.add(matchedTx);
         assignments.push({
-            tsField: expected.tsField,
+            ...expected,
             address: matchedTx.contractAddress,
-            contractName: cname,
-            expectedOld: expected.expectedOld,
         });
     }
 
-    // Defensive: ensure the broadcast has exactly the 2 expected CREATEs.
+    // Defensive: broadcast should contain exactly the expected count of CREATEs.
     if (creates.length !== DEPLOY_ORDER.length) {
-        fail(3, `Broadcast has ${creates.length} CREATE transactions; expected exactly ${DEPLOY_ORDER.length} (BatchNFTMinter + StableYieldAccumulator)`);
+        fail(3, `Broadcast has ${creates.length} CREATE transactions; expected exactly ${DEPLOY_ORDER.length} (BatchNFTMinter + StableYieldAccumulator + BalancerPoolerV2)`);
     }
 
     return assignments;
 }
 
 /**
- * Self-validating flat-field overwrite. Replaces the field's address only when
- * the existing value matches `expectedOld` (the deploy script's OLD_* constant).
- * This protects against:
- *   - Re-running the patcher on a stale broadcast (the existing value would
- *     already be the NEW address, not the OLD one — refused).
- *   - Out-of-band edits (anything other than OLD_* — refused).
+ * Self-validating flat-field overwrite. Replaces a top-level field's address
+ * only when the existing value matches `expectedOld`.
  *
- * Returns { newSource, currentAddress, replaced } where:
- *   - replaced === true  means the source was mutated successfully.
- *   - replaced === false && currentAddress is non-null means the field exists
- *     but its value does not match expectedOld; caller should fail with exit 4.
- *   - replaced === false && currentAddress === null means the field wasn't
- *     found at all.
+ * Returns { newSource, currentAddress, replaced }.
  */
 function patchFlatField(source, field, newAddress, expectedOld) {
     const re = new RegExp(`^(\\s*${field}:\\s*)"(0x[0-9a-fA-F]{40})"(.*)$`, 'm');
@@ -174,6 +163,50 @@ function patchFlatField(source, field, newAddress, expectedOld) {
     return { newSource, currentAddress, replaced: true };
 }
 
+/**
+ * Self-validating nested-field overwrite. Locates the named parent object
+ * (`parentKey: { ... }`) and replaces the `childField` line within it.
+ *
+ * The regex scans from the parent block's opening `{` to its matching closing
+ * `}` and only mutates a `childField: "0x…"` line within that span. To keep
+ * the regex tractable we use a multiline match anchored to a `\s*<parentKey>:\s*{`
+ * header, then a non-greedy span up to the next top-level `},` or `}` followed
+ * by a newline + outdented context.
+ *
+ * Returns { newSource, currentAddress, replaced } with the same semantics as
+ * patchFlatField.
+ */
+function patchNestedField(source, parentKey, childField, newAddress, expectedOld) {
+    // Locate the parent block. Capture indent depth so we can constrain the span.
+    const headerRe = new RegExp(`(^[ \\t]*${parentKey}:\\s*\\{[\\s\\S]*?\\n[ \\t]*\\},)`, 'm');
+    const headerMatch = source.match(headerRe);
+    if (!headerMatch) {
+        return { newSource: source, currentAddress: null, replaced: false };
+    }
+    const block = headerMatch[1];
+
+    // Within the captured block, find the childField line.
+    const childRe = new RegExp(`(^[ \\t]+${childField}:\\s*)"(0x[0-9a-fA-F]{40})"(.*)$`, 'm');
+    const childMatch = block.match(childRe);
+    if (!childMatch) {
+        return { newSource: source, currentAddress: null, replaced: false };
+    }
+    const currentAddress = childMatch[2];
+    const trailingContent = childMatch[3];
+    const cleanTrailing = trailingContent
+        .replace(/\s*\/\/\s*not yet deployed.*/i, ',')
+        .replace(/\s*\/\/\s*placeholder.*/i, ',')
+        .replace(/\s*\/\/\s*PLACEHOLDER:.*/, ',');
+
+    if (currentAddress.toLowerCase() !== expectedOld.toLowerCase()) {
+        return { newSource: source, currentAddress, replaced: false };
+    }
+
+    const newBlock = block.replace(childRe, `$1"${newAddress}"${cleanTrailing}`);
+    const newSource = source.replace(block, newBlock);
+    return { newSource, currentAddress, replaced: true };
+}
+
 function run() {
     loadProgress();
     const broadcast = loadBroadcast();
@@ -187,8 +220,15 @@ function run() {
     let hadCollision = false;
 
     for (const a of assignments) {
-        const result = patchFlatField(source, a.tsField, a.address, a.expectedOld);
-        const label = a.tsField;
+        let result;
+        let label;
+        if (a.kind === 'flat') {
+            result = patchFlatField(source, a.tsField, a.address, a.expectedOld);
+            label = a.tsField;
+        } else {
+            result = patchNestedField(source, a.parentKey, a.childField, a.address, a.expectedOld);
+            label = `${a.parentKey}.${a.childField}`;
+        }
 
         if (result.replaced) {
             source = result.newSource;
@@ -206,15 +246,15 @@ function run() {
 
     // Header comment refresh.
     const today = new Date().toISOString().split('T')[0];
-    if (!/Updated .*nudge accumulator addresses patched/.test(source)) {
+    if (!/Updated .*nudge-pooler addresses patched/.test(source)) {
         source = source.replace(
             /(\/\/ Updated [^\n]*\n)(?=import)/,
-            `$1// Updated ${today}: nudge accumulator addresses patched from broadcast\n`
+            `$1// Updated ${today}: nudge-pooler addresses patched from broadcast\n`
         );
     }
 
     console.log('==========================================');
-    console.log('  patch-mainnet-addresses-nudge-accumulator');
+    console.log('  patch-mainnet-addresses-nudge-pooler');
     console.log('==========================================');
     summary.forEach((line) => console.log(line));
     console.log('==========================================');
