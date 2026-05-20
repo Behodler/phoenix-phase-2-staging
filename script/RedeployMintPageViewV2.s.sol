@@ -46,8 +46,14 @@ contract RedeployMintPageViewV2 is Script {
     address public constant BURN_RECORDER = 0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F;
     address public constant VIEW_ROUTER   = 0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a;
 
-    // Current MintPageView on ViewRouter (V1-wired — being replaced)
-    address public constant OLD_MINT_PAGE_VIEW = 0x5122cb32aE42AcC2aD5C2071e977C95c08F70141;
+    // Current MintPageView on ViewRouter — being replaced.
+    // History:
+    //   * Originally pointed at V1 NFTMinter (0x5122cb32…), replaced 2026-04-20
+    //     by 0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119 wired to V2 NFTMinter.
+    //   * That V2 view hardcodes the USDS slot at dispatcher index 4, which is
+    //     the OLD BalancerPoolerV2 (disabled by story-047). This redeploy
+    //     bumps the source to index 6 — the new BalancerPoolerV2.
+    address public constant OLD_MINT_PAGE_VIEW = 0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119;
 
     // Tokens consumed by the V2 mint flow (must match each V2 dispatcher's primeToken())
     address public constant EYE  = 0x155ff1A85F440EE0A382eA949f24CE4E0b751c65;

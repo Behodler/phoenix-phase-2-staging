@@ -80,7 +80,7 @@ export const mainnetAddresses: ContractAddresses = {
   // View contracts
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
   DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
-  MintPageView: "0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119",
+  MintPageView: "0xeBEc50cD19310e6ed59D8153313Ec7C888152c1A",
   // NFT staking
   BalancerPoolerMintDebtHook: "0xbe79dc2c302165025166f09193d9905ef262c064",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",

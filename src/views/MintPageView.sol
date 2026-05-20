@@ -15,8 +15,8 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 ///        Index 1: EYE   - Burner
 ///        Index 2: SCX   - Burner
 ///        Index 3: Flax  - Burner
-///        Index 4: USDS  - BalancerPoolerV2
 ///        Index 5: WBTC  - Gather
+///        Index 6: USDS  - BalancerPoolerV2 (story-047 redeploy; old index 4 disabled)
 ///
 ///      Returns 33 fields total (6 per token + 3 burn totals).
 contract MintPageView is IPageView {
@@ -117,8 +117,9 @@ contract MintPageView is IPageView {
         // Flax (dispatcher index 3)
         _fillTokenData(data, 12, flax, 3, user);
 
-        // USDS (dispatcher index 4 — BalancerPoolerV2 on NFTMinterV2)
-        _fillTokenData(data, 18, usds, 4, user);
+        // USDS (dispatcher index 6 — story-047 BalancerPoolerV2 on NFTMinterV2;
+        //                          old pooler at index 4 is disabled).
+        _fillTokenData(data, 18, usds, 6, user);
 
         // WBTC (dispatcher index 5)
         _fillTokenData(data, 24, wbtc, 5, user);
