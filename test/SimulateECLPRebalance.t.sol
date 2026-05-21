@@ -37,6 +37,11 @@ contract SimulateECLPRebalance is Test {
     address trader;
 
     function setUp() public {
+        // Skip when not running against a mainnet fork (no code at the live pool).
+        uint256 codeSize;
+        assembly { codeSize := extcodesize(0x5B26d938F0bE6357C39e936Cc9c2277b9334eA58) }
+        vm.skip(codeSize == 0);
+
         trader = makeAddr("rebalance-trader");
     }
 

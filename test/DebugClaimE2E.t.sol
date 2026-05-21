@@ -18,6 +18,11 @@ contract DebugClaimE2E is Test {
     address constant USDC               = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
 
     function testClaimSucceedsAfterRemoval() external {
+        // Skip when not running against a mainnet fork (no code at the live address).
+        uint256 codeSize;
+        assembly { codeSize := extcodesize(0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E) }
+        vm.skip(codeSize == 0);
+
         StableYieldAccumulator acc = StableYieldAccumulator(ACCUMULATOR);
 
         // Confirm claim reverts before fix

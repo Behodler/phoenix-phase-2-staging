@@ -181,8 +181,8 @@
     "dispatcher-replace:broadcast": "node scripts/backup-mainnet-addresses.js && forge script script/DispatcherReplaceAtIndex4.s.sol:DispatcherReplaceAtIndex4 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-dispatcher-replace.js",
     "//phlimbo-v1-to-v2": "Story 049 — PhlimboEA V1 → PhlimboV2 silent staker migration (snapshot stakers, then migrate)",
     "snapshot:phlimbo-v1": "node scripts/snapshot-phlimbo-v1-stakers.js",
-    "migrate-phlimbo-v1-to-v2:dry": "PREVIEW_MODE=true forge script script/MigratePhlimboV1ToV2.s.sol:MigratePhlimboV1ToV2 --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate-phlimbo-v1-to-v2:broadcast": "node scripts/backup-mainnet-addresses.js && forge script script/MigratePhlimboV1ToV2.s.sol:MigratePhlimboV1ToV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/update-mainnet-addresses-phlimbo-v2.js"
+    "migrate-phlimbo-v1-to-v2:dry": "node scripts/check-phlimbo-snapshot-age.js --max-hours 24 --auto-refresh && PREVIEW_MODE=true forge script script/MigratePhlimboV1ToV2.s.sol:MigratePhlimboV1ToV2 --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate-phlimbo-v1-to-v2:broadcast": "node scripts/check-phlimbo-snapshot-age.js --max-hours 24 --fail-on-stale && node scripts/backup-mainnet-addresses.js && forge script script/MigratePhlimboV1ToV2.s.sol:MigratePhlimboV1ToV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/update-mainnet-addresses-phlimbo-v2.js"
   },
   "keywords": [
     "phoenix",

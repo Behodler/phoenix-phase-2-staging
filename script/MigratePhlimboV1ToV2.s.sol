@@ -29,8 +29,11 @@ import {MigratorV1V2} from "@phlimbo-ea/MigratorV1V2.sol";
 ///           8. settleDebt(BATCH_SIZE) loop until iterator == -1.
 ///           9. migrateDeposits(BATCH_SIZE) loop until iterator == -1.
 ///          10. migrator.withdrawAll() to sweep any leftover.
-///          11. phUSD.setMinter(migrator, false) (cleanup).
-///          12. phlimboV2.setPauser(V1_PAUSER) (mirror V1 governance).
+///          11. v2.collectReward(v1USDCRecovered - snapTotalUSDC):
+///              forward V1's unaccrued USDC into V2's reward pool so users
+///              continue accruing yield; starts a fresh 10-day window.
+///          12. phUSD.setMinter(migrator, false) (cleanup).
+///          13. phlimboV2.setPauser(V1_PAUSER) (mirror V1 governance).
 ///
 ///         Snapshot JSON shape (consumed via vm.readFile + vm.parseJson):
 ///         see scripts/snapshot-phlimbo-v1-stakers.js header for full spec.
@@ -118,6 +121,13 @@ contract MigratePhlimboV1ToV2 is Script {
     uint256 public v1TotalStakedPre;
     uint256 public ownerPhUSDBalanceAfterDrain;
 
+    /// @dev USDC drained out of V1 in step 1. After step 7 funds the migrator
+    /// with `snapTotalUSDC` (the pending portion), the remainder
+    /// (`v1USDCRecovered - snapTotalUSDC`) is the unaccrued reward float that
+    /// step 11 forwards into V2 via `collectReward`, so users resume earning
+    /// USDC yield after migration without an operator follow-up.
+    uint256 public v1USDCRecovered;
+
     // Tuning.
     uint256 public batchSize;
     string public snapshotFile;
@@ -173,9 +183,10 @@ contract MigratePhlimboV1ToV2 is Script {
         _step8_settleDebtLoop();
         _step9_migrateDepositsLoop();
         _step10_withdrawAll();
-        _step11_revokePhUSDMint();
-        _step12_mirrorPauserOnV2();
-        _step13_postStateLog();
+        _step11_seedV2RewardPool();
+        _step12_revokePhUSDMint();
+        _step13_mirrorPauserOnV2();
+        _step14_postStateLog();
 
         if (isPreview) {
             vm.stopPrank();
@@ -315,6 +326,7 @@ contract MigratePhlimboV1ToV2 is Script {
         uint256 ownerPhUSDAfter = IERC20Minimal(PHUSD).balanceOf(OWNER_ADDRESS);
         uint256 ownerUSDCAfter  = IERC20Minimal(USDC).balanceOf(OWNER_ADDRESS);
         ownerPhUSDBalanceAfterDrain = ownerPhUSDAfter;
+        v1USDCRecovered = v1USDCBefore;
 
         console.log("Post-drain owner phUSD:", ownerPhUSDAfter);
         console.log("Post-drain owner USDC: ", ownerUSDCAfter);
@@ -533,34 +545,87 @@ contract MigratePhlimboV1ToV2 is Script {
     }
 
     // ==========================================
-    // Step 11: revoke phUSD mint role
+    // Step 11: seed PhlimboV2 reward pool with V1's unaccrued USDC
+    // ==========================================
+    //
+    // After step 7 funded the migrator with exactly `snapTotalUSDC` (the
+    // accrued-and-pending portion), the owner still holds the unaccrued
+    // remainder of V1's reward pool: leftover = v1USDCRecovered - snapTotalUSDC.
+    //
+    // We forward that remainder into V2 by approve + collectReward(leftover).
+    // PhlimboV2.collectReward pulls USDC from msg.sender, increments
+    // rewardBalance, and recomputes rewardPerSecond against the (fresh)
+    // depletionDuration -- so V2 starts its own 10-day depletion window,
+    // matching V1's duration. The phUSD-per-second rate stays at zero
+    // (V1 was already at zero; we do not seed a phUSD reward float here).
+    //
+    // Edge cases:
+    //   - leftover == 0: skip (V1 had nothing unaccrued, or pending == pool).
+    //   - leftover > 0 but owner balance < leftover: would mean some external
+    //     drain happened mid-broadcast; the safeTransferFrom inside V2 will
+    //     revert and abort the broadcast.
+
+    function _step11_seedV2RewardPool() internal {
+        console.log("");
+        console.log("=== Step 11: seed PhlimboV2 reward pool with leftover USDC ===");
+
+        require(
+            v1USDCRecovered >= snapTotalUSDC,
+            "v1USDCRecovered < snapTotalUSDC -- pending exceeds drained pool"
+        );
+        uint256 leftover = v1USDCRecovered - snapTotalUSDC;
+        console.log("v1USDCRecovered:         ", v1USDCRecovered);
+        console.log("snapTotalUSDC (pending): ", snapTotalUSDC);
+        console.log("leftover (-> V2 pool):   ", leftover);
+
+        if (leftover == 0) {
+            console.log("Nothing unaccrued to forward -- skipping collectReward.");
+            return;
+        }
+
+        IERC20Minimal(USDC).approve(address(v2), leftover);
+        v2.collectReward(leftover);
+
+        require(
+            IERC20Minimal(USDC).balanceOf(address(v2)) == leftover,
+            "V2 USDC balance != leftover after collectReward"
+        );
+        require(v2.rewardBalance() == leftover, "v2.rewardBalance() != leftover");
+        require(v2.rewardPerSecond() > 0, "v2.rewardPerSecond did not initialise");
+        console.log("V2 rewardBalance:        ", v2.rewardBalance());
+        console.log("V2 rewardPerSecond:      ", v2.rewardPerSecond());
+        console.log("V2 depletionDuration:    ", v2.depletionDuration());
+    }
+
+    // ==========================================
+    // Step 12: revoke phUSD mint role
     // ==========================================
 
-    function _step11_revokePhUSDMint() internal {
+    function _step12_revokePhUSDMint() internal {
         console.log("");
-        console.log("=== Step 11: phUSD.setMinter(migrator, false) ===");
+        console.log("=== Step 12: phUSD.setMinter(migrator, false) ===");
         IFlaxMinimal(PHUSD).setMinter(address(migrator), false);
     }
 
     // ==========================================
-    // Step 12: mirror V1 pauser on V2
+    // Step 13: mirror V1 pauser on V2
     // ==========================================
 
-    function _step12_mirrorPauserOnV2() internal {
+    function _step13_mirrorPauserOnV2() internal {
         console.log("");
-        console.log("=== Step 12: phlimboV2.setPauser(V1_PAUSER) ===");
+        console.log("=== Step 13: phlimboV2.setPauser(V1_PAUSER) ===");
         v2.setPauser(V1_PAUSER);
         require(v2.pauser() == V1_PAUSER, "v2.pauser != V1_PAUSER after setPauser");
         console.log("NOTE: Pauser.register(v2) must be performed separately by Pauser.owner.");
     }
 
     // ==========================================
-    // Step 13: post-state log + invariants
+    // Step 14: post-state log + invariants
     // ==========================================
 
-    function _step13_postStateLog() internal view {
+    function _step14_postStateLog() internal view {
         console.log("");
-        console.log("=== Step 13: post-state log + invariants ===");
+        console.log("=== Step 14: post-state log + invariants ===");
 
         // V2 should now hold exactly the original V1 totalStaked in phUSD.
         uint256 v2PhUSDHeld = IERC20Minimal(PHUSD).balanceOf(address(v2));
@@ -609,6 +674,7 @@ contract MigratePhlimboV1ToV2 is Script {
 interface IERC20Minimal {
     function balanceOf(address account) external view returns (uint256);
     function transfer(address to, uint256 amount) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
 }
 
 /// @dev IFlax surface used by this script. The phUSD token implements IFlax

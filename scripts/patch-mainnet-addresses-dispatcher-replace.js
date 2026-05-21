@@ -5,10 +5,7 @@
  * After broadcasting DispatcherReplaceAtIndex4.s.sol (story 048), this script
  * patches mainnet-addresses.ts with the new BalancerPoolerV2 and
  * BalancerPoolerMintDebtHook addresses pulled from
- * `broadcast/DispatcherReplaceAtIndex4.s.sol/1/run-latest.json`. It also
- * reverts `MintPageView` to the previous (index-4-targeting) address, gated
- * on the script's pre-revert verification flag (logged in the broadcast
- * output as `priorMintPageViewReadsIndex4`).
+ * `broadcast/DispatcherReplaceAtIndex4.s.sol/1/run-latest.json`.
  *
  * Patches in this run:
  *
@@ -16,18 +13,13 @@
  *                                      patched to  = newPooler from broadcast
  *   2. BalancerPoolerMintDebtHook      expected old = current hook tied to bugged pooler
  *                                      patched to  = newHook from broadcast
- *   3. MintPageView                    expected old = current index-6 view
- *                                      patched to  = PRIOR_MINT_PAGE_VIEW (index-4 view)
- *                                      GATED on PRIOR_MINT_PAGE_VIEW_READS_INDEX_4
- *                                      flag (set by the agent BEFORE running this
- *                                      patcher; otherwise the field is left alone
- *                                      and a follow-up redeploy is required).
  *
- * Additionally rewrites the misleading comment block near lines 49-56 of
- * mainnet-addresses.ts: prior comments described the previous swap (story-047)
- * which left the active dispatcher at index 6 with a hardcoded-index-6 view.
- * After story 048 the active dispatcher is index 4 again, so the historical
- * comment is stale.
+ * Note: MintPageView is no longer rewritten by this patcher. The revert to the
+ * prior index-4 view was applied directly to mainnet-addresses.ts ahead of the
+ * cutover (see commit history) after on-chain verification that
+ * `getData(0)[23] == 4`. Since the field is consumed by hand-copying into the
+ * UI project (not by any live contract), pre-emptive revert is safe on this
+ * staging branch.
  *
  * Exit codes:
  *   0 - Success
@@ -50,26 +42,6 @@ const ADDRESSES_FILE = path.join(ROOT, 'server', 'deployments', 'mainnet-address
 // pre-broadcast state of mainnet-addresses.ts (post-story-047).
 const OLD_BALANCER_POOLER_NFTS_V2 = '0x4da153dc02bb084528d10335759f2c4447e6f73d';
 const OLD_BALANCER_POOLER_MINT_DEBT_HOOK = '0xbe79dc2c302165025166f09193d9905ef262c064';
-const OLD_MINT_PAGE_VIEW = '0xeBEc50cD19310e6ed59D8153313Ec7C888152c1A';
-
-// Restore target for MintPageView -- the V2-wired view that hardcoded
-// dispatcher index 4. Restored when the script verified the on-chain
-// `dispatcherIndex()` reads 4.
-const PRIOR_MINT_PAGE_VIEW = '0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119';
-
-/**
- * Gate flag for the MintPageView revert. The cutover script logs a line like
- * `priorMintPageViewReadsIndex4: true|false` in the broadcast. The agent
- * surfaces this in the dry-run output for human review before broadcast.
- *
- * Setting via env var avoids parsing forge's mixed stdout/JSON. Default is
- * false, meaning the patcher will NOT revert the MintPageView field unless
- * the agent / human passes
- *   PRIOR_MINT_PAGE_VIEW_READS_INDEX_4=true node scripts/patch-mainnet-addresses-dispatcher-replace.js
- * during the broadcast wrapper. The dry-run log includes the value of
- * `priorMintPageViewReadsIndex4` so the human can decide.
- */
-const REVERT_MINT_PAGE_VIEW = process.env.PRIOR_MINT_PAGE_VIEW_READS_INDEX_4 === 'true';
 
 function fail(code, msg) {
     console.error(`ERROR (${code}): ${msg}`);
@@ -227,22 +199,10 @@ function run() {
         }
     }
 
-    // 3. MintPageView -- gated on PRIOR_MINT_PAGE_VIEW_READS_INDEX_4 env flag
-    if (REVERT_MINT_PAGE_VIEW) {
-        const r = patchFlatField(source, 'MintPageView', PRIOR_MINT_PAGE_VIEW, OLD_MINT_PAGE_VIEW);
-        if (r.replaced) {
-            source = r.newSource;
-            summary.push(`  PATCH    MintPageView                  ${OLD_MINT_PAGE_VIEW} -> ${PRIOR_MINT_PAGE_VIEW} (reverted)`);
-        } else if (r.currentAddress) {
-            summary.push(`  COLLIDE  MintPageView                  existing=${r.currentAddress} (expected OLD=${OLD_MINT_PAGE_VIEW})`);
-            hadFailure = true;
-        } else {
-            summary.push(`  MISS     MintPageView                  field not found`);
-            hadFailure = true;
-        }
-    } else {
-        summary.push(`  SKIP     MintPageView                  pre-revert verification flag not set (PRIOR_MINT_PAGE_VIEW_READS_INDEX_4 != "true"); leaving current value untouched. Follow-up story may redeploy a fresh index-4 view.`);
-    }
+    // MintPageView is intentionally NOT touched here: the revert to the prior
+    // index-4 view was applied directly to mainnet-addresses.ts ahead of the
+    // cutover after on-chain verification (getData(0)[23] == 4).
+    summary.push(`  SKIP     MintPageView                  reverted pre-emptively in source; patcher leaves it untouched.`);
 
     source = refreshHeaderComment(source);
 
