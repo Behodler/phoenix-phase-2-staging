@@ -5,3 +5,9 @@ out/
 .npmrc
 .envrc
 docs/
+
+# Story 049: per-run staker snapshot artifacts. Regenerate via
+# `npm run snapshot:phlimbo-v1` immediately before broadcasting
+# `migrate-phlimbo-v1-to-v2`. They are environment- and timing-sensitive
+# and should not be checked in.
+scripts/snapshots/
