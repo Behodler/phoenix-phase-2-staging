@@ -886,3 +886,7 @@ When working with this repo:
 - Use network-specific scripts for different deployment targets
 - Verify contracts on Etherscan after Sepolia/Mainnet deployments
 - Follow TDD principles for all changes
+
+### package.json Script Ordering
+
+When adding a new entry to the `scripts` block in `package.json`, **append it at the end of the list** rather than inserting it alphabetically or grouping it with related scripts. This makes the most recently added scripts visible at a glance and preserves a rough chronological history of script additions. Do not reorder existing scripts when adding a new one.
