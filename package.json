@@ -185,7 +185,13 @@
     "migrate-phlimbo-v1-to-v2:broadcast": "node scripts/check-phlimbo-snapshot-age.js --max-hours 24 --fail-on-stale && node scripts/backup-mainnet-addresses.js && forge script script/MigratePhlimboV1ToV2.s.sol:MigratePhlimboV1ToV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/update-mainnet-addresses-phlimbo-v2.js",
     "//rewire-sya-to-phlimbo-v2": "Story 049 follow-up — repoint StableYieldAccumulator at PhlimboV2 (setPhlimbo + approvePhlimbo) and redeploy DepositView with V2 baked into its immutable. DepositPageView is deprecated and intentionally NOT redeployed.",
     "rewire-sya-to-phlimbo-v2:dry": "PREVIEW_MODE=true forge script script/RewireSYAToPhlimboV2.s.sol:RewireSYAToPhlimboV2 --rpc-url $RPC_MAINNET --slow -vvv",
-    "rewire-sya-to-phlimbo-v2:broadcast": "node scripts/backup-mainnet-addresses.js && forge script script/RewireSYAToPhlimboV2.s.sol:RewireSYAToPhlimboV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-deposit-view.js"
+    "rewire-sya-to-phlimbo-v2:broadcast": "node scripts/backup-mainnet-addresses.js && forge script script/RewireSYAToPhlimboV2.s.sol:RewireSYAToPhlimboV2 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-deposit-view.js",
+    "//RestoreMintAtIndex4": "Story 048 follow-up — re-enable NFTMinterV2 dispatcher index 4 + repoint ViewRouter 'mint' to index-4 MintPageView",
+    "RestoreMintAtIndex4:preview": "PREVIEW_MODE=true forge script script/RestoreMintAtIndex4.s.sol:RestoreMintAtIndex4 --rpc-url $RPC_MAINNET -vvv",
+    "RestoreMintAtIndex4": "forge script script/RestoreMintAtIndex4.s.sol:RestoreMintAtIndex4 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "//SetMinterOnIndex4Pooler": "Story 048 follow-up — authorize NFTMinterV2 on new index-4 BalancerPoolerV2 (cutover step 11 was skipped)",
+    "SetMinterOnIndex4Pooler:preview": "PREVIEW_MODE=true forge script script/SetMinterOnIndex4Pooler.s.sol:SetMinterOnIndex4Pooler --rpc-url $RPC_MAINNET -vvv",
+    "SetMinterOnIndex4Pooler": "forge script script/SetMinterOnIndex4Pooler.s.sol:SetMinterOnIndex4Pooler --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
