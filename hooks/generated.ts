@@ -6756,10 +6756,10 @@ export const pauserAbi = [
 ] as const
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// PhlimboEA
+// PhlimboV2
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-export const phlimboEaAbi = [
+export const phlimboV2Abi = [
   {
     type: 'constructor',
     inputs: [
@@ -6813,7 +6813,7 @@ export const phlimboEaAbi = [
   },
   {
     type: 'function',
-    inputs: [],
+    inputs: [{ name: 'user', internalType: 'address', type: 'address' }],
     name: 'claim',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -6877,8 +6877,24 @@ export const phlimboEaAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'hook',
+    outputs: [
+      { name: '', internalType: 'contract IPhlimboHook', type: 'address' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'lastRewardTime',
     outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'migrator',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
     stateMutability: 'view',
   },
   {
@@ -7002,6 +7018,20 @@ export const phlimboEaAbi = [
   },
   {
     type: 'function',
+    inputs: [{ name: '_hook', internalType: 'address', type: 'address' }],
+    name: 'setHook',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '_migrator', internalType: 'address', type: 'address' }],
+    name: 'setMigrator',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [{ name: '_pauser', internalType: 'address', type: 'address' }],
     name: 'setPauser',
     outputs: [],
@@ -7011,7 +7041,7 @@ export const phlimboEaAbi = [
     type: 'function',
     inputs: [
       { name: 'amount', internalType: 'uint256', type: 'uint256' },
-      { name: 'recipient', internalType: 'address', type: 'address' },
+      { name: 'user', internalType: 'address', type: 'address' },
     ],
     name: 'stake',
     outputs: [],
@@ -7051,7 +7081,10 @@ export const phlimboEaAbi = [
   },
   {
     type: 'function',
-    inputs: [{ name: 'amount', internalType: 'uint256', type: 'uint256' }],
+    inputs: [
+      { name: 'amount', internalType: 'uint256', type: 'uint256' },
+      { name: 'user', internalType: 'address', type: 'address' },
+    ],
     name: 'withdraw',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -7113,6 +7146,25 @@ export const phlimboEaAbi = [
     anonymous: false,
     inputs: [
       {
+        name: 'oldHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newHook',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'HookSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
         name: 'proposedAPY',
         internalType: 'uint256',
         type: 'uint256',
@@ -7132,6 +7184,25 @@ export const phlimboEaAbi = [
       },
     ],
     name: 'IntendedSetAPY',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'oldMigrator',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newMigrator',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'MigratorSet',
   },
   {
     type: 'event',

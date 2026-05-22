@@ -27,8 +27,12 @@ export const mainnetAddresses: ContractAddresses = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
+  // DEPRECATED post-story-049 -- V1 paused + drained; positions migrated to PhlimboV2
+  PhlimboEA: "0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4",
   // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol
-  PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
+  PhlimboV2: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
+  // One-shot V1 -> V2 user migrator. Retired after broadcast; left here for audit.
+  MigratorV1V2: "0xb50caf00647127f7a4945c4b007c4efa205364de",
   StableYieldAccumulator: "0x3bbe928340c61a65cb6c4a87b3fb59b6f3f7606a",
   DepositView: "0x2Fdf77d4Ea75eFd48922B8E521612197FFbB564c",
   YieldStrategyDola: "0xE7aEC21BF6420FF483107adCB9360C4b31d69D78",

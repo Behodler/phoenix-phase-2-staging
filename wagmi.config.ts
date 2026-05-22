@@ -14,7 +14,7 @@ export default defineConfig({
 
         // Main Phase 2 contracts
         'PhusdStableMinter.sol/PhusdStableMinter.json',
-        'Phlimbo.sol/PhlimboEA.json',
+        'PhlimboV2.sol/PhlimboV2.json',
 
         // Key interfaces (path-prefixed to avoid duplicate artifact conflicts)
         'src/IFlax.sol/IFlax.json',

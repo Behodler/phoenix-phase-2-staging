@@ -7,8 +7,6 @@
 // Updated 2026-05-02: BalancerPool repointed to phUSD/sUSDS 50/50 pool
 // Updated 2026-05-01: NFT staking addresses patched from broadcast
 // Updated 2026-05-13: nudge-pooler addresses patched from broadcast
-// Updated 2026-05-22: dispatcher-replace cutover patched (story 048 - index 4 restored)
-// Updated 2026-05-22: PhlimboV2 + MigratorV1V2 deployed (story 049 - V1 stakers migrated)
 import { ContractAddresses } from './addresses';
 
 
@@ -27,8 +25,7 @@ export const mainnetAddresses: ContractAddresses = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
-  // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol
-  PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
+  PhlimboEA: "0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4",
   StableYieldAccumulator: "0x3bbe928340c61a65cb6c4a87b3fb59b6f3f7606a",
   DepositView: "0x2Fdf77d4Ea75eFd48922B8E521612197FFbB564c",
   YieldStrategyDola: "0xE7aEC21BF6420FF483107adCB9360C4b31d69D78",
@@ -76,7 +73,7 @@ export const mainnetAddresses: ContractAddresses = {
     BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
     BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
     BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
-    BalancerPooler: "0x26f89f4b46eb164303985795ee20b15bb1edb38a",
+    BalancerPooler: "0x4da153dc02bb084528d10335759f2c4447e6f73d",
     GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   },
 
@@ -88,7 +85,7 @@ export const mainnetAddresses: ContractAddresses = {
   // getData(0)[23] == 4 for the address below.
   MintPageView: "0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119",
   // NFT staking
-  BalancerPoolerMintDebtHook: "0x14277a0bc38a6bb7eb732c3a49190030632f727e",
+  BalancerPoolerMintDebtHook: "0xbe79dc2c302165025166f09193d9905ef262c064",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
   BatchNFTMinter: "0x4ef0fde49360ed31c68ed442ff263cc6291041f3",
