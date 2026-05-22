@@ -191,7 +191,12 @@
     "RestoreMintAtIndex4": "forge script script/RestoreMintAtIndex4.s.sol:RestoreMintAtIndex4 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "//SetMinterOnIndex4Pooler": "Story 048 follow-up — authorize NFTMinterV2 on new index-4 BalancerPoolerV2 (cutover step 11 was skipped)",
     "SetMinterOnIndex4Pooler:preview": "PREVIEW_MODE=true forge script script/SetMinterOnIndex4Pooler.s.sol:SetMinterOnIndex4Pooler --rpc-url $RPC_MAINNET -vvv",
-    "SetMinterOnIndex4Pooler": "forge script script/SetMinterOnIndex4Pooler.s.sol:SetMinterOnIndex4Pooler --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "SetMinterOnIndex4Pooler": "forge script script/SetMinterOnIndex4Pooler.s.sol:SetMinterOnIndex4Pooler --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "//TempSimulate40MintsIndex4": "TEMP — delete after use. Fork-simulates 40 mints at index 4 (applies pending owner fixes via prank, deals 482 USDS, loops mint)",
+    "TempSimulate40MintsIndex4": "forge script script/TempSimulate40MintsIndex4.s.sol:TempSimulate40MintsIndex4 --fork-url $RPC_MAINNET -vv",
+    "//SetBatchDonationSizeIndex4": "Story 048 follow-up — set batchDonationSize back to 10% on new index-4 pooler (cutover mirrored a zeroed value)",
+    "SetBatchDonationSizeIndex4:preview": "PREVIEW_MODE=true forge script script/SetBatchDonationSizeIndex4.s.sol:SetBatchDonationSizeIndex4 --rpc-url $RPC_MAINNET -vvv",
+    "SetBatchDonationSizeIndex4": "forge script script/SetBatchDonationSizeIndex4.s.sol:SetBatchDonationSizeIndex4 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
