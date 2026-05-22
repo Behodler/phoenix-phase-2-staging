@@ -9,7 +9,6 @@
 // Updated 2026-05-13: nudge-pooler addresses patched from broadcast
 // Updated 2026-05-22: dispatcher-replace cutover patched (story 048 - index 4 restored)
 // Updated 2026-05-22: PhlimboV2 + MigratorV1V2 deployed (story 049 - V1 stakers migrated)
-// Updated 2026-05-22: DepositView redeployed against PhlimboV2 (story 049 follow-up - rewire-sya-to-phlimbo-v2)
 import { ContractAddresses } from './addresses';
 
 
@@ -31,7 +30,7 @@ export const mainnetAddresses: ContractAddresses = {
   // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol
   PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
   StableYieldAccumulator: "0x3bbe928340c61a65cb6c4a87b3fb59b6f3f7606a",
-  DepositView: "0x0725722b50287f2285b873f534d5848e76c15251",
+  DepositView: "0x2Fdf77d4Ea75eFd48922B8E521612197FFbB564c",
   YieldStrategyDola: "0xE7aEC21BF6420FF483107adCB9360C4b31d69D78",
   YieldStrategyUSDe: "0xFc629bC5F6339F77635f4F656FBb114A31F7bCB3",
   YieldStrategyUSDC: "0x8b4A75290A1C4935eC1dfd990374AC4BD4D33952",
