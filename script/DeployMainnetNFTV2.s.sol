@@ -61,7 +61,7 @@ contract DeployMainnetNFTV2 is Script {
 
     // Core protocol
     address public constant PAUSER = 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3;
-    address public constant STABLE_YIELD_ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address public constant STABLE_YIELD_ACCUMULATOR = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
     address public constant BURN_RECORDER = 0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F;
 
     // V1 NFT stack

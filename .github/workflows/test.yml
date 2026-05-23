@@ -31,6 +31,13 @@ jobs:
       - name: Run Forge fmt
         run: forge fmt --check
 
+      - name: Ensure no deprecated accumulator address in scripts
+        run: |
+          if rg -n "0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E" script --glob "*.sol"; then
+            echo "deprecated accumulator address found in script/"
+            exit 1
+          fi
+
       - name: Run Forge build
         run: forge build --sizes
 

@@ -58,7 +58,7 @@ interface INFTMinterV2Like {
 /// Override the user/index via env:
 ///   USER=0xabc... NFT_INDEX=1 forge script ... -vvvv
 contract DryRunClaimSYA is Script {
-    address constant SYA = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address constant SYA = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
     address constant DEFAULT_USER = 0x2593be17Dd1C31B4c124A18BAC3a7aE19567ae37;
 
     function run() external {

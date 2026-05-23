@@ -61,7 +61,7 @@ contract RebalanceTVL is Script {
     address constant OLD_YIELD_STRATEGY  = 0x01d34d7EF3988C5b981ee06bF0Ba4485Bd8eA20C;
     address constant PHUSD_STABLE_MINTER = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
     address constant GLOBAL_PAUSER       = 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3;
-    address constant ACCUMULATOR         = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address constant ACCUMULATOR         = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
 
     // AutoPoolYieldStrategy constructor args (same as original deployment)
     address constant DOLA             = 0x865377367054516e17014CcdED1e7d814EDC9ce4;

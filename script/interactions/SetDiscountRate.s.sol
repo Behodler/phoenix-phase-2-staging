@@ -21,7 +21,7 @@ interface IStableYieldAccumulator {
  */
 contract SetDiscountRate is Script {
     address constant OWNER = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
-    address constant STABLE_YIELD_ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address constant STABLE_YIELD_ACCUMULATOR = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
 
     uint256 constant EXPECTED_CURRENT_RATE = 3000; // 30%
     uint256 constant NEW_RATE = 3500; // 35%

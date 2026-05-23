@@ -143,7 +143,7 @@ contract DeployMainnetNudgePoolerV2 is Script {
     address public constant YIELD_STRATEGY_USDE = 0xFc629bC5F6339F77635f4F656FBb114A31F7bCB3;
 
     // Old contracts to replace (self-validated by patcher)
-    address public constant OLD_ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address public constant OLD_ACCUMULATOR = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
     address public constant OLD_BATCH_MINTER = 0xD3104A6e6D53b37061856fe1f31296D8962f9e01;
     address public constant OLD_BALANCER_POOLER_V2 = 0x6e957842AFBCD01cE9DB296D173F39134b362771;
 
