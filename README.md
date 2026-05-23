@@ -63,7 +63,7 @@ docs/             Project documentation
 |----------|---------|
 | PhusdStableMinter | `0x435B0A1884bd0fb5667677C9eb0e59425b1477E5` |
 | PhlimboEA | `0x3984eBC84d45a889dDAc595d13dc0aC2E54819F4` |
-| StableYieldAccumulator | `0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E` |
+| StableYieldAccumulator | `0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a` |
 | Pauser | `0x7c5A8EeF1d836450C019FB036453ac6eC97885a3` |
 
 ## Part of the Behodler Ecosystem

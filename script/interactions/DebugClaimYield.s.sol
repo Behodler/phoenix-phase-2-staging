@@ -25,7 +25,7 @@ interface INFTMinterView {
  */
 contract DebugClaimYield is Script {
     // Mainnet addresses
-    address constant ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address constant ACCUMULATOR = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
     address constant USDC        = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant CALLER      = 0x3E9003DA2ad56A7cc677b6b414AD475A0231Eb28;
 
@@ -181,7 +181,7 @@ contract DebugClaimYield is Script {
  *       --rpc-url $RPC_MAINNET --sender 0x3E9003DA2ad56A7cc677b6b414AD475A0231Eb28 -vvvv
  */
 contract DebugClaimYieldSim is Script {
-    address constant ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address constant ACCUMULATOR = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
     address constant CALLER      = 0x3E9003DA2ad56A7cc677b6b414AD475A0231Eb28;
 
     function run() external {

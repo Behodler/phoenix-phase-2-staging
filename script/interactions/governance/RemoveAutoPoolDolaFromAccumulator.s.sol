@@ -33,7 +33,7 @@ interface IAccumulator {
  *                  --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths "m/44'/60'/46'/0/0" -vvv
  */
 contract RemoveAutoPoolDolaFromAccumulator is Script {
-    address constant STABLE_YIELD_ACCUMULATOR = 0xb9639e6Be92033F55E6D9E375Fd1C28ceEdbA50E;
+    address constant STABLE_YIELD_ACCUMULATOR = 0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a;
     address constant AUTO_POOL_DOLA_YS        = 0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4;
     address constant OWNER                    = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
 
