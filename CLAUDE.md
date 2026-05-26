@@ -258,6 +258,8 @@ Each deployment script (DeployAnvil.s.sol, DeploySepolia.s.sol, DeployMainnet.s.
 6. **Log addresses**: Output for extraction
 7. **Handle failures**: Record errors in progress file
 
+**Before any broadcast, satisfy the [Configuration Safety](#configuration-safety-non-negotiable) gate below.** Every safety-critical parameter (slippage bounds, oracle staleness, access-control addresses, caps, reward durations) must be deliberately chosen — never left at zero or a default. If a value is unknown, stop and ask the user instead of guessing.
+
 ### Progress File Integration Example
 
 ```solidity
@@ -282,6 +284,44 @@ contract DeployAnvil is Script {
     }
 }
 ```
+
+## Configuration Safety (NON-NEGOTIABLE)
+
+**Lazy, rushed deployment scripts are the death of protocols.** A deployment script is not "done" when it compiles and the contracts land on-chain — it is done when every safety-relevant parameter has been *deliberately chosen and justified*. Treat this section as a hard gate, not a suggestion.
+
+### The Cardinal Rule
+
+**NEVER deploy a contract with a safety parameter left at zero, blank, or a language/compiler default unless that exact value has been explicitly confirmed as correct for this deployment.** Zero is not a neutral placeholder — for many parameters zero means "no protection," which is precisely the configuration an attacker wants. A default is an assumption, and assumptions about money get exploited.
+
+When in doubt, **stop and ask the user.** It is always cheaper to interrupt a human for thirty seconds than to drain a protocol. Bothering the user is the correct, professional behavior — silently picking a value is not.
+
+### Parameters That Require Explicit Justification
+
+Before deploying, audit every constructor argument, initializer argument, and post-deploy setter for safety-critical configuration. This includes, but is **not** limited to:
+
+- **Slippage tolerance / `minAmountOut` / `maxAmountIn`** — a zero slippage bound (`minOut = 0`) is an open invitation to sandwich and MEV attacks. There is *no* legitimate production reason for an unbounded swap.
+- **Deadlines / TTLs** — `deadline = 0` or `type(uint256).max` disables transaction expiry protection.
+- **Oracle / price-feed configuration** — staleness thresholds, heartbeat, max price deviation, fallback oracles. A missing staleness check means a stale or manipulated price is trusted blindly.
+- **Fee parameters** — fee recipients, fee basis points. A zero address recipient can burn fees; an unbounded fee can rug users.
+- **Access control** — owner, admin, guardian, pauser, minter/burner roles. Never leave these as the zero address, the deployer EOA "for now," or an unverified address. Confirm the intended controller (multisig, timelock, governance) explicitly.
+- **Caps and limits** — supply caps, deposit/mint caps, rate limits, debt ceilings. An unset cap (zero or max) removes the circuit breaker.
+- **Reward / emission rates and durations** — e.g. Phlimbo's depletion duration. A zero or wildly wrong duration can dump all rewards instantly or lock them forever.
+- **Initial parameter values on Phase 2 contracts specifically** — phlimbo's `depletionDuration`, reward token wiring, and the phUSD minter's collateral/mint parameters. Verify each against the contract's own docs and constructor before broadcasting.
+
+If you encounter a safety parameter not in this list, the list's incompleteness is not permission to guess — apply the cardinal rule.
+
+### Required Behavior When Writing or Modifying Deployment Scripts
+
+1. **Enumerate every parameter.** Read the actual contract constructor/initializer from the submodule source (`lib/phlimbo/`, `lib/phUSD-stable-minter/`). Do not infer arguments from memory or from an example in this file.
+2. **Classify each parameter** as either cosmetic or safety-relevant. When unsure, treat it as safety-relevant.
+3. **For every safety-relevant parameter, source its value explicitly** — from the user, from a committed config file, or from a documented protocol spec. Record *where the value came from* in a code comment.
+4. **Add an in-script assertion (`require`/`revert`) that rejects unsafe defaults** for mainnet and Sepolia (e.g. `require(minAmountOut > 0, "slippage bound unset")`, `require(admin != address(0) && admin != deployer, "admin not configured")`). The script should refuse to broadcast rather than deploy something dangerous.
+5. **Anvil may relax these checks** for local iteration, but the relaxation must be gated behind an explicit `block.chainid == 31337` branch and clearly commented — never share an unsafe default code path between local and real networks.
+6. **If a required value is unknown, STOP.** Do not deploy with a placeholder. Surface the open question to the user with the specific parameter name, the contract it belongs to, and why it matters. Resume only once the value is confirmed.
+
+### Why This Matters Here
+
+This repo deploys to **Mainnet with real funds** (see the multi-network table above). The phUSD minter and Phlimbo handle user collateral and rewards. A single unbounded swap, missing oracle staleness check, or misassigned admin role is the difference between a working protocol and a post-mortem. Pedantry is the cheapest insurance available — pay it every time.
 
 ## Contract Deployment Order
 
@@ -836,6 +876,8 @@ Before deploying to Mainnet:
 - [ ] Private keys secured with hardware wallet or vault
 - [ ] Gas price and limits configured appropriately
 - [ ] Backup plan in place if deployment fails
+- [ ] **Every safety parameter explicitly justified** (slippage/`minAmountOut`, deadlines, oracle staleness, fees, access-control addresses, caps, reward durations) — none left at zero or a default; see [Configuration Safety](#configuration-safety-non-negotiable)
+- [ ] **In-script `require` guards reject unsafe defaults** on real networks (script refuses to broadcast rather than deploy something dangerous)
 
 ### Local Development Only
 
