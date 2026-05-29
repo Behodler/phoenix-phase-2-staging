@@ -196,7 +196,10 @@
     "TempSimulate40MintsIndex4": "forge script script/TempSimulate40MintsIndex4.s.sol:TempSimulate40MintsIndex4 --fork-url $RPC_MAINNET -vv",
     "//SetBatchDonationSizeIndex4": "Story 048 follow-up — set batchDonationSize back to 10% on new index-4 pooler (cutover mirrored a zeroed value)",
     "SetBatchDonationSizeIndex4:preview": "PREVIEW_MODE=true forge script script/SetBatchDonationSizeIndex4.s.sol:SetBatchDonationSizeIndex4 --rpc-url $RPC_MAINNET -vvv",
-    "SetBatchDonationSizeIndex4": "forge script script/SetBatchDonationSizeIndex4.s.sol:SetBatchDonationSizeIndex4 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "SetBatchDonationSizeIndex4": "forge script script/SetBatchDonationSizeIndex4.s.sol:SetBatchDonationSizeIndex4 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "//DisableNudgeAndDivertDonations": "NO_STORY — mainnet operational stop-gap for the BatchNFTMinter nudge drain: zero SYA nudgeSplit (stop the claim() USDC drip) + redirect pool donations to owner + disable BatchNFTMinter nudge. Holds until the minter-pinned BatchNFTMinter ships. See docs/batch-nft-minter-nudge-drain-fix.md",
+    "DisableNudgeAndDivertDonations:preview": "PREVIEW_MODE=true forge script script/DisableNudgeAndDivertDonations.s.sol:DisableNudgeAndDivertDonations --rpc-url $RPC_MAINNET -vvv",
+    "DisableNudgeAndDivertDonations": "forge script script/DisableNudgeAndDivertDonations.s.sol:DisableNudgeAndDivertDonations --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
