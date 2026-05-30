@@ -49,6 +49,11 @@ interface ISYANudge {
     // NOTE: the getter is the public state var `nudge` (source: StableYieldAccumulator.sol
     // `address public nudge;`), NOT `nudgeAddress`. The setter is `setNudgeAddress`.
     function nudge() external view returns (address);
+    // nudgeSplit is the percentage [0,100] of each claim() payment routed to `nudge`
+    // (StableYieldAccumulator.sol: `nudgeAmount = actualPayment * nudgeSplit / 100`). The
+    // incident mitigation dropped it to 0 to cut funding; the cutover restores it to 30%.
+    function setNudgeSplit(uint256) external;
+    function nudgeSplit() external view returns (uint256);
 }
 
 interface IBalancerPoolerV2Min {
@@ -84,11 +89,36 @@ interface IBalancerRouterV3 {
     ) external returns (uint256[] memory amountsOut);
 }
 
+// Balancer V3 VaultTypes.TokenInfo (src/balancer-v3/interfaces/.../VaultTypes.sol). Mirrored
+// here only so getPoolTokenInfo's return tuple decodes correctly; we use balancesRaw.
+enum TokenType {
+    STANDARD,
+    WITH_RATE
+}
+
+struct TokenInfo {
+    TokenType tokenType;
+    address rateProvider;
+    bool paysYieldFees;
+}
+
 interface IBalancerVaultV3 {
     function getPoolTokens(address pool) external view returns (address[] memory);
     // Balancer V3 keeps token reserves in the Vault, not the pool contract — so the
     // pool's sUSDS reserve must be read from the Vault, not via IERC20.balanceOf(pool).
     function getCurrentLiveBalances(address pool) external view returns (uint256[] memory);
+    // RAW (un-rate-scaled) per-token reserves, aligned with `tokens`. Used to compute exact
+    // proportional-exit floors: amountOut[i] = balancesRaw[i] * bptIn / bptTotalSupply
+    // (Balancer V3 BasePoolMath.computeProportionalAmountsOut — no swap fee, exact).
+    function getPoolTokenInfo(address pool)
+        external
+        view
+        returns (
+            address[] memory tokens,
+            TokenInfo[] memory tokenInfo,
+            uint256[] memory balancesRaw,
+            uint256[] memory lastBalancesLiveScaled18
+        );
 }
 
 interface IERC4626Min {
@@ -222,6 +252,9 @@ contract ReplaceBatchNFTMinter is Script {
 
     uint256 public constant DISPATCHER_INDEX = 4;
     uint256 public constant NUDGE_SIZE = 40;
+    // SYA nudgeSplit (percent, [0,100]) to restore after the migration. The incident
+    // mitigation set this to 0 to cut nudge funding; the canonical operating value is 30%.
+    uint256 public constant SYA_NUDGE_SPLIT = 30;
 
     // ============ Tunable slippage / sizing knobs (env-overridable) ============
     // SEED_USDS_TARGET is the USDS-equivalent (18-dp) notional of the pool slice to remove. It is
@@ -239,10 +272,17 @@ contract ReplaceBatchNFTMinter is Script {
     // MIN_USDC_OUT: final slippage floor on USDC into the pot (observed 50.42; ~6.8% haircut allowed).
     uint256 public constant DEFAULT_MIN_USDC_OUT = 47_000_000;
     address public constant DEFAULT_SWAP_POOL = 0x0B65A4505E8C323AE4fEDcc48515FD713dC9d8C0; // sUSDS/waUSDC
+    // EXIT_SLIPPAGE_BPS: per-leg slippage tolerance for the proportional BPT exit's minAmountsOut.
+    // The proportional exit is deterministic (amountOut[i] = balancesRaw[i] * bptIn / supply, no
+    // swap fee), so the only real drift is other LPs joining/exiting in the same block before our
+    // tx lands. 50 bps (0.5%) is a safe non-zero floor; NEVER leave minAmountsOut at 0 on mainnet
+    // (repo Configuration Safety gate — an unbounded exit invites sandwiching/MEV).
+    uint256 public constant DEFAULT_EXIT_SLIPPAGE_BPS = 50;
 
     uint256 public seedUsdsTarget;
     uint256 public minBptWei;
     uint256 public minUsdcOut;
+    uint256 public exitSlippageBps;
     address public swapPool;
 
     address public newMinter;
@@ -255,7 +295,11 @@ contract ReplaceBatchNFTMinter is Script {
         seedUsdsTarget = vm.envOr("SEED_USDS_TARGET", DEFAULT_SEED_USDS_TARGET);
         minBptWei = vm.envOr("MIN_BPT_WEI", DEFAULT_MIN_BPT_WEI);
         minUsdcOut = vm.envOr("MIN_USDC_OUT", DEFAULT_MIN_USDC_OUT);
+        exitSlippageBps = vm.envOr("EXIT_SLIPPAGE_BPS", DEFAULT_EXIT_SLIPPAGE_BPS);
         swapPool = vm.envOr("SWAP_POOL", DEFAULT_SWAP_POOL);
+        // Configuration Safety gate: the exit floor must be a real, bounded haircut — never 0%
+        // (=> minAmountsOut all 0, unbounded) and never >=100% (=> floor of 0).
+        require(exitSlippageBps > 0 && exitSlippageBps < 10_000, "EXIT_SLIPPAGE_BPS out of range");
 
         if (preview) {
             console.log("=== PREVIEW MODE (fork dry-run) ===");
@@ -288,6 +332,7 @@ contract ReplaceBatchNFTMinter is Script {
         console.log("old USDC balance:   ", IERC20(USDC).balanceOf(OLD_BATCH_MINTER));
         console.log("pooler BPT balance: ", IERC20(LP_POOL).balanceOf(POOLER));
         console.log("SYA nudge:          ", ISYANudge(SYA).nudge());
+        console.log("SYA nudgeSplit:     ", ISYANudge(SYA).nudgeSplit());
         console.log("pooler batchMinter: ", IBalancerPoolerV2Min(POOLER).batchMinter());
         console.log("seed USDS target:   ", seedUsdsTarget);
     }
@@ -330,11 +375,18 @@ contract ReplaceBatchNFTMinter is Script {
 
     // ============ 5. Repoint dependencies ============
     function _repoint() internal {
+        // Set the nudge address BEFORE restoring the split: SYA's claim() reverts
+        // (NudgeNotConfigured) whenever nudgeSplit > 0 while nudge == address(0), so the
+        // pointer must be live before the split is re-enabled.
         ISYANudge(SYA).setNudgeAddress(newMinter);
+        // Restore the nudge funding cut during the incident mitigation (split was zeroed).
+        ISYANudge(SYA).setNudgeSplit(SYA_NUDGE_SPLIT);
         IBalancerPoolerV2Min(POOLER).setBatchMinter(newMinter);
         require(ISYANudge(SYA).nudge() == newMinter, "SYA repoint failed");
+        require(ISYANudge(SYA).nudgeSplit() == SYA_NUDGE_SPLIT, "SYA nudgeSplit restore failed");
         require(IBalancerPoolerV2Min(POOLER).batchMinter() == newMinter, "pooler repoint failed");
         console.log("Repointed SYA + BalancerPoolerV2 to new minter");
+        console.log("SYA nudgeSplit restored to:", ISYANudge(SYA).nudgeSplit());
     }
 
     // ============ 6. Seed nudge pot from BPT ============
@@ -364,18 +416,30 @@ contract ReplaceBatchNFTMinter is Script {
 
         // proportional exit: BPT -> sUSDS + phUSD
         IERC20(LP_POOL).approve(BALANCER_ROUTER, bptSlice);
-        uint256[] memory minAmountsOut = new uint256[](2);
-        minAmountsOut[0] = 0;
-        minAmountsOut[1] = 0;
+        // Per-token slippage floors (NEVER 0 on mainnet). A proportional exit is exact:
+        // amountOut[i] = balancesRaw[i] * bptSlice / bptTotalSupply (no swap fee). We read the
+        // RAW reserves from the Vault (view, so it never broadcasts — a Balancer V3 query* call
+        // is non-view and would emit a junk broadcast tx), compute the deterministic expected
+        // out, then haircut by exitSlippageBps to absorb same-block LP drift.
+        (address[] memory rawToks,, uint256[] memory rawBals,) =
+            IBalancerVaultV3(BALANCER_VAULT).getPoolTokenInfo(LP_POOL);
+        require(rawToks.length == 2, "unexpected pool token count");
+        uint256[] memory minAmountsOut = new uint256[](rawToks.length);
+        for (uint256 i; i < rawToks.length; ++i) {
+            uint256 expectedOut = (rawBals[i] * bptSlice) / bptTotalSupply;
+            minAmountsOut[i] = (expectedOut * (10_000 - exitSlippageBps)) / 10_000;
+            require(minAmountsOut[i] > 0, "exit floor is zero");
+            console.log("exit minAmountOut leg:", rawToks[i], minAmountsOut[i]);
+        }
         uint256[] memory amountsOut =
             IBalancerRouterV3(BALANCER_ROUTER).removeLiquidityProportional(LP_POOL, bptSlice, minAmountsOut, false, bytes(""));
 
-        address[] memory poolToks = IBalancerVaultV3(BALANCER_VAULT).getPoolTokens(LP_POOL);
+        // rawToks (from getPoolTokenInfo) is in the same order as amountsOut.
         uint256 susdsLeg;
         uint256 phusdLeg;
-        for (uint256 i; i < poolToks.length; ++i) {
-            if (poolToks[i] == SUSDS) susdsLeg = amountsOut[i];
-            else if (poolToks[i] == PHUSD) phusdLeg = amountsOut[i];
+        for (uint256 i; i < rawToks.length; ++i) {
+            if (rawToks[i] == SUSDS) susdsLeg = amountsOut[i];
+            else if (rawToks[i] == PHUSD) phusdLeg = amountsOut[i];
         }
         console.log("sUSDS leg released:", susdsLeg);
         console.log("phUSD leg released:", phusdLeg);
@@ -434,6 +498,7 @@ contract ReplaceBatchNFTMinter is Script {
         console.log("new USDC (nudge pot):", IERC20(USDC).balanceOf(newMinter));
         console.log("usdc seeded:         ", usdcSeeded);
         console.log("SYA nudge:           ", ISYANudge(SYA).nudge());
+        console.log("SYA nudgeSplit:      ", ISYANudge(SYA).nudgeSplit());
         console.log("pooler batchMinter:  ", IBalancerPoolerV2Min(POOLER).batchMinter());
         console.log("pooler BPT remaining:", IERC20(LP_POOL).balanceOf(POOLER));
     }
