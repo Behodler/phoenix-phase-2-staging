@@ -188,13 +188,14 @@ contract TestNudgePayout is Script {
             eye.mint(deployer, paymentBudget);
         }
         eye.approve(batchNFTMinterAddr, paymentBudget);
+        // batchMint was hardened: nftMinter/paymentToken/dispatcherIndex are now read
+        // from contract state (set during deploy), plus a minReward slippage bound.
+        // minReward = 0 here: local anvil test exercising the payout path.
         batchNFTMinter.batchMint(
-            ITokenMinterV2(nftMinterV2Addr),
-            IERC20(eyeAddr),
-            BURNER_EYE_V2_INDEX,
             batchCount,
             recipient,
-            paymentBudget
+            paymentBudget,
+            0
         );
         vm.stopBroadcast();
 

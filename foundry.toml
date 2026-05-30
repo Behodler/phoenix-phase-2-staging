@@ -25,10 +25,35 @@ remappings = [
     "lib/mutable/pauser/=lib/pauser/",
     "vault/interfaces/=lib/vault/src/interfaces/",
     "phlimbo-ea/=lib/phlimbo-ea/src/",
-    "lib/phUSD-stable-minter/lib/mutable/pauser/=lib/pauser/",
-    "lib/stable-yield-accumulator/lib/mutable/pauser/=lib/pauser/",
+    # --- Diamond-dependency canonicalization ---------------------------------
+    # After the recursive submodule bump, each top-level submodule vendors its
+    # OWN nested copy of the shared deps (pauser, vault, yield-claim-nft,
+    # phlimbo-ea, flax-token). Compiling two submodules together would then pull
+    # the same interface (e.g. IPausable) from two physical files -> "Identifier
+    # already declared". Redirect every nested copy to the single top-level
+    # pinned submodule so there is exactly one physical source per interface.
+    # pauser -> lib/pauser
+    "lib/phUSD-stable-minter/lib/pauser/=lib/pauser/",
+    "lib/stable-yield-accumulator/lib/pauser/=lib/pauser/",
+    "lib/vault/lib/mutable/pauser/=lib/pauser/",
+    "lib/nft-staking/lib/mutable/pauser/=lib/pauser/",
+    "lib/yield-claim-nft/lib/mutable/pauser/=lib/pauser/",
     "lib/phlimbo-ea/lib/mutable/pauser/=lib/pauser/",
-    "lib/phUSD-stable-minter/lib/mutable/vault/=lib/vault/",
+    "lib/phUSD-stable-minter/lib/vault/lib/mutable/pauser/=lib/pauser/",
+    "lib/stable-yield-accumulator/lib/vault/lib/mutable/pauser/=lib/pauser/",
+    "lib/stable-yield-accumulator/lib/yield-claim-nft/lib/mutable/pauser/=lib/pauser/",
+    "lib/stable-yield-accumulator/lib/phlimbo-ea/lib/mutable/pauser/=lib/pauser/",
+    "lib/nft-staking/lib/mutable/yield-claim-nft/lib/mutable/pauser/=lib/pauser/",
+    # vault -> lib/vault
+    "lib/phUSD-stable-minter/lib/vault/=lib/vault/",
+    "lib/stable-yield-accumulator/lib/vault/=lib/vault/",
+    # yield-claim-nft -> lib/yield-claim-nft
+    "lib/stable-yield-accumulator/lib/yield-claim-nft/=lib/yield-claim-nft/",
+    "lib/nft-staking/lib/mutable/yield-claim-nft/=lib/yield-claim-nft/",
+    # phlimbo-ea -> lib/phlimbo-ea
+    "lib/stable-yield-accumulator/lib/phlimbo-ea/=lib/phlimbo-ea/",
+    # flax-token -> lib/flax-token-v2
+    "lib/phUSD-stable-minter/lib/flax-token/=lib/flax-token-v2/",
     "openzeppelin-contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/",
     "erc4626-tests/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/erc4626-tests/",
     "halmos-cheatcodes/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/halmos-cheatcodes/src/",

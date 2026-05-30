@@ -27,7 +27,7 @@ contract UpdateExchangeRate is Script {
         console.log("Stablecoin:", rewardToken);
 
         // Get current rate
-        (, uint256 oldRate,,) = PhusdStableMinter(minter).stablecoinConfigs(rewardToken);
+        (, uint256 oldRate,,,,,) = PhusdStableMinter(minter).stablecoinConfigs(rewardToken);
         console.log("Old exchange rate:", oldRate);
         console.log("New exchange rate:", newExchangeRate);
 
@@ -40,7 +40,7 @@ contract UpdateExchangeRate is Script {
         vm.stopBroadcast();
 
         // Verify update
-        (, uint256 currentRate,,) = PhusdStableMinter(minter).stablecoinConfigs(rewardToken);
+        (, uint256 currentRate,,,,,) = PhusdStableMinter(minter).stablecoinConfigs(rewardToken);
         console.log("Current exchange rate:", currentRate);
 
         // Show impact

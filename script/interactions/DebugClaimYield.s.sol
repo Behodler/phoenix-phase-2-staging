@@ -42,14 +42,14 @@ contract DebugClaimYield is Script {
         // ---- 1. Contract configuration ----
         console.log("\n--- 1. Accumulator Config ---");
         address rewardToken = acc.rewardToken();
-        address minter = acc.minterAddress();
+        // NOTE: SYA.minterAddress() was removed in the stable-yield-accumulator bump.
+        // address minter = acc.minterAddress();
         address phlimbo = acc.phlimbo();
         address nftMinterAddr = acc.nftMinter();
         uint256 discount = acc.discountRate();
         bool isPaused = acc.paused();
 
         console.log("Reward token:  ", rewardToken);
-        console.log("Minter:        ", minter);
         console.log("Phlimbo:       ", phlimbo);
         console.log("NFT Minter:    ", nftMinterAddr);
         console.log("Discount (bps):", discount);
@@ -58,7 +58,6 @@ contract DebugClaimYield is Script {
         // Check zero-address guards
         if (phlimbo == address(0)) console.log("!! FAIL: phlimbo is zero address");
         if (rewardToken == address(0)) console.log("!! FAIL: rewardToken is zero address");
-        if (minter == address(0)) console.log("!! FAIL: minterAddress is zero address");
         if (nftMinterAddr == address(0)) console.log("!! FAIL: nftMinter is zero address");
 
         // ---- 2. NFT state ----
@@ -103,14 +102,15 @@ contract DebugClaimYield is Script {
             console.log("    Token paused:", tc.paused);
 
             if (token != address(0) && !tc.paused) {
-                IYieldStrategy ys = IYieldStrategy(strategy);
-                uint256 totalBal = ys.totalBalanceOf(token, minter);
-                uint256 principal = ys.principalOf(token, minter);
-                uint256 yieldAmt = totalBal > principal ? totalBal - principal : 0;
-
-                console.log("    totalBalanceOf(minter):", totalBal);
-                console.log("    principalOf(minter):   ", principal);
-                console.log("    Yield (native):        ", yieldAmt);
+                // NOTE: per-minter balance queries removed — SYA no longer exposes
+                // minterAddress() after the stable-yield-accumulator bump.
+                // IYieldStrategy ys = IYieldStrategy(strategy);
+                // uint256 totalBal = ys.totalBalanceOf(token, minter);
+                // uint256 principal = ys.principalOf(token, minter);
+                // uint256 yieldAmt = totalBal > principal ? totalBal - principal : 0;
+                // console.log("    totalBalanceOf(minter):", totalBal);
+                // console.log("    principalOf(minter):   ", principal);
+                // console.log("    Yield (native):        ", yieldAmt);
 
                 // Try to get normalized yield via accumulator view
                 uint256 stratYield = acc.getYield(strategy);

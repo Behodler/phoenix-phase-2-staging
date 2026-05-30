@@ -713,9 +713,10 @@ contract DeployMocks is Script {
         stableYieldAccumulator.setPhlimbo(address(phlimbo));
         console.log("Set Phlimbo as reward recipient:", address(phlimbo));
 
-        // Set minter address for yield queries
-        stableYieldAccumulator.setMinter(address(minter));
-        console.log("Set minter for yield queries:", address(minter));
+        // NOTE: SYA.setMinter() was removed in the stable-yield-accumulator bump
+        // (the accumulator no longer tracks the phUSD stable minter directly;
+        // yield strategies are registered via addYieldStrategy instead). Call dropped.
+        // stableYieldAccumulator.setMinter(address(minter));
 
         // Configure USDC token (6 decimals, 1:1 exchange rate)
         stableYieldAccumulator.setTokenConfig(address(rewardToken), 6, 1e18);

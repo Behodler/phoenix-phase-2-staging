@@ -177,9 +177,12 @@ contract DeployNewAccumulator is Script {
     // STEP 4: Set Minter
     // ========================================
 
-    function _setMinter() internal {
-        StableYieldAccumulator(newAccumulator).setMinter(PHUSD_STABLE_MINTER);
-        console.log("Minter set to:", PHUSD_STABLE_MINTER);
+    function _setMinter() internal view {
+        // NOTE: SYA.setMinter() was removed in the stable-yield-accumulator bump
+        // (the accumulator no longer tracks the phUSD stable minter directly).
+        // Call dropped; step retained as a no-op for progress-step parity.
+        // StableYieldAccumulator(newAccumulator).setMinter(PHUSD_STABLE_MINTER);
+        console.log("Minter step skipped (SYA.setMinter removed); minter:", PHUSD_STABLE_MINTER);
     }
 
     // ========================================

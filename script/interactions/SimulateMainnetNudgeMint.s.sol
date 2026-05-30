@@ -71,13 +71,14 @@ contract SimulateMainnetNudgeMint is Script {
 
         vm.startPrank(caller);
         IERC20(USDS).approve(BATCH, payment);
+        // batchMint was hardened: nftMinter/paymentToken/dispatcherIndex are now read
+        // from contract state (not caller-supplied), plus a minReward slippage bound.
+        // minReward = 0 here: read-only mainnet-fork simulation, not a real broadcast.
         try batch.batchMint(
-            ITokenMinterV2(NFT_MINTER_V2),
-            IERC20(USDS),
-            DISPATCHER_INDEX,
             count,
             recipient,
-            payment
+            payment,
+            0
         ) returns (uint256 totalPaid) {
             console.log("SUCCESS totalPaid:", totalPaid);
         } catch Error(string memory reason) {

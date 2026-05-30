@@ -30,7 +30,8 @@ contract ViewMintQuote is Script {
         console.log("Stablecoin:", rewardToken);
 
         // Get stablecoin configuration
-        (address yieldStrategy, uint256 exchangeRate, uint8 decimals, bool enabled) =
+        // StablecoinConfig grew to 7 fields (added maxMintPerDay/mintedToday/lastMintTimestamp)
+        (address yieldStrategy, uint256 exchangeRate, uint8 decimals, bool enabled,,,) =
             PhusdStableMinter(minter).stablecoinConfigs(rewardToken);
 
         console.log("Yield strategy:", yieldStrategy);

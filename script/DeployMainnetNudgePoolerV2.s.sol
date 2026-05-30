@@ -470,8 +470,10 @@ contract DeployMainnetNudgePoolerV2 is Script {
         sya.setPhlimbo(PHLIMBO_EA);
         console.log("Step 5: setPhlimbo(PhlimboEA)");
 
-        sya.setMinter(PHUSD_STABLE_MINTER);
-        console.log("Step 6: setMinter(PhusdStableMinter)");
+        // NOTE: SYA.setMinter() was removed in the stable-yield-accumulator bump
+        // (the accumulator no longer tracks the phUSD stable minter directly). Call dropped.
+        // sya.setMinter(PHUSD_STABLE_MINTER);
+        console.log("Step 6: setMinter skipped (SYA.setMinter removed)");
 
         sya.setNFTMinter(NFT_MINTER_V2);
         console.log("Step 7: setNFTMinter(NFTMinterV2)");

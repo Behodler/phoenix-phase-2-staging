@@ -50,7 +50,8 @@ contract RegisterStablecoin is Script {
         vm.stopBroadcast();
 
         // Verify registration
-        (address configYS, uint256 configRate, uint8 configDecimals, bool enabled) =
+        // StablecoinConfig grew to 7 fields (added maxMintPerDay/mintedToday/lastMintTimestamp)
+        (address configYS, uint256 configRate, uint8 configDecimals, bool enabled,,,) =
             PhusdStableMinter(minter).stablecoinConfigs(newStablecoin);
 
         console.log("\n--- Verification ---");
