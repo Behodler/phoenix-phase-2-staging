@@ -46,7 +46,9 @@ import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol"
 
 interface ISYANudge {
     function setNudgeAddress(address) external;
-    function nudgeAddress() external view returns (address);
+    // NOTE: the getter is the public state var `nudge` (source: StableYieldAccumulator.sol
+    // `address public nudge;`), NOT `nudgeAddress`. The setter is `setNudgeAddress`.
+    function nudge() external view returns (address);
 }
 
 interface IBalancerPoolerV2Min {
@@ -95,8 +97,11 @@ interface IERC4626Min {
     function totalSupply() external view returns (uint256);
 }
 
-interface IERC20Burnable {
-    function burn(uint256 amount) external;
+interface IFlaxBurn {
+    // phUSD (FlaxToken) has NO self-burn `burn(uint256)`. Its `burn(holder, amount)` works
+    // like `transferFrom`: it spends msg.sender's allowance against `holder`, then `_burn`s.
+    // It is permissionless (no minter role needed). Source: flax-token-v2/src/FlaxToken.sol.
+    function burn(address holder, uint256 amount) external;
 }
 
 interface IBalancerSwapVaultV3 {
@@ -119,6 +124,84 @@ struct VaultSwapParams {
     uint256 amountGivenRaw;
     uint256 limitRaw;
     bytes userData;
+}
+
+/// @notice Short-lived helper that performs the Balancer-V3 sUSDS -> waUSDC -> USDC swap
+///         and forwards the USDC to the new nudge pot. A Balancer V3 `unlock` callback is
+///         dispatched to `msg.sender`, so the caller MUST be a contract — an owner-signed
+///         EOA broadcast cannot drive `unlock` directly (the earlier `this.swapCallback`
+///         approach reverted with `AddressEmptyCode` on the EOA). Mirrors
+///         RescuePoolAndDonateUSDC's `DonationRescueHelper`: owner pre-funds it with sUSDS,
+///         calls `execute`, the Vault calls back `unlockCallback` (guarded `msg.sender==vault`),
+///         which swaps/settles/redeems and forwards USDC. Deployed fresh per run.
+contract SeedSwapHelper {
+    address public immutable owner;
+    address public immutable vault;
+    address public immutable swapPool;
+    address public immutable sUSDS;
+    address public immutable waUsdc;
+    address public immutable usdc;
+    address public immutable recipient; // the new BatchNFTMinter nudge pot
+
+    error NotOwner();
+    error NotVault();
+    error UsdcSlippage(uint256 received, uint256 minOut);
+
+    constructor(
+        address _vault,
+        address _swapPool,
+        address _sUSDS,
+        address _waUsdc,
+        address _usdc,
+        address _recipient
+    ) {
+        owner = msg.sender;
+        vault = _vault;
+        swapPool = _swapPool;
+        sUSDS = _sUSDS;
+        waUsdc = _waUsdc;
+        usdc = _usdc;
+        recipient = _recipient;
+    }
+
+    /// @notice Owner pre-funds this helper with `sUSDSAmount` sUSDS, then calls `execute`
+    ///         to swap it to USDC and forward to `recipient`. Returns the USDC forwarded.
+    function execute(uint256 sUSDSAmount, uint256 minUsdcOut) external returns (uint256 usdcSent) {
+        if (msg.sender != owner) revert NotOwner();
+        bytes memory inner = abi.encode(sUSDSAmount, minUsdcOut);
+        bytes memory ret =
+            IBalancerSwapVaultV3(vault).unlock(abi.encodeWithSelector(this.unlockCallback.selector, inner));
+        usdcSent = abi.decode(ret, (uint256));
+    }
+
+    function unlockCallback(bytes calldata data) external returns (bytes memory) {
+        if (msg.sender != vault) revert NotVault();
+        (uint256 sUSDSAmount, uint256 minUsdcOut) = abi.decode(data, (uint256, uint256));
+
+        // 1. Pay the sUSDS swap input into the Vault.
+        IERC20(sUSDS).transfer(vault, sUSDSAmount);
+        // 2. Swap sUSDS -> waUSDC (Vault credits this contract internally).
+        VaultSwapParams memory params = VaultSwapParams({
+            kind: SwapKind.EXACT_IN,
+            pool: swapPool,
+            tokenIn: sUSDS,
+            tokenOut: waUsdc,
+            amountGivenRaw: sUSDSAmount,
+            limitRaw: 0,
+            userData: bytes("")
+        });
+        (,, uint256 waUsdcReceived) = IBalancerSwapVaultV3(vault).swap(params);
+        // 3. Settle the sUSDS we paid in.
+        IBalancerSwapVaultV3(vault).settle(sUSDS, sUSDSAmount);
+        // 4. Materialize the waUSDC credit into a real balance here.
+        IBalancerSwapVaultV3(vault).sendTo(waUsdc, address(this), waUsdcReceived);
+        // 5. Unwrap waUSDC -> USDC.
+        uint256 usdcReceived = IERC4626Min(waUsdc).redeem(waUsdcReceived, address(this), address(this));
+        if (usdcReceived < minUsdcOut) revert UsdcSlippage(usdcReceived, minUsdcOut);
+        // 6. Forward USDC to the new nudge pot.
+        IERC20(usdc).transfer(recipient, usdcReceived);
+        return abi.encode(usdcReceived);
+    }
 }
 
 contract ReplaceBatchNFTMinter is Script {
@@ -144,12 +227,17 @@ contract ReplaceBatchNFTMinter is Script {
     // SEED_USDS_TARGET is the USDS-equivalent (18-dp) notional of the pool slice to remove. It is
     // sized against the Vault's rate-scaled sUSDS live balance, and the proportional exit also
     // releases the phUSD leg (burned), so the eventual USDC seed is a fraction of this notional.
-    // On the calibration fork (2026-05-30, pool ~6.5k USDS phUSD / ~11.8k USDS-equiv sUSDS),
-    // 190e18 yielded ~49.9 USDC into the new nudge pot — i.e. ~50 USDC, the story's target.
+    // CALIBRATED ON FORK (2026-05-30, block ~0x180a223, RPC_MAINNET; pooler held ~2214 BPT):
+    //   - SEED_USDS_TARGET = 46e18  -> BPT slice ~49.88e18 -> sUSDS leg 46.0 / phUSD leg 54.1
+    //                                 -> 50.417869 USDC seeded into the new nudge pot. (target ~50 USDC)
+    //   - (For reference, 190e18 -> 208.03 USDC, so the prior 190e18 default was ~4x too high.)
     // Re-tune on a fresh fork before broadcast if pool state has moved materially.
-    uint256 public constant DEFAULT_SEED_USDS_TARGET = 190e18; // calibrated to ~50 USDC seed
-    uint256 public constant DEFAULT_MIN_BPT_WEI = 0;
-    uint256 public constant DEFAULT_MIN_USDC_OUT = 0;
+    uint256 public constant DEFAULT_SEED_USDS_TARGET = 46e18; // fork-calibrated -> ~50.4 USDC seed
+    // Non-zero safety floors (repo Configuration Safety gate: never leave slippage bounds at 0).
+    // MIN_BPT_WEI: reject a degenerate dust slice (calibrated slice ~49.88e18; floor well below it).
+    uint256 public constant DEFAULT_MIN_BPT_WEI = 40e18;
+    // MIN_USDC_OUT: final slippage floor on USDC into the pot (observed 50.42; ~6.8% haircut allowed).
+    uint256 public constant DEFAULT_MIN_USDC_OUT = 47_000_000;
     address public constant DEFAULT_SWAP_POOL = 0x0B65A4505E8C323AE4fEDcc48515FD713dC9d8C0; // sUSDS/waUSDC
 
     uint256 public seedUsdsTarget;
@@ -199,7 +287,7 @@ contract ReplaceBatchNFTMinter is Script {
         console.log("old batchMinter:    ", OLD_BATCH_MINTER);
         console.log("old USDC balance:   ", IERC20(USDC).balanceOf(OLD_BATCH_MINTER));
         console.log("pooler BPT balance: ", IERC20(LP_POOL).balanceOf(POOLER));
-        console.log("SYA nudgeAddress:   ", ISYANudge(SYA).nudgeAddress());
+        console.log("SYA nudge:          ", ISYANudge(SYA).nudge());
         console.log("pooler batchMinter: ", IBalancerPoolerV2Min(POOLER).batchMinter());
         console.log("seed USDS target:   ", seedUsdsTarget);
     }
@@ -244,7 +332,7 @@ contract ReplaceBatchNFTMinter is Script {
     function _repoint() internal {
         ISYANudge(SYA).setNudgeAddress(newMinter);
         IBalancerPoolerV2Min(POOLER).setBatchMinter(newMinter);
-        require(ISYANudge(SYA).nudgeAddress() == newMinter, "SYA repoint failed");
+        require(ISYANudge(SYA).nudge() == newMinter, "SYA repoint failed");
         require(IBalancerPoolerV2Min(POOLER).batchMinter() == newMinter, "pooler repoint failed");
         console.log("Repointed SYA + BalancerPoolerV2 to new minter");
     }
@@ -292,20 +380,26 @@ contract ReplaceBatchNFTMinter is Script {
         console.log("sUSDS leg released:", susdsLeg);
         console.log("phUSD leg released:", phusdLeg);
 
-        // sUSDS leg -> waUSDC (Balancer V3 swap) -> USDC (ERC4626 redeem)
-        uint256 waUsdcOut = _swapSusdsToWaUsdc(susdsLeg);
-        console.log("waUSDC out:", waUsdcOut);
-        usdcOut = IERC4626Min(WAUSDC).redeem(waUsdcOut, OWNER, OWNER);
-        require(usdcOut >= minUsdcOut, "USDC out below floor");
-        console.log("USDC out:", usdcOut);
-
-        // seed the new nudge pot
-        IERC20(USDC).transfer(newMinter, usdcOut);
+        // sUSDS leg -> waUSDC -> USDC, forwarded straight to the new nudge pot. The Balancer
+        // V3 `unlock` callback is dispatched to its caller, so this must run inside a contract
+        // (SeedSwapHelper), NOT from the owner EOA. Owner pre-funds the helper with the sUSDS
+        // leg, then `execute` swaps it and forwards the USDC to newMinter (slippage floor
+        // enforced inside the helper).
+        uint256 potBefore = IERC20(USDC).balanceOf(newMinter);
+        SeedSwapHelper helper = new SeedSwapHelper(BALANCER_VAULT, swapPool, SUSDS, WAUSDC, USDC, newMinter);
+        IERC20(SUSDS).transfer(address(helper), susdsLeg);
+        helper.execute(susdsLeg, minUsdcOut);
+        // Measure the actual delta into the pot (robust against the Vault.unlock bytes-wrapper
+        // return shape); the helper already enforced the minUsdcOut slippage floor.
+        usdcOut = IERC20(USDC).balanceOf(newMinter) - potBefore;
         console.log("Seeded new BatchNFTMinter USDC:", usdcOut);
 
-        // burn the phUSD leg (phUSD exposes ERC20Burnable.burn; same path RescuePoolAndDonateUSDC uses)
+        // Burn the proportionally-released phUSD leg. phUSD (FlaxToken) has no self-burn; its
+        // burn(holder, amount) spends the caller's allowance against holder (like burnFrom), so
+        // the owner approves itself, then burns from its own balance.
         if (phusdLeg > 0) {
-            IERC20Burnable(PHUSD).burn(phusdLeg);
+            IERC20(PHUSD).approve(OWNER, phusdLeg);
+            IFlaxBurn(PHUSD).burn(OWNER, phusdLeg);
             console.log("Burned phUSD leg:", phusdLeg);
         }
     }
@@ -319,30 +413,6 @@ contract ReplaceBatchNFTMinter is Script {
             if (toks[i] == SUSDS) return bals[i];
         }
         revert("sUSDS not in pool tokens");
-    }
-
-    function _swapSusdsToWaUsdc(uint256 susdsAmount) internal returns (uint256 waUsdcOut) {
-        if (susdsAmount == 0) return 0;
-        bytes memory result =
-            IBalancerSwapVaultV3(BALANCER_VAULT).unlock(abi.encodeWithSelector(this.swapCallback.selector, susdsAmount));
-        waUsdcOut = abi.decode(result, (uint256));
-    }
-
-    function swapCallback(uint256 susdsAmount) external returns (uint256 waUsdcOut) {
-        IERC20(SUSDS).transfer(BALANCER_VAULT, susdsAmount);
-        IBalancerSwapVaultV3(BALANCER_VAULT).settle(SUSDS, susdsAmount);
-        VaultSwapParams memory params = VaultSwapParams({
-            kind: SwapKind.EXACT_IN,
-            pool: swapPool,
-            tokenIn: SUSDS,
-            tokenOut: WAUSDC,
-            amountGivenRaw: susdsAmount,
-            limitRaw: 0,
-            userData: bytes("")
-        });
-        (,, waUsdcOut) = IBalancerSwapVaultV3(BALANCER_VAULT).swap(params);
-        IBalancerSwapVaultV3(BALANCER_VAULT).sendTo(WAUSDC, OWNER, waUsdcOut);
-        return waUsdcOut;
     }
 
     // ============ 7. Retire old contract (defense-in-depth) ============
@@ -363,7 +433,7 @@ contract ReplaceBatchNFTMinter is Script {
         console.log("new batchMinter:     ", newMinter);
         console.log("new USDC (nudge pot):", IERC20(USDC).balanceOf(newMinter));
         console.log("usdc seeded:         ", usdcSeeded);
-        console.log("SYA nudgeAddress:    ", ISYANudge(SYA).nudgeAddress());
+        console.log("SYA nudge:           ", ISYANudge(SYA).nudge());
         console.log("pooler batchMinter:  ", IBalancerPoolerV2Min(POOLER).batchMinter());
         console.log("pooler BPT remaining:", IERC20(LP_POOL).balanceOf(POOLER));
     }
