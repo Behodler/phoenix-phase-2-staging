@@ -9,7 +9,7 @@ import "./MockDola.sol";
 /**
  * @title MockAutoDOLA
  * @notice Generic ERC4626 vault mock used to stand in for production AutoDola /
- *         AutoUSDC-style vaults on Anvil and Sepolia.
+ *         AutoUSDC-style vaults on Anvil.
  * @dev Pure ERC4626 with a simple time-based yield simulation. No external
  *      staking / reward layer — the going-forward ERC4626YieldStrategy wraps
  *      the vault directly.

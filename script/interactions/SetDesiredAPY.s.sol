@@ -15,18 +15,11 @@ import "@phlimbo-ea/Phlimbo.sol";
  *   # Anvil (local)
  *   forge script script/interactions/SetDesiredAPY.s.sol:SetDesiredAPY --rpc-url http://localhost:8545 --broadcast
  *
- *   # Sepolia
- *   forge script script/interactions/SetDesiredAPY.s.sol:SetDesiredAPY --rpc-url $SEPOLIA_RPC_URL --broadcast
- *
  * Environment variables:
- *   - DEPLOYER_SEPOLIA_pk: Private key for Sepolia (required for Sepolia)
  *   - PHLIMBO_ADDRESS: (optional) Override the default Phlimbo address
  *   - DESIRED_APY_BPS: (optional) Override the default APY (default: 500 = 5%)
  */
 contract SetDesiredAPY is Script {
-    // Sepolia PhlimboEA address from deployment
-    address constant SEPOLIA_PHLIMBO = 0x347168aCbf5d5d6E2e49e7Ca6298e77123758C0F;
-
     // Anvil PhlimboEA address (default Anvil deployment)
     address constant ANVIL_PHLIMBO = 0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6;
 
@@ -77,7 +70,7 @@ contract SetDesiredAPY is Script {
             console.log("APY change previewed (tx 1)");
 
             console.log("\n--- Step 2: Commit APY Change ---");
-            // On real networks (Sepolia, Mainnet), this will be in a new block
+            // On real networks (Mainnet), this will be in a new block
             // On Anvil with --broadcast, forge sends transactions sequentially
             // which should result in different blocks
             p.setDesiredAPY(newAPY);
@@ -112,9 +105,7 @@ contract SetDesiredAPY is Script {
         }
 
         // Select based on chain ID
-        if (block.chainid == 11155111) {
-            return SEPOLIA_PHLIMBO;
-        } else if (block.chainid == 31337) {
+        if (block.chainid == 31337) {
             return ANVIL_PHLIMBO;
         } else if (block.chainid == 1) {
             revert("Mainnet Phlimbo address not configured - set PHLIMBO_ADDRESS env var");
@@ -124,10 +115,7 @@ contract SetDesiredAPY is Script {
     }
 
     function _getPrivateKey() internal view returns (uint256) {
-        if (block.chainid == 11155111) {
-            // Sepolia - use DEPLOYER_SEPOLIA_pk
-            return vm.envUint("DEPLOYER_SEPOLIA_pk");
-        } else if (block.chainid == 31337) {
+        if (block.chainid == 31337) {
             // Anvil - use default Anvil private key
             return 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         } else if (block.chainid == 1) {

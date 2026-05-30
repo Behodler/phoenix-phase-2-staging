@@ -9,7 +9,6 @@
  *
  * Examples:
  *   node server/generate-ts-addresses.js 31337     # Local/Anvil
- *   node server/generate-ts-addresses.js 11155111  # Sepolia
  *   node server/generate-ts-addresses.js           # Defaults to 31337
  */
 
@@ -19,20 +18,17 @@ const path = require('path');
 // Chain ID to input file mapping
 const CHAIN_FILE_MAP = {
     31337: 'local.json',
-    11155111: 'sepolia.json',
     1: 'mainnet.json'
 };
 
 // Chain ID to output file mapping
 const CHAIN_OUTPUT_MAP = {
     31337: 'local-addresses.ts',
-    11155111: 'sepolia-addresses.ts',
     1: 'mainnet-addresses.ts'
 };
 
 const CHAIN_NAME_MAP = {
     31337: 'anvil',
-    11155111: 'sepolia',
     1: 'mainnet'
 };
 
@@ -91,7 +87,7 @@ function generateTsAddresses(chainId) {
 
     if (!inputFile) {
         console.error(`Error: Unsupported chainId '${chainId}'.`);
-        console.error('Supported chain IDs: 31337 (Anvil), 11155111 (Sepolia), 1 (Mainnet)');
+        console.error('Supported chain IDs: 31337 (Anvil), 1 (Mainnet)');
         process.exit(1);
     }
 
@@ -190,7 +186,7 @@ function parseArgs() {
         if (isNaN(parsed)) {
             console.error(`Error: Invalid chainId '${args[0]}'. Must be a number.`);
             console.error('Usage: node server/generate-ts-addresses.js [chainId]');
-            console.error('  chainId: 31337 (Anvil), 11155111 (Sepolia), 1 (Mainnet)');
+            console.error('  chainId: 31337 (Anvil), 1 (Mainnet)');
             process.exit(1);
         }
         chainId = parsed;
