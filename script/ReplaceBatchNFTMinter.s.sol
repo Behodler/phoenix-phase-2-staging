@@ -132,7 +132,7 @@ contract ReplaceBatchNFTMinter is Script {
     address public constant USDS = 0xdC035D45d973E3EC169d2276DDab16f1e407384F;
     address public constant SUSDS = 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD;
     address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address public constant WAUSDC = 0xD4fa2D31b7968E448877f69a96DE69f5de8cD23E;
+    address public constant WAUSDC = 0xD4fa2D31b7968E448877f69A96DE69f5de8cD23E;
     address public constant LP_POOL = 0x642BB6860b4776CC10b26B8f361Fd139E7f0db04; // 50/50 phUSD/sUSDS BPT
     address public constant BALANCER_VAULT = 0xbA1333333333a1BA1108E8412f11850A5C319bA9;
     address public constant BALANCER_ROUTER = 0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd;
@@ -231,7 +231,11 @@ contract ReplaceBatchNFTMinter is Script {
         address primeToken = ITokenDispatcherV2Prime(dispatcher).primeToken();
         console.log("index-4 dispatcher: ", dispatcher);
         console.log("index-4 primeToken: ", primeToken);
+        // index-4 is the USDS / BalancerPoolerV2 path (confirmed on-chain 2026-05-30:
+        // configs(4).primeToken == USDS 0xdC03...384F).
         require(primeToken == USDS, "index-4 primeToken != USDS");
+        // The security-critical exploit guard: nudge payout token MUST differ from the
+        // dispatcher's prime (mint payment) token, else batchMint would revert up-front.
         require(m.nudgePaymentToken() != primeToken, "nudge token == prime token");
         console.log("Guards passed.");
     }

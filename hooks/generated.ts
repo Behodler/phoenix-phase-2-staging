@@ -1044,24 +1044,21 @@ export const batchNftMinterAbi = [
   {
     type: 'function',
     inputs: [
-      {
-        name: 'nftMinter',
-        internalType: 'contract ITokenMinterV2',
-        type: 'address',
-      },
-      {
-        name: 'paymentToken',
-        internalType: 'contract IERC20',
-        type: 'address',
-      },
-      { name: 'dispatcherIndex', internalType: 'uint256', type: 'uint256' },
       { name: 'count', internalType: 'uint256', type: 'uint256' },
       { name: 'recipient', internalType: 'address', type: 'address' },
       { name: 'paymentAmount', internalType: 'uint256', type: 'uint256' },
+      { name: 'minReward', internalType: 'uint256', type: 'uint256' },
     ],
     name: 'batchMint',
     outputs: [{ name: 'totalPaid', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'dispatcherIndex',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -1087,7 +1084,46 @@ export const batchNftMinterAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'pause',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'paused',
+    outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pauser',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'renounceOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'token', internalType: 'contract IERC20', type: 'address' },
+      { name: 'to', internalType: 'address', type: 'address' },
+      { name: 'amount', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'rescueERC20',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newIndex', internalType: 'uint256', type: 'uint256' }],
+    name: 'setDispatcherIndex',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -1107,10 +1143,59 @@ export const batchNftMinterAbi = [
   },
   {
     type: 'function',
+    inputs: [{ name: 'newPauser', internalType: 'address', type: 'address' }],
+    name: 'setPauser',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      {
+        name: 'newMinter',
+        internalType: 'contract ITokenMinterV2',
+        type: 'address',
+      },
+    ],
+    name: 'setTokenMinter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'tokenMinter',
+    outputs: [
+      { name: '', internalType: 'contract ITokenMinterV2', type: 'address' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
     name: 'transferOwnership',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'unpause',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'dispatcherIndex',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: true,
+      },
+    ],
+    name: 'DispatcherIndexSet',
   },
   {
     type: 'event',
@@ -1183,12 +1268,102 @@ export const batchNftMinterAbi = [
     name: 'OwnershipTransferred',
   },
   {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'account',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'Paused',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'previousPauser',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newPauser',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'PauserChanged',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'token',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      { name: 'to', internalType: 'address', type: 'address', indexed: true },
+      {
+        name: 'amount',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'Rescued',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newMinter',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'TokenMinterSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'account',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'Unpaused',
+  },
+  { type: 'error', inputs: [], name: 'BatchMint__DispatcherNotConfigured' },
+  { type: 'error', inputs: [], name: 'BatchMint__MinterNotConfigured' },
+  {
     type: 'error',
     inputs: [],
     name: 'BatchMint__NudgeTokenMatchesPaymentToken',
   },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'minReward', internalType: 'uint256', type: 'uint256' },
+      { name: 'actualReward', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__RewardBelowMinimum',
+  },
   { type: 'error', inputs: [], name: 'BatchMint__ZeroCount' },
   { type: 'error', inputs: [], name: 'BatchMint__ZeroRecipient' },
+  { type: 'error', inputs: [], name: 'EnforcedPause' },
+  { type: 'error', inputs: [], name: 'ExpectedPause' },
   {
     type: 'error',
     inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
@@ -1199,6 +1374,7 @@ export const batchNftMinterAbi = [
     inputs: [{ name: 'account', internalType: 'address', type: 'address' }],
     name: 'OwnableUnauthorizedAccount',
   },
+  { type: 'error', inputs: [], name: 'Rescue__ZeroRecipient' },
   {
     type: 'error',
     inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
@@ -1928,7 +2104,14 @@ export const erc4626YieldStrategyAbi = [
   },
   {
     type: 'function',
-    inputs: [{ name: '', internalType: 'address', type: 'address' }],
+    inputs: [],
+    name: 'authorizedClientCount',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'client', internalType: 'address', type: 'address' }],
     name: 'authorizedClients',
     outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
     stateMutability: 'view',
@@ -1978,6 +2161,13 @@ export const erc4626YieldStrategyAbi = [
     name: 'emergencyWithdraw',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'getAuthorizedClients',
+    outputs: [{ name: '', internalType: 'address[]', type: 'address[]' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -2040,6 +2230,13 @@ export const erc4626YieldStrategyAbi = [
   },
   {
     type: 'function',
+    inputs: [{ name: '', internalType: 'address', type: 'address' }],
+    name: 'setAsideBufferSize',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [
       { name: 'client', internalType: 'address', type: 'address' },
       { name: '_auth', internalType: 'bool', type: 'bool' },
@@ -2058,11 +2255,33 @@ export const erc4626YieldStrategyAbi = [
   {
     type: 'function',
     inputs: [
+      { name: 'client', internalType: 'address', type: 'address' },
+      { name: 'bufferPercent', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'setSetAsideBuffer',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
       { name: 'withdrawer', internalType: 'address', type: 'address' },
       { name: '_auth', internalType: 'bool', type: 'bool' },
     ],
     name: 'setWithdrawer',
     outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'token', internalType: 'address', type: 'address' },
+      { name: 'recipient', internalType: 'address', type: 'address' },
+    ],
+    name: 'skimSurplus',
+    outputs: [
+      { name: 'underlyingReceived', internalType: 'uint256', type: 'uint256' },
+    ],
     stateMutability: 'nonpayable',
   },
   {
@@ -2139,18 +2358,6 @@ export const erc4626YieldStrategyAbi = [
       { name: 'amount', internalType: 'uint256', type: 'uint256' },
     ],
     name: 'withdrawAsOwner',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [
-      { name: 'token', internalType: 'address', type: 'address' },
-      { name: 'client', internalType: 'address', type: 'address' },
-      { name: 'amount', internalType: 'uint256', type: 'uint256' },
-      { name: 'recipient', internalType: 'address', type: 'address' },
-    ],
-    name: 'withdrawFrom',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -2303,6 +2510,68 @@ export const erc4626YieldStrategyAbi = [
     anonymous: false,
     inputs: [
       {
+        name: 'client',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'oldPercent',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'newPercent',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'SetAsideBufferSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'token',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'client',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'withdrawer',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'amount',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'recipient',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'SurplusSkimmed',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
         name: 'account',
         internalType: 'address',
         type: 'address',
@@ -2434,43 +2703,6 @@ export const erc4626YieldStrategyAbi = [
       },
     ],
     name: 'Withdrawn',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'token',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      {
-        name: 'client',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      {
-        name: 'withdrawer',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      {
-        name: 'amount',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-      {
-        name: 'recipient',
-        internalType: 'address',
-        type: 'address',
-        indexed: false,
-      },
-    ],
-    name: 'WithdrawnFrom',
   },
   { type: 'error', inputs: [], name: 'EnforcedPause' },
   { type: 'error', inputs: [], name: 'ExpectedPause' },
@@ -3037,7 +3269,7 @@ export const iFlaxAbi = [
     name: 'authorizedMinters',
     outputs: [
       {
-        name: '',
+        name: 'info',
         internalType: 'struct IFlax.MinterInfo',
         type: 'tuple',
         components: [
@@ -3067,6 +3299,13 @@ export const iFlaxAbi = [
   },
   {
     type: 'function',
+    inputs: [],
+    name: 'decimals',
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [
       { name: 'recipient', internalType: 'address', type: 'address' },
       { name: 'amount', internalType: 'uint256', type: 'uint256' },
@@ -3085,9 +3324,47 @@ export const iFlaxAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'name',
+    outputs: [{ name: '', internalType: 'string', type: 'string' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'owner',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'renounceOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'revokeAllMintPrivileges',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'minter', internalType: 'address', type: 'address' },
+      { name: 'canMint', internalType: 'bool', type: 'bool' },
+    ],
+    name: 'setMinter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'symbol',
+    outputs: [{ name: '', internalType: 'string', type: 'string' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -3118,6 +3395,13 @@ export const iFlaxAbi = [
     stateMutability: 'nonpayable',
   },
   {
+    type: 'function',
+    inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
+    name: 'transferOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
     type: 'event',
     anonymous: false,
     inputs: [
@@ -3141,6 +3425,39 @@ export const iFlaxAbi = [
       },
     ],
     name: 'Approval',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newMintVersion',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'MintPrivilegesRevoked',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'minter',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      { name: 'canMint', internalType: 'bool', type: 'bool', indexed: false },
+      {
+        name: 'mintVersion',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'MinterSet',
   },
   {
     type: 'event',
@@ -3458,6 +3775,13 @@ export const iYieldStrategyAbi = [
   },
   {
     type: 'function',
+    inputs: [],
+    name: 'getAuthorizedClients',
+    outputs: [{ name: '', internalType: 'address[]', type: 'address[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [
       { name: 'token', internalType: 'address', type: 'address' },
       { name: 'account', internalType: 'address', type: 'address' },
@@ -3473,6 +3797,16 @@ export const iYieldStrategyAbi = [
       { name: '_auth', internalType: 'bool', type: 'bool' },
     ],
     name: 'setClient',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'token', internalType: 'address', type: 'address' },
+      { name: 'recipient', internalType: 'address', type: 'address' },
+    ],
+    name: 'skimSurplus',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -3504,18 +3838,6 @@ export const iYieldStrategyAbi = [
       { name: 'recipient', internalType: 'address', type: 'address' },
     ],
     name: 'withdraw',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [
-      { name: 'token', internalType: 'address', type: 'address' },
-      { name: 'client', internalType: 'address', type: 'address' },
-      { name: 'amount', internalType: 'uint256', type: 'uint256' },
-      { name: 'recipient', internalType: 'address', type: 'address' },
-    ],
-    name: 'withdrawFrom',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -7405,6 +7727,13 @@ export const phusdStableMinterAbi = [
           { name: 'exchangeRate', internalType: 'uint256', type: 'uint256' },
           { name: 'decimals', internalType: 'uint8', type: 'uint8' },
           { name: 'enabled', internalType: 'bool', type: 'bool' },
+          { name: 'maxMintPerDay', internalType: 'uint256', type: 'uint256' },
+          { name: 'mintedToday', internalType: 'uint256', type: 'uint256' },
+          {
+            name: 'lastMintTimestamp',
+            internalType: 'uint256',
+            type: 'uint256',
+          },
         ],
       },
     ],
@@ -7494,6 +7823,16 @@ export const phusdStableMinterAbi = [
   },
   {
     type: 'function',
+    inputs: [
+      { name: 'stablecoin', internalType: 'address', type: 'address' },
+      { name: 'newMaxMintPerDay', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'setMaxMintPerDay',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [{ name: 'newPauser', internalType: 'address', type: 'address' }],
     name: 'setPauser',
     outputs: [],
@@ -7518,6 +7857,9 @@ export const phusdStableMinterAbi = [
       { name: 'exchangeRate', internalType: 'uint256', type: 'uint256' },
       { name: 'decimals', internalType: 'uint8', type: 'uint8' },
       { name: 'enabled', internalType: 'bool', type: 'bool' },
+      { name: 'maxMintPerDay', internalType: 'uint256', type: 'uint256' },
+      { name: 'mintedToday', internalType: 'uint256', type: 'uint256' },
+      { name: 'lastMintTimestamp', internalType: 'uint256', type: 'uint256' },
     ],
     stateMutability: 'view',
   },
@@ -7544,23 +7886,6 @@ export const phusdStableMinterAbi = [
     name: 'updateExchangeRate',
     outputs: [],
     stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [
-      { name: 'yieldStrategy', internalType: 'address', type: 'address' },
-      { name: 'recipient', internalType: 'address', type: 'address' },
-    ],
-    name: 'withdraw',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [{ name: '', internalType: 'address', type: 'address' }],
-    name: 'yieldStrategyToToken',
-    outputs: [{ name: '', internalType: 'address', type: 'address' }],
-    stateMutability: 'view',
   },
   {
     type: 'event',
@@ -7605,6 +7930,25 @@ export const phusdStableMinterAbi = [
       },
     ],
     name: 'ExchangeRateUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'stablecoin',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newMaxMintPerDay',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'MaxMintPerDayUpdated',
   },
   {
     type: 'event',
@@ -7767,37 +8111,6 @@ export const phusdStableMinterAbi = [
     name: 'Unpaused',
   },
   {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'yieldStrategy',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      {
-        name: 'token',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      {
-        name: 'amount',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-      {
-        name: 'recipient',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-    ],
-    name: 'WithdrawalExecuted',
-  },
-  {
     type: 'error',
     inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
     name: 'OwnableInvalidOwner',
@@ -7944,13 +8257,6 @@ export const stableYieldAccumulatorAbi = [
   {
     type: 'function',
     inputs: [],
-    name: 'minterAddress',
-    outputs: [{ name: '', internalType: 'address', type: 'address' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
     name: 'nftMinter',
     outputs: [{ name: '', internalType: 'address', type: 'address' }],
     stateMutability: 'view',
@@ -8036,13 +8342,6 @@ export const stableYieldAccumulatorAbi = [
     type: 'function',
     inputs: [{ name: 'rate', internalType: 'uint256', type: 'uint256' }],
     name: 'setDiscountRate',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [{ name: '_minter', internalType: 'address', type: 'address' }],
-    name: 'setMinter',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -8173,25 +8472,6 @@ export const stableYieldAccumulatorAbi = [
       },
     ],
     name: 'DiscountRateSet',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'oldMinter',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      {
-        name: 'newMinter',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-    ],
-    name: 'MinterUpdated',
   },
   {
     type: 'event',
