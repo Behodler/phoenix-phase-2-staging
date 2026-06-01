@@ -25,3 +25,6 @@
 [submodule "lib/nft-staking"]
 	path = lib/nft-staking
 	url = git@github.com:Behodler/phoenix-nft-staking.git
+[submodule "lib/stable-staker"]
+	path = lib/stable-staker
+	url = git@github.com:Behodler/stable-staker.git
