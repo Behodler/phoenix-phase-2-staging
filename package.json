@@ -169,7 +169,9 @@
     "DisableNudgeAndDivertDonations": "forge script script/DisableNudgeAndDivertDonations.s.sol:DisableNudgeAndDivertDonations --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "//batch-minter-replace": "Story 050 — redeploy fixed BatchNFTMinter, repoint SYA + BalancerPoolerV2, seed nudge pot from BPT, retire old contract",
     "batch-minter-replace:preview": "PREVIEW_MODE=true forge script script/ReplaceBatchNFTMinter.s.sol:ReplaceBatchNFTMinter --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --slow -vvv",
-    "batch-minter-replace": "node scripts/backup-mainnet-addresses.js && forge script script/ReplaceBatchNFTMinter.s.sol:ReplaceBatchNFTMinter --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-batch-minter-replace.js"
+    "batch-minter-replace": "node scripts/backup-mainnet-addresses.js && forge script script/ReplaceBatchNFTMinter.s.sol:ReplaceBatchNFTMinter --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-batch-minter-replace.js",
+    "//verify-stable-staker": "Story 051 — end-to-end StableStaker config verification (deploy, stake, evm_increaseTime 1 day, claim+withdraw, assert ~10 phUSD reward + principal/baseline restored)",
+    "test:stable-staker": "./verify-stable-staker.sh"
   },
   "keywords": [
     "phoenix",

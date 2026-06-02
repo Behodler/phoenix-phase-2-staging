@@ -66,7 +66,23 @@ remappings = [
     "yield-claim-nft/=lib/yield-claim-nft/src/",
     "@yield-claim-nft/=lib/yield-claim-nft/src/",
     "nft-staking/=lib/nft-staking/src/",
-    "lib/yield-claim-nft/src/interfaces/IBurnable.sol=lib/pauser/src/interfaces/IBurnable.sol"
+    "lib/yield-claim-nft/src/interfaces/IBurnable.sol=lib/pauser/src/interfaces/IBurnable.sol",
+    # --- stable-staker (story 051) ---------------------------------------------
+    # StableStaker.sol imports use the prefixes: flax-token/, pauser/,
+    # reflax-yield-vault/, @openzeppelin/contracts/. `pauser/` is already mapped
+    # to lib/pauser/src/ above. Map the staker source + its remaining import
+    # prefixes to the single top-level pinned submodule so there is exactly one
+    # physical source per interface (no "Identifier already declared").
+    "stable-staker/=lib/stable-staker/src/",
+    "flax-token/=lib/flax-token-v2/src/",
+    "reflax-yield-vault/=lib/vault/src/",
+    # Canonicalize stable-staker's own nested vendored copies onto the top-level
+    # pinned submodules (defensive — keeps a stray nested import from forking a
+    # second physical interface file).
+    "lib/stable-staker/lib/flax-token/=lib/flax-token-v2/",
+    "lib/stable-staker/lib/pauser/=lib/pauser/",
+    "lib/stable-staker/lib/reflax-yield-vault/=lib/vault/",
+    "lib/stable-staker/lib/openzeppelin-contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

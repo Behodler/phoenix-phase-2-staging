@@ -46,6 +46,11 @@ import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalan
 import {NFTStaker} from "nft-staking/NFTStaker.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
 import {INFTSupply} from "nft-staking/INFTSupply.sol";
+import {StableStaker} from "stable-staker/StableStaker.sol";
+// StableStaker's constructor takes the flax-token-v2 IFlax; alias to avoid an
+// identifier clash with phlimbo-ea's IFlax which is already in scope transitively.
+import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
+import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -129,6 +134,9 @@ contract DeployMocks is Script {
     BalancerPoolerMintDebtHook public balancerPoolerHook;
     NFTStaker public nftStaker;
     BatchNFTMinter public batchNFTMinter;
+
+    // Stable Staking infrastructure (story 051)
+    StableStaker public stableStaker;
 
     // Story 045.5 Phase 7 — BalancerPoolerV2 donation-phase mocks
     // waUSDC mock = ERC4626 wrapper over the existing USDC `rewardToken`.
@@ -643,6 +651,39 @@ contract DeployMocks is Script {
         balancerPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
         console.log("BalancerPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
 
+        // ====== PHASE 3.7: StableStaker Deployment + Wiring (story 051) ======
+        console.log("\n=== Phase 3.7: Deploying + Wiring StableStaker ===");
+
+        // 1. Deploy the MasterChef-style stable farm. phUSD (MockPhUSD) satisfies IFlax
+        //    (exposes mint/setMinter); deployer is the initial owner.
+        gasBefore = gasleft();
+        stableStaker = new StableStaker(IFlaxStaker(address(phUSD)), deployer);
+        _trackDeployment("StableStaker", address(stableStaker), gasBefore - gasleft());
+        console.log("StableStaker deployed at:", address(stableStaker));
+
+        // 2. Authorize StableStaker as a phUSD minter — it mints rewards on claim/withdraw.
+        phUSD.setMinter(address(stableStaker), true);
+        console.log("Authorized StableStaker as phUSD minter");
+
+        // 3. Per token: register the pool, authorize the staker as a client ON the strategy
+        //    (mandatory two-sided wiring — without it stake/withdraw revert), wire the
+        //    strategy on the staker, then set the daily phUSD emission budget.
+        //    Emission units are phUSD wei/day (18 decimals) regardless of the staked
+        //    token's decimals: 10e18 = 10 phUSD/day, 5e18 = 5 phUSD/day.
+        //    DOLA and USDe pools get 10/day; the USDC (rewardToken) pool gets 5/day so
+        //    the reduced rate is visible in the UI (story 051 Concerns).
+        address[3] memory ssTokens = [address(dola), address(rewardToken), address(usde)];
+        ERC4626YieldStrategy[3] memory ssStrats = [yieldStrategyDola, yieldStrategyUSDC, yieldStrategyUSDe];
+        for (uint256 i = 0; i < 3; i++) {
+            stableStaker.addToken(ssTokens[i]);
+            ssStrats[i].setClient(address(stableStaker), true); // client added ON the yield strategy
+            stableStaker.setYieldStrategy(ssTokens[i], IYieldStrategy(address(ssStrats[i])));
+            uint256 dailyRate = ssTokens[i] == address(rewardToken) ? 5e18 : 10e18;
+            stableStaker.phUSDPerDay(ssTokens[i], dailyRate);
+            console.log("StableStaker pool wired (token / phUSD-per-day):", ssTokens[i], dailyRate);
+        }
+        console.log("StableStaker: 3 pools registered, strategies wired (both sides), rates set");
+
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
 
@@ -1044,6 +1085,7 @@ contract DeployMocks is Script {
         _markConfigured("BalancerPoolerMintDebtHook", 0);
         _markConfigured("NFTStaker", 0);
         _markConfigured("BatchNFTMinter", 0);
+        _markConfigured("StableStaker", 0);
         _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
         _markConfigured("DepositPageView", 0);
