@@ -846,6 +846,14 @@ contract DeployMocks is Script {
         pauser.register(address(nftStaker));
         console.log("Pauser.register(NFTStaker) completed");
 
+        // Register StableStaker with Pauser (story 052 — fixes story 051's missing pauser wiring)
+        // Step 1: Set pauser address on contract FIRST (register() validates pauser() == address(this))
+        stableStaker.setPauser(address(pauser));
+        console.log("StableStaker.setPauser() called");
+        // Step 2: Register with pauser
+        pauser.register(address(stableStaker));
+        console.log("Pauser.register(StableStaker) completed");
+
         console.log("All protocol contracts registered with Pauser");
 
         // ====== PHASE 8.5: NFTMinter Configuration ======
@@ -1133,6 +1141,7 @@ contract DeployMocks is Script {
         console.log("  - PhusdStableMinter registered with Pauser");
         console.log("  - PhlimboEA registered with Pauser");
         console.log("  - StableYieldAccumulator registered with Pauser");
+        console.log("  - StableStaker registered with Pauser");
         console.log("  - Burn 1000 EYE to trigger global pause");
         console.log("");
         console.log("Initial Seeding:");
