@@ -678,11 +678,16 @@ contract DeployMocks is Script {
             stableStaker.addToken(ssTokens[i]);
             ssStrats[i].setClient(address(stableStaker), true); // client added ON the yield strategy
             stableStaker.setYieldStrategy(ssTokens[i], IYieldStrategy(address(ssStrats[i])));
+            // Reserve a 10% liquid buffer of realized surplus back to StableStaker (the client)
+            // on each skimSurplus, so 90% flows downstream. Integer percent (require <= 100); the
+            // setter lives on the strategy, not the staker (story 053).
+            ssStrats[i].setSetAsideBuffer(address(stableStaker), 10);
             uint256 dailyRate = ssTokens[i] == address(rewardToken) ? 5e18 : 10e18;
             stableStaker.phUSDPerDay(ssTokens[i], dailyRate);
             console.log("StableStaker pool wired (token / phUSD-per-day):", ssTokens[i], dailyRate);
+            console.log("StableStaker set-aside buffer set to 10% on strategy:", address(ssStrats[i]));
         }
-        console.log("StableStaker: 3 pools registered, strategies wired (both sides), rates set");
+        console.log("StableStaker: 3 pools registered, strategies wired (both sides), rates set, 10% set-aside buffer");
 
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
@@ -1142,6 +1147,7 @@ contract DeployMocks is Script {
         console.log("  - PhlimboEA registered with Pauser");
         console.log("  - StableYieldAccumulator registered with Pauser");
         console.log("  - StableStaker registered with Pauser");
+        console.log("StableStaker: 10% set-aside buffer on all 3 pools (DOLA, USDC, USDe)");
         console.log("  - Burn 1000 EYE to trigger global pause");
         console.log("");
         console.log("Initial Seeding:");

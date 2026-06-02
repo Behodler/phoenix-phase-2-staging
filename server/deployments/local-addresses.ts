@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-06-02T01:37:57.727Z
+// Generated from local.json on 2026-06-02T21:05:18.782Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -34,10 +34,10 @@ export const anvilAddresses: ContractAddresses = {
   NFTStaker: "0x4C4a2f8c81640e47606d3fd77B353E87Ba015584",
   BatchNFTMinter: "0x51A1ceB83B83F1985a81C295d1fF28Afef186E02",
   StableStaker: "0xf4B146FbA71F41E0592668ffbF264F1D186b2Ca8",
-  DepositView: "0x986aaa537b8cc170761FDAC6aC4fc7F9d8a20A8C",
-  ViewRouter: "0xde2Bd2ffEA002b8E84ADeA96e5976aF664115E2c",
-  DepositPageView: "0xefc1aB2475ACb7E60499Efb171D173be19928a05",
-  MintPageView: "0xD49a0e9A4CD5979aE36840f542D2d7f02C4817Be",
+  DepositView: "0x870526b7973b56163a6997bB7C886F5E4EA53638",
+  ViewRouter: "0xD49a0e9A4CD5979aE36840f542D2d7f02C4817Be",
+  DepositPageView: "0xe1Fd27F4390DcBE165f4D60DBF821e4B9Bb02dEd",
+  MintPageView: "0xB2b580ce436E6F77A5713D80887e14788Ef49c9A",
   nftsV1: {
     NFTMinter: "0x09635F643e140090A9A8Dcd712eD6285858ceBef",
     BurnerEYE: "0x67d269191c92Caf3cD7723F116c85e6E9bf55933",
