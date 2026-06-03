@@ -46,6 +46,9 @@ export default defineConfig({
         'NFTStaker.sol/NFTStaker.json',
         'BatchNFTMinter.sol/BatchNFTMinter.json',
 
+        // Stable Staker (yield farm for stablecoin staking)
+        'StableStaker.sol/StableStaker.json',
+
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',
         'ERC4626YieldStrategy.sol/ERC4626YieldStrategy.json',
