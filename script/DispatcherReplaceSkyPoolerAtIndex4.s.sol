@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
+import {StdCheats} from "@forge-std/StdCheats.sol";
 import {NFTMinterV2} from "@yield-claim-nft/V2/NFTMinterV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPoolerMintDebtHook.sol";
@@ -54,7 +55,7 @@ import {NFTStaker} from "nft-staking/NFTStaker.sol";
 ///           forge script script/DispatcherReplaceSkyPoolerAtIndex4.s.sol \
 ///             --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow \
 ///             --ledger --hd-paths "m/44'/60'/46'/0/0" -vvv
-contract DispatcherReplaceSkyPoolerAtIndex4 is Script {
+contract DispatcherReplaceSkyPoolerAtIndex4 is Script, StdCheats {
     // ==========================================
     //         LIVE MAINNET ADDRESSES
     // ==========================================
@@ -131,6 +132,7 @@ contract DispatcherReplaceSkyPoolerAtIndex4 is Script {
     uint256 public sweptSUSDS;       // sUSDS pulled from oldPooler to the owner
     uint256 public seededSUSDS;      // 90% remaining seeded into the new pooler
     uint256 public derivedMinBPT;
+    bool public poolExecuted;        // true iff the final pool() LP add succeeded
 
     bool internal isPreview;
 
@@ -179,8 +181,23 @@ contract DispatcherReplaceSkyPoolerAtIndex4 is Script {
         _step12_swapStakerHook();
         _step13_replaceDispatcher4();
         _step14_decommissionOldHook();
-        _step15_pool();
-        _step16_postStateLog();
+        // Cutover invariants are confirmed BEFORE the LP add so the dispatcher swap is
+        // verified independent of pool()'s outcome.
+        _step15_postStateLog();
+
+        if (isPreview) {
+            // PREVIEW ONLY: prove the cutover left index 4 fully mintable end-to-end.
+            // Uses the `deal` cheatcode (fork-only); runs before stopPrank and never on a
+            // real broadcast. Done before the LP add so dispatch is validated regardless of
+            // whether pool() succeeds.
+            _step16_previewE2EMint();
+        }
+
+        // FINAL, ISOLATED action -- intentionally the LAST state-changing call. A pool()
+        // failure (minBPT estimate too high, or live pool drift between the offline quote
+        // and broadcast) is caught inside the step so it can NEVER roll back or block the
+        // already-committed cutover above. See _step17_finalPool for the recovery path.
+        _step17_finalPool();
 
         if (isPreview) {
             vm.stopPrank();
@@ -326,6 +343,26 @@ contract DispatcherReplaceSkyPoolerAtIndex4 is Script {
 
         BalancerPoolerV2(newPooler).setHook(IDispatchHook(newHook));
         console.log("newPooler.setHook(newHook)");
+
+        // CRITICAL: authorize NFTMinterV2 as the dispatch caller on the new pooler.
+        // ATokenDispatcherV2.dispatch() is gated by `onlyMinter` (msg.sender == _minter).
+        // The pooler constructor does NOT set _minter (it inits hook + owner only), and
+        // NFTMinterV2.replaceDispatcher does NOT set it either -- verified on-chain: the
+        // story-048 replaceDispatcher install tx (0xa72ff101...) is a pure storage write
+        // with no internal call into the pooler, and the live pooler's _minter was wired
+        // by a SEPARATE FixBalancerPoolerV2SetMinter / SetMinterOnIndex4Pooler tx. Without
+        // this call the very first index-4 mint after the cutover reverts
+        // "ATokenDispatcherV2: caller is not minter" and index-4 minting is bricked.
+        BalancerPoolerV2(newPooler).setMinter(NFT_MINTER_V2);
+        console.log("newPooler.setMinter(NFTMinterV2):", NFT_MINTER_V2);
+
+        // _minter has no public getter; assert via raw storage slot so the script refuses
+        // to proceed with an unwired dispatcher. Storage layout verified against the live
+        // pooler 0x26F8...b38a: slot0 = Ownable._owner (packed with Pausable._paused),
+        // slot1 = ATokenDispatcherV2._minter. Same contract code => same layout here.
+        address wiredMinter = address(uint160(uint256(vm.load(newPooler, bytes32(uint256(1))))));
+        require(wiredMinter == NFT_MINTER_V2, "newPooler._minter (slot1) != NFTMinterV2 after setMinter");
+        console.log("newPooler._minter (slot1) verified == NFTMinterV2");
 
         BalancerPoolerMintDebtHook(newHook).setRecipient(NFT_STAKER);
         console.log("newHook.setRecipient(NFTStaker):", NFT_STAKER);
@@ -536,12 +573,125 @@ contract DispatcherReplaceSkyPoolerAtIndex4 is Script {
     }
 
     // ==========================================
-    // Step 15: derive minBPT > 0 and pool()
+    // Step 15: post-state log + cutover invariants (pre-pool)
     // ==========================================
-
-    function _step15_pool() internal {
+    //
+    // Runs BEFORE the final LP add so the dispatcher swap is asserted independently of
+    // pool()'s outcome. At this point the new pooler holds exactly the migrated (seeded)
+    // BPT, so `newBptBalance == preBptOld`; the step-17 LP add only increases it further.
+    function _step15_postStateLog() internal view {
         console.log("");
-        console.log("=== Step 15: derive minBPT (>0) and pool() ===");
+        console.log("=== Step 15: post-state log + cutover invariants (pre-pool) ===");
+
+        NFTMinterV2 minter = NFTMinterV2(NFT_MINTER_V2);
+        (address d4,,,) = minter.configs(4);
+
+        uint256 newBptBalance = IERC20Minimal(bpt).balanceOf(newPooler);
+        uint256 oldBptBalance = IERC20Minimal(bpt).balanceOf(oldPooler);
+        uint256 oldSusdsBalance = IERC20Minimal(sUSDS_).balanceOf(oldPooler);
+
+        console.log("configs(4).dispatcher:      ", d4);
+        console.log("BPT.balanceOf(newPooler):   ", newBptBalance);
+        console.log("BPT.balanceOf(oldPooler):   ", oldBptBalance);
+        console.log("sUSDS.balanceOf(oldPooler): ", oldSusdsBalance);
+        console.log("NFTStaker.dispatcherHook(): ", address(NFTStaker(NFT_STAKER).dispatcherHook()));
+
+        require(d4 == newPooler, "INVARIANT: configs(4).dispatcher != newPooler");
+        require(newBptBalance >= preBptOld, "INVARIANT: newPooler BPT < migrated BPT");
+        require(
+            address(NFTStaker(NFT_STAKER).dispatcherHook()) == newHook,
+            "INVARIANT: NFTStaker.dispatcherHook != newHook"
+        );
+        require(oldBptBalance == 0, "INVARIANT: oldPooler still holds BPT");
+        require(oldSusdsBalance == 0, "INVARIANT: oldPooler still holds sUSDS");
+
+        console.log("All cutover invariants hold (LP add still pending in step 17).");
+        console.log("");
+        console.log("--- For patcher / human reference ---");
+        console.log("newPooler:               ", newPooler);
+        console.log("newHook:                 ", newHook);
+        console.log("oldPooler (pre-cutover): ", oldPooler);
+        console.log("oldHook (pre-cutover):   ", oldHook);
+    }
+
+    // ==========================================
+    // Step 16 (PREVIEW ONLY): end-to-end index-4 mint
+    // ==========================================
+    //
+    // Proves the cutover left index 4 fully mintable -- in particular that the new pooler's
+    // _minter wiring from step 6 lets NFTMinterV2.dispatch() through the `onlyMinter` gate
+    // (the exact failure this whole change guards against). Spoofs the dispatcher's prime
+    // token (USDS) to the owner via forge-std's `deal` cheatcode -- a FORK-ONLY operation
+    // that has no effect on a live broadcast, which is precisely why this step is gated
+    // behind `isPreview`. It then approves NFTMinterV2 and mints one id-4 NFT to the owner,
+    // exercising the full path: onlyMinter gate -> USDS->sUSDS wrap -> Sky-PSM donation
+    // (try/catch) -> hook.onDispatch debt accrual -> ERC1155 _mint.
+    //
+    // Runs inside the owner prank (set in run()) and BEFORE the step-17 LP add, so dispatch
+    // is validated regardless of pool()'s outcome. Never reached on a real broadcast.
+    function _step16_previewE2EMint() internal {
+        console.log("");
+        console.log("=== Step 16 (PREVIEW ONLY): end-to-end index-4 mint ===");
+
+        NFTMinterV2 minter = NFTMinterV2(NFT_MINTER_V2);
+
+        // Sanity: index 4 now points at the new pooler and is enabled.
+        (address d4, uint256 price4,, bool disabled4) = minter.configs(4);
+        require(d4 == newPooler, "e2e: configs(4).dispatcher != newPooler");
+        require(!disabled4, "e2e: index 4 is disabled");
+        require(price4 > 0, "e2e: index-4 price is zero");
+
+        // The dispatcher's authoritative prime token (NFTMinterV2 reads this, not the caller).
+        address usds = IERC4626Minimal(sUSDS_).asset();
+        console.log("USDS (prime token):", usds);
+        console.log("index-4 price:     ", price4);
+
+        // Spoof exactly the mint price of USDS onto the owner (fork cheatcode; no-op live).
+        deal(usds, OWNER_ADDRESS, price4);
+        require(IERC20Minimal(usds).balanceOf(OWNER_ADDRESS) >= price4, "e2e: deal USDS failed");
+
+        uint256 nftBefore       = minter.balanceOf(OWNER_ADDRESS, 4);
+        uint256 poolerSusdsBefore = IERC20Minimal(sUSDS_).balanceOf(newPooler);
+        uint256 hookDebtBefore  = BalancerPoolerMintDebtHook(newHook).mintDebt();
+
+        // Approve + mint one id-4 NFT to the owner (owner is the active prank sender).
+        IERC20Minimal(usds).approve(NFT_MINTER_V2, price4);
+        bool ok = minter.mint(4, OWNER_ADDRESS);
+        require(ok, "e2e: mint returned false");
+
+        uint256 nftAfter        = minter.balanceOf(OWNER_ADDRESS, 4);
+        uint256 poolerSusdsAfter = IERC20Minimal(sUSDS_).balanceOf(newPooler);
+        uint256 hookDebtAfter   = BalancerPoolerMintDebtHook(newHook).mintDebt();
+
+        console.log("owner id-4 NFT balance:  ", nftBefore, "->", nftAfter);
+        console.log("newPooler sUSDS balance: ", poolerSusdsBefore, "->", poolerSusdsAfter);
+        console.log("newHook mintDebt:        ", hookDebtBefore, "->", hookDebtAfter);
+
+        require(nftAfter == nftBefore + 1, "e2e: NFT id-4 balance did not increase by 1");
+        require(hookDebtAfter > hookDebtBefore, "e2e: hook mintDebt did not accrue on dispatch");
+        console.log("PREVIEW e2e mint OK: index-4 dispatch path works post-cutover.");
+    }
+
+    // ==========================================
+    // Step 17: FINAL isolated LP add -- derive minBPT and pool()
+    // ==========================================
+    //
+    // Intentionally the LAST state-changing action in run(). Everything above is the
+    // dispatcher cutover, which is fully committed (and, on a real broadcast, already
+    // mined) by the time this executes. The pool() call is wrapped in try/catch so an
+    // overstated minBPT -- or live Balancer-pool drift between the offline router quote
+    // and execution -- can NEVER roll back or block that cutover. On failure the new
+    // pooler simply keeps its seeded sUSDS un-LP'd; no funds are at risk and the owner
+    // (already an authorized pooler) calls pool(freshMinBPT) later to finish the LP add.
+    //
+    // Note on Foundry semantics: forge executes run() locally to collect the broadcast
+    // transactions BEFORE sending any of them, and that local pass aborts on the first
+    // uncaught revert. Without this catch, a too-high minBPT would abort the local pass
+    // and NOTHING -- including the cutover -- would broadcast. The catch lets the cutover
+    // txs broadcast and isolates the LP add as the only step that can fail.
+    function _step17_finalPool() internal {
+        console.log("");
+        console.log("=== Step 17: FINAL isolated LP add -- derive minBPT (>0) and pool() ===");
 
         // --- minBPT derivation ---
         // The `minBPT` floor is DERIVED from the Balancer Router ideal-BPT quote
@@ -580,59 +730,43 @@ contract DispatcherReplaceSkyPoolerAtIndex4 is Script {
         console.log("derivedMinBPT (slippage floor):", derivedMinBPT);
 
         uint256 newPoolerBptBefore = IERC20Minimal(bpt).balanceOf(newPooler);
-        BalancerPoolerV2(newPooler).pool(derivedMinBPT);
-        uint256 newPoolerBptAfter = IERC20Minimal(bpt).balanceOf(newPooler);
-        console.log("BPT.balanceOf(newPooler) before pool:", newPoolerBptBefore);
-        console.log("BPT.balanceOf(newPooler) after pool: ", newPoolerBptAfter);
-        require(newPoolerBptAfter > newPoolerBptBefore, "pool() did not increase new pooler BPT");
-        require(
-            newPoolerBptAfter - newPoolerBptBefore >= derivedMinBPT,
-            "pool() minted fewer BPT than minBPT floor"
-        );
-        require(
-            IERC20Minimal(sUSDS_).balanceOf(newPooler) == 0,
-            "new pooler still holds sUSDS after pool()"
-        );
-        console.log("pool() succeeded; sUSDS consumed; BPT increased.");
-    }
 
-    // ==========================================
-    // Step 16: post-state log + invariant asserts
-    // ==========================================
-
-    function _step16_postStateLog() internal view {
-        console.log("");
-        console.log("=== Step 16: post-state log + invariant asserts ===");
-
-        NFTMinterV2 minter = NFTMinterV2(NFT_MINTER_V2);
-        (address d4,,,) = minter.configs(4);
-
-        uint256 newBptBalance = IERC20Minimal(bpt).balanceOf(newPooler);
-        uint256 oldBptBalance = IERC20Minimal(bpt).balanceOf(oldPooler);
-        uint256 oldSusdsBalance = IERC20Minimal(sUSDS_).balanceOf(oldPooler);
-
-        console.log("configs(4).dispatcher:      ", d4);
-        console.log("BPT.balanceOf(newPooler):   ", newBptBalance);
-        console.log("BPT.balanceOf(oldPooler):   ", oldBptBalance);
-        console.log("sUSDS.balanceOf(oldPooler): ", oldSusdsBalance);
-        console.log("NFTStaker.dispatcherHook(): ", address(NFTStaker(NFT_STAKER).dispatcherHook()));
-
-        require(d4 == newPooler, "INVARIANT: configs(4).dispatcher != newPooler");
-        require(newBptBalance >= preBptOld, "INVARIANT: newPooler BPT < migrated BPT");
-        require(
-            address(NFTStaker(NFT_STAKER).dispatcherHook()) == newHook,
-            "INVARIANT: NFTStaker.dispatcherHook != newHook"
-        );
-        require(oldBptBalance == 0, "INVARIANT: oldPooler still holds BPT");
-        require(oldSusdsBalance == 0, "INVARIANT: oldPooler still holds sUSDS");
-
-        console.log("All post-state invariants hold.");
-        console.log("");
-        console.log("--- For patcher / human reference ---");
-        console.log("newPooler:               ", newPooler);
-        console.log("newHook:                 ", newHook);
-        console.log("oldPooler (pre-cutover): ", oldPooler);
-        console.log("oldHook (pre-cutover):   ", oldHook);
+        // pool(minBPT) enforces the slippage floor on-chain (it reverts if it would mint
+        // fewer than minBPT). We catch that revert so it stays an isolated failure.
+        try BalancerPoolerV2(newPooler).pool(derivedMinBPT) {
+            uint256 newPoolerBptAfter = IERC20Minimal(bpt).balanceOf(newPooler);
+            console.log("BPT.balanceOf(newPooler) before pool:", newPoolerBptBefore);
+            console.log("BPT.balanceOf(newPooler) after pool: ", newPoolerBptAfter);
+            // On a successful pool() these always hold (pool() enforces minBPT internally
+            // and consumes the full sUSDS balance); kept as belt-and-suspenders.
+            require(newPoolerBptAfter > newPoolerBptBefore, "pool() did not increase new pooler BPT");
+            require(
+                newPoolerBptAfter - newPoolerBptBefore >= derivedMinBPT,
+                "pool() minted fewer BPT than minBPT floor"
+            );
+            require(
+                IERC20Minimal(sUSDS_).balanceOf(newPooler) == 0,
+                "new pooler still holds sUSDS after pool()"
+            );
+            poolExecuted = true;
+            console.log("pool() succeeded; sUSDS consumed; BPT increased.");
+        } catch (bytes memory reason) {
+            // ISOLATED FAILURE -- the cutover above is committed and unaffected.
+            poolExecuted = false;
+            console.log("");
+            console.log("*** WARNING: pool() FAILED -- cutover is COMMITTED, LP add DEFERRED ***");
+            console.log("Likely cause: minBPT estimate too high, or the Balancer pool drifted");
+            console.log("between the offline router quote and execution. Revert reason (bytes):");
+            console.logBytes(reason);
+            console.log("");
+            console.log("The dispatcher swap is fully in effect; the new pooler just holds its");
+            console.log("seeded sUSDS un-LP'd. No funds are at risk -- the sUSDS stays parked");
+            console.log("until pooled:");
+            console.log("  newPooler:           ", newPooler);
+            console.log("  sUSDS held (un-LP'd):", IERC20Minimal(sUSDS_).balanceOf(newPooler));
+            console.log("ACTION REQUIRED: re-query the router for a fresh minBPT, then call as owner:");
+            console.log("  BalancerPoolerV2(newPooler).pool(freshMinBPT)");
+        }
     }
 }
 
