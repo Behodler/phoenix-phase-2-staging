@@ -10,6 +10,7 @@
 // Updated 2026-05-22: dispatcher-replace cutover patched (story 048 - index 4 restored)
 // Updated 2026-05-22: PhlimboV2 + MigratorV1V2 deployed (story 049 - V1 stakers migrated)
 // Updated 2026-05-22: DepositView redeployed against PhlimboV2 (story 049 follow-up - rewire-sya-to-phlimbo-v2)
+// Updated 2026-06-04: index-4 dispatcher cut over to Sky-PSM BalancerPoolerV2 + new MintDebtHook (story 056)
 import { ContractAddresses } from './addresses';
 
 
@@ -77,7 +78,7 @@ export const mainnetAddresses: ContractAddresses = {
     BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
     BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
     BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
-    BalancerPooler: "0x26f89f4b46eb164303985795ee20b15bb1edb38a",
+    BalancerPooler: "0x7f74388bc970de5e2822036a1ad06fccd156786b",
     GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   },
 
@@ -89,7 +90,7 @@ export const mainnetAddresses: ContractAddresses = {
   // getData(0)[23] == 4 for the address below.
   MintPageView: "0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119",
   // NFT staking
-  BalancerPoolerMintDebtHook: "0x14277a0bc38a6bb7eb732c3a49190030632f727e",
+  BalancerPoolerMintDebtHook: "0x4a26ad83306a2f17155799fdd9449f77eb3f8bd7",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
   BatchNFTMinter: "0x6e9886AfDF07DD67dc70b8335E4e9DF14B445071",
