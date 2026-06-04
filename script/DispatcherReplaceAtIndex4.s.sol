@@ -406,16 +406,18 @@ contract DispatcherReplaceAtIndex4 is Script {
 
         uint256 batchSize = srcP.batchDonationSize();
         address batchM    = srcP.batchMinter();
-        address swapPool_ = srcP.swapPool();
-        address waUsdc_   = srcP.waUsdc();
-        address usdc_     = srcP.usdc();
+        // Story 056: the swapPool/waUsdc/usdc donation getters were removed from
+        // BalancerPoolerV2 when the Balancer-swap donation route was replaced by the
+        // Sky PSM route. This historical (already-executed) script's mirror is updated
+        // to the new API only so the repo continues to compile.
+        address psm_  = srcP.psm();
+        uint256 maxTout_ = srcP.maxTout();
 
         console.log("Mirroring from buggedPooler (index 6, same artifact family):");
         console.log("  batchDonationSize:", batchSize);
         console.log("  batchMinter:      ", batchM);
-        console.log("  swapPool:         ", swapPool_);
-        console.log("  waUsdc:           ", waUsdc_);
-        console.log("  usdc:             ", usdc_);
+        console.log("  psm:              ", psm_);
+        console.log("  maxTout:          ", maxTout_);
 
         newP.setBatchDonationSize(batchSize);
         if (batchM != address(0)) {
@@ -423,10 +425,11 @@ contract DispatcherReplaceAtIndex4 is Script {
         } else {
             console.log("  (skipping setBatchMinter -- old value is address(0))");
         }
-        if (swapPool_ != address(0) && waUsdc_ != address(0) && usdc_ != address(0)) {
-            newP.setSwapConfig(swapPool_, waUsdc_, usdc_);
+        if (psm_ != address(0)) {
+            newP.setPSM(psm_);
+            newP.setMaxTout(maxTout_);
         } else {
-            console.log("  (skipping setSwapConfig -- at least one of swapPool/waUsdc/usdc is address(0))");
+            console.log("  (skipping setPSM -- old value is address(0))");
         }
 
         // Authorise the codified set on the new pooler.

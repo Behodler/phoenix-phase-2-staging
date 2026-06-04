@@ -315,6 +315,15 @@ export const balancerPoolerMintDebtHookAbi = [
   },
   {
     type: 'function',
+    inputs: [
+      { name: 'newDispatcher', internalType: 'address', type: 'address' },
+    ],
+    name: 'setDispatcher',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [{ name: 'newRatio', internalType: 'uint8', type: 'uint8' }],
     name: 'setRatio',
     outputs: [],
@@ -385,6 +394,25 @@ export const balancerPoolerMintDebtHookAbi = [
       },
     ],
     name: 'DebtPulled',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'oldDispatcher',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newDispatcher',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'DispatcherUpdated',
   },
   {
     type: 'event',
@@ -479,6 +507,13 @@ export const balancerPoolerV2Abi = [
   },
   {
     type: 'function',
+    inputs: [{ name: 'usdsAmount', internalType: 'uint256', type: 'uint256' }],
+    name: '_psmDonate',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [],
     name: 'authVersion',
     outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
@@ -551,6 +586,13 @@ export const balancerPoolerV2Abi = [
   {
     type: 'function',
     inputs: [],
+    name: 'maxTout',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'name',
     outputs: [{ name: '', internalType: 'string', type: 'string' }],
     stateMutability: 'view',
@@ -585,10 +627,7 @@ export const balancerPoolerV2Abi = [
   },
   {
     type: 'function',
-    inputs: [
-      { name: 'minBPT', internalType: 'uint256', type: 'uint256' },
-      { name: 'minUSDC', internalType: 'uint256', type: 'uint256' },
-    ],
+    inputs: [{ name: 'minBPT', internalType: 'uint256', type: 'uint256' }],
     name: 'pool',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -604,6 +643,13 @@ export const balancerPoolerV2Abi = [
     type: 'function',
     inputs: [],
     name: 'primeToken',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'psm',
     outputs: [{ name: '', internalType: 'address', type: 'address' }],
     stateMutability: 'view',
   },
@@ -673,6 +719,13 @@ export const balancerPoolerV2Abi = [
   },
   {
     type: 'function',
+    inputs: [{ name: 'newMaxTout', internalType: 'uint256', type: 'uint256' }],
+    name: 'setMaxTout',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [
       { name: 'name_', internalType: 'string', type: 'string' },
       { name: 'image_', internalType: 'string', type: 'string' },
@@ -691,28 +744,17 @@ export const balancerPoolerV2Abi = [
   },
   {
     type: 'function',
+    inputs: [{ name: 'newPSM', internalType: 'address', type: 'address' }],
+    name: 'setPSM',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [{ name: 'newPool', internalType: 'address', type: 'address' }],
     name: 'setPool',
     outputs: [],
     stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [
-      { name: 'swapPool_', internalType: 'address', type: 'address' },
-      { name: 'waUsdc_', internalType: 'address', type: 'address' },
-      { name: 'usdc_', internalType: 'address', type: 'address' },
-    ],
-    name: 'setSwapConfig',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'swapPool',
-    outputs: [{ name: '', internalType: 'address', type: 'address' }],
-    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -738,21 +780,7 @@ export const balancerPoolerV2Abi = [
   {
     type: 'function',
     inputs: [],
-    name: 'usdc',
-    outputs: [{ name: '', internalType: 'address', type: 'address' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
     name: 'vault',
-    outputs: [{ name: '', internalType: 'address', type: 'address' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'waUsdc',
     outputs: [{ name: '', internalType: 'address', type: 'address' }],
     stateMutability: 'view',
   },
@@ -784,25 +812,13 @@ export const balancerPoolerV2Abi = [
     anonymous: false,
     inputs: [
       {
-        name: 'pooler',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-      {
-        name: 'sUSDSSwapped',
+        name: 'usdsSpent',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
       },
       {
-        name: 'waUsdcReceived',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-      {
-        name: 'usdcSent',
+        name: 'usdcDonated',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
@@ -814,7 +830,7 @@ export const balancerPoolerV2Abi = [
         indexed: true,
       },
     ],
-    name: 'BatchDonated',
+    name: 'BatchDonatedViaPSM',
   },
   {
     type: 'event',
@@ -847,6 +863,19 @@ export const balancerPoolerV2Abi = [
     anonymous: false,
     inputs: [
       {
+        name: 'usdsParked',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'DonationSkipped',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
         name: 'oldHook',
         internalType: 'address',
         type: 'address',
@@ -860,6 +889,19 @@ export const balancerPoolerV2Abi = [
       },
     ],
     name: 'HookUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newMaxTout',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'MaxToutSet',
   },
   {
     type: 'event',
@@ -894,6 +936,19 @@ export const balancerPoolerV2Abi = [
       },
     ],
     name: 'OwnershipTransferred',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newPSM',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'PSMSet',
   },
   {
     type: 'event',
@@ -970,31 +1025,6 @@ export const balancerPoolerV2Abi = [
       },
     ],
     name: 'PoolerDeauthorized',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'swapPool',
-        internalType: 'address',
-        type: 'address',
-        indexed: false,
-      },
-      {
-        name: 'waUsdc',
-        internalType: 'address',
-        type: 'address',
-        indexed: false,
-      },
-      {
-        name: 'usdc',
-        internalType: 'address',
-        type: 'address',
-        indexed: false,
-      },
-    ],
-    name: 'SwapConfigSet',
   },
   {
     type: 'event',

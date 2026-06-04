@@ -158,6 +158,13 @@ contract DeployMainnetNudgePoolerV2 is Script {
     address public constant WAUSDC_MAINNET = 0xD4fa2D31b7968E448877f69A96DE69f5de8cD23E;
     address public constant SWAP_POOL_SUSDS_WAUSDC = 0x0B65A4505E8C323AE4fEDcc48515FD713dC9d8C0;
 
+    // Story 056: the Balancer sUSDS->waUSDC swap donation route was replaced by the
+    // Sky PSM route (USDS -> USDC via `buyGem`). This historical script already
+    // executed; its donation-config call below is updated to the new API only so the
+    // repo continues to compile against the bumped BalancerPoolerV2 artifact.
+    address public constant SKY_PSM = 0xA188EEC8F81263234dA3622A406892F3D630f98c;
+    uint256 public constant MAX_TOUT = 0.01e18;
+
     // ==========================================
     //         CONFIGURATION CONSTANTS
     // ==========================================
@@ -703,11 +710,12 @@ contract DeployMainnetNudgePoolerV2 is Script {
         pooler.setBatchMinter(newBatchMinter);
         console.log("Step 23: setBatchMinter(BatchNFTMinter)");
 
-        pooler.setSwapConfig(SWAP_POOL_SUSDS_WAUSDC, WAUSDC_MAINNET, USDC);
-        console.log("Step 24: setSwapConfig(swapPool, waUsdc, usdc)");
-        console.log("  swapPool:", SWAP_POOL_SUSDS_WAUSDC);
-        console.log("  waUsdc:  ", WAUSDC_MAINNET);
-        console.log("  usdc:    ", USDC);
+        // Story 056: Sky-PSM donation route (replaces the dead setSwapConfig swap path).
+        pooler.setPSM(SKY_PSM);
+        pooler.setMaxTout(MAX_TOUT);
+        console.log("Step 24: setPSM(SKY_PSM) + setMaxTout(MAX_TOUT)");
+        console.log("  psm:     ", SKY_PSM);
+        console.log("  maxTout: ", MAX_TOUT);
 
         uint256 gasUsed = gasBefore - gasleft();
         _trackDeployment("BalancerPoolerV2Config", address(0), 0);

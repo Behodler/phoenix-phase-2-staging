@@ -9,47 +9,42 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "../../src/mocks/MockUSDS.sol";
 import "../../src/mocks/MockSUSDS.sol";
 import "../../src/mocks/MockRewardToken.sol";
-import "../../src/mocks/MockBalancerVault.sol";
-import "../../src/mocks/MockERC4626Wrapper.sol";
+import "../../src/mocks/MockSkyPSM.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 
 /**
  * @title TestBalancerDonation
- * @notice End-to-end exercise of the BalancerPoolerV2 batch-donation phase
- *         on a fresh local devnet. Story 045.5 Phase 7. Sibling of TestNudgePayout.
+ * @notice End-to-end exercise of the BalancerPoolerV2 Sky-PSM batch-donation route on
+ *         a fresh local devnet. Story 056 (rewritten from the story 045.5 swap-route
+ *         version, which exercised the now-removed sUSDS->waUSDC Balancer swap donation
+ *         and the two-arg `pool(minBPT, minUSDC)` signature).
  *
- *      Flow (happy path):
+ *      The donation now lives inside the dispatcher's `_dispatch` (USDS -> USDC via the
+ *      Sky PSM `buyGem`), isolated in a try/catch; `pool(uint256 minBPT)` is a pure LP
+ *      add. Because `_dispatch` is internal and only reachable via a full NFTMinterV2
+ *      mint, this script validates the wired Sky-route config and exercises the exact
+ *      redeem->PSM->batchMinter path the contract uses, asserting USDC lands at the
+ *      batch minter and the PSM math floors correctly (dust accrues to the protocol).
+ *
+ *      Flow:
  *        1. Load deployed contract addresses from progress.31337.json
- *        2. Pre-fund the waUSDC mock with USDC so its `redeem` step can pay out
- *        3. Pre-fund BalancerPoolerV2 with sUSDS shares to seed the donation
- *        4. Record initialBatchMinterUSDC, then call pool(minBPT, minUSDC)
- *           with permissive minUSDC so the donation phase succeeds
- *        5. Assert BatchNFTMinter USDC balance increased and BatchDonated
- *           event was emitted
- *
- *      Flow (slippage-revert boundary):
- *        6. Re-seed sUSDS into BalancerPoolerV2
- *        7. Force the swap rate to ZERO via MockBalancerVault.setSwapRate so
- *           the unwrap returns 0 USDC, guaranteeing the slippage check fails
- *           regardless of `minUSDC` (must be > 0 to be meaningful)
- *        8. Call pool(0, 1) and assert the call reverts with the canonical
- *           string `"BalancerPoolerV2: USDC slippage"`. This validates the
- *           contract's slippage-floor enforcement on the real (mock-driven)
- *           flow rather than relying on a constant-response stub.
- *
- *      The slippage assertion is the entire reason the swap mock has to be
- *      functional rather than constant-response — a constant-response mock
- *      could not reproduce the boundary condition.
+ *        2. Assert the on-chain Sky-route config (psm, maxTout, batchDonationSize,
+ *           batchMinter) matches what DeployMocks wired
+ *        3. Drive the redeem(sUSDS)->USDS->PSM.buyGem(batchMinter)->USDC path with the
+ *           same floored gemAmt math the contract uses, and assert batchMinter USDC
+ *           increased by exactly the computed gemAmt
  */
 contract TestBalancerDonation is Script {
     uint256 constant MOCK_BATCH_DONATION_SIZE = 30;
+    uint256 constant WAD = 1e18;
+    uint256 constant MAX_TOUT = 0.01e18;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("ANVIL_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
         console.log("\n========================================");
-        console.log("    BALANCER DONATION END-TO-END TEST");
+        console.log("  BALANCER POOLER SKY-PSM DONATION TEST");
         console.log("========================================\n");
         console.log("Deployer:", deployer);
 
@@ -59,162 +54,84 @@ contract TestBalancerDonation is Script {
         address usdcAddr = vm.parseJsonAddress(progressJson, ".contracts.MockUSDC.address");
         address usdsAddr = vm.parseJsonAddress(progressJson, ".contracts.MockUSDS.address");
         address susdsAddr = vm.parseJsonAddress(progressJson, ".contracts.MockSUSDS.address");
-        address waUsdcAddr = vm.parseJsonAddress(progressJson, ".contracts.MockWaUSDC.address");
-        address vaultAddr = vm.parseJsonAddress(progressJson, ".contracts.MockBalancerVault.address");
+        address psmAddr = vm.parseJsonAddress(progressJson, ".contracts.MockSkyPSM.address");
         address poolerV2Addr = vm.parseJsonAddress(progressJson, ".contracts.BalancerPoolerV2.address");
         address batchNFTMinterAddr = vm.parseJsonAddress(progressJson, ".contracts.BatchNFTMinter.address");
 
         console.log("MockUSDC:", usdcAddr);
+        console.log("MockUSDS:", usdsAddr);
         console.log("MockSUSDS:", susdsAddr);
-        console.log("MockWaUSDC:", waUsdcAddr);
-        console.log("MockBalancerVault:", vaultAddr);
+        console.log("MockSkyPSM:", psmAddr);
         console.log("BalancerPoolerV2:", poolerV2Addr);
         console.log("BatchNFTMinter:", batchNFTMinterAddr);
 
         MockRewardToken usdc = MockRewardToken(usdcAddr);
         MockUSDS usds = MockUSDS(usdsAddr);
         MockSUSDS susds = MockSUSDS(susdsAddr);
-        // waUsdc is touched directly only via the address-based call above —
-        // no instance handle needed beyond `waUsdcAddr` for this script.
-        MockBalancerVault vault = MockBalancerVault(vaultAddr);
+        MockSkyPSM psm = MockSkyPSM(psmAddr);
         BalancerPoolerV2 pooler = BalancerPoolerV2(poolerV2Addr);
 
-        // Read configured donation state from chain (defends against constant drift).
+        // --- Step 2: Assert wired Sky-route donation config (defends against drift) ---
         uint256 onChainDonationSize = pooler.batchDonationSize();
         address onChainBatchMinter = pooler.batchMinter();
-        address onChainSwapPool = pooler.swapPool();
-        address onChainWaUsdc = pooler.waUsdc();
-        address onChainUsdc = pooler.usdc();
+        address onChainPsm = pooler.psm();
+        uint256 onChainMaxTout = pooler.maxTout();
 
-        console.log("\n--- Wired Donation State (read from chain) ---");
+        console.log("\n--- Wired Sky-route donation state (read from chain) ---");
         console.log("PV2.batchDonationSize:", onChainDonationSize);
         console.log("PV2.batchMinter:", onChainBatchMinter);
-        console.log("PV2.swapPool:", onChainSwapPool);
-        console.log("PV2.waUsdc:", onChainWaUsdc);
-        console.log("PV2.usdc:", onChainUsdc);
+        console.log("PV2.psm:", onChainPsm);
+        console.log("PV2.maxTout:", onChainMaxTout);
 
         require(onChainDonationSize == MOCK_BATCH_DONATION_SIZE, "donationSize drift");
         require(onChainBatchMinter == batchNFTMinterAddr, "batchMinter != BatchNFTMinter");
-        require(onChainWaUsdc == waUsdcAddr, "waUsdc wiring drift");
-        require(onChainUsdc == usdcAddr, "usdc wiring drift");
+        require(onChainPsm == psmAddr, "psm wiring drift");
+        require(onChainMaxTout == MAX_TOUT, "maxTout drift");
 
-        // --- Step 2: Pre-fund waUSDC wrapper with USDC so redeem can pay out ---
-        console.log("\n--- Step 1: Pre-fund waUSDC wrapper with USDC ---");
-        vm.startBroadcast(deployerPrivateKey);
-        // Generous USDC pre-fund: covers the donation redeem and the slippage-revert
-        // attempt. Far more than required so the wrapper never runs dry mid-test.
-        uint256 waUsdcPrefund = 100_000 * 10 ** 6; // 100k USDC
-        usdc.mint(waUsdcAddr, waUsdcPrefund);
-        console.log("Minted USDC to waUSDC wrapper:", waUsdcPrefund);
-        vm.stopBroadcast();
+        // --- Step 3: Exercise the redeem -> PSM.buyGem -> batchMinter route ---
+        console.log("\n--- Exercising redeem -> PSM.buyGem(batchMinter) -> USDC ---");
 
-        // --- Step 3: Seed sUSDS into BalancerPoolerV2 (happy-path donation) ---
-        console.log("\n--- Step 2: Seed sUSDS into BalancerPoolerV2 (happy path) ---");
-        // Mint USDS to deployer, deposit into sUSDS to mint shares, transfer to pooler.
-        uint256 sUsdsSeed = 100 ether; // 100 sUSDS shares (18-dec)
+        // Seed deployer with sUSDS shares (deposit USDS into the ERC4626 wrapper).
+        uint256 usdsSeed = 100 ether; // 100 USDS (18-dec)
         vm.startBroadcast(deployerPrivateKey);
-        usds.mint(deployer, sUsdsSeed);
-        usds.approve(susdsAddr, sUsdsSeed);
-        uint256 mintedShares = susds.deposit(sUsdsSeed, deployer);
-        IERC20(susdsAddr).transfer(poolerV2Addr, mintedShares);
-        vm.stopBroadcast();
-        console.log("Seeded sUSDS shares to BalancerPoolerV2:", mintedShares);
-        require(mintedShares > 0, "no sUSDS shares minted");
+        usds.mint(deployer, usdsSeed);
+        usds.approve(susdsAddr, usdsSeed);
+        uint256 shares = susds.deposit(usdsSeed, deployer);
+        require(shares > 0, "no sUSDS shares minted");
+
+        // Redeem the shares back to USDS (the donation slice the contract would carve).
+        uint256 redeemedUsds = susds.redeem(shares, deployer, deployer);
+        require(redeemedUsds > 0, "redeem returned 0 USDS");
+        console.log("Redeemed USDS from sUSDS shares:", redeemedUsds);
+
+        // Read the PSM fee/conv and size USDC out with the SAME floored math the
+        // contract uses (dust accrues to the protocol, never over-credits).
+        uint256 tout = psm.tout();
+        require(tout <= MAX_TOUT, "tout above MAX_TOUT");
+        uint256 conv = psm.to18ConversionFactor();
+        uint256 gemAmt = (redeemedUsds * WAD) / (conv * (WAD + tout));
+        require(gemAmt > 0, "donation dust");
+        uint256 usdsSpent = gemAmt * conv * (WAD + tout) / WAD;
+        console.log("tout:", tout);
+        console.log("conv (to18ConversionFactor):", conv);
+        console.log("gemAmt (USDC out, floored):", gemAmt);
+        console.log("usdsSpent (<= redeemedUsds):", usdsSpent);
+        require(usdsSpent <= redeemedUsds, "PSM would pull more USDS than available");
 
         uint256 initialBatchMinterUSDC = usdc.balanceOf(batchNFTMinterAddr);
-        console.log("BatchNFTMinter USDC before pool():", initialBatchMinterUSDC);
+        console.log("BatchNFTMinter USDC before buyGem:", initialBatchMinterUSDC);
 
-        // --- Step 4: Call pool() with permissive minUSDC ---
-        console.log("\n--- Step 3: pool(minBPT=0, minUSDC=1) (happy path) ---");
-        // Expected USDC delivered to BatchMinter:
-        //   donationSUSDS = mintedShares * 30 / 100      (18-dec sUSDS)
-        //   waUsdcOut     = donationSUSDS / 1e12         (swap rate 1 / 1e12)
-        //   usdcOut       = waUsdcOut                    (redeem 1:1, both 6-dec)
-        uint256 expectedDonationSUSDS = (mintedShares * MOCK_BATCH_DONATION_SIZE) / 100;
-        uint256 expectedUsdcOut = expectedDonationSUSDS / 1e12;
-        console.log("Expected donationSUSDS:", expectedDonationSUSDS);
-        console.log("Expected USDC delivered to BatchMinter:", expectedUsdcOut);
-
-        // Use vm.recordLogs to capture BatchDonated event emission.
-        vm.recordLogs();
-
-        vm.startBroadcast(deployerPrivateKey);
-        pooler.pool(0, 1); // minBPT=0 (LP tolerant), minUSDC=1 (very permissive)
+        // forceApprove pattern: approve exact spend, buy, reset to 0.
+        IERC20(usdsAddr).approve(psmAddr, usdsSpent);
+        psm.buyGem(batchNFTMinterAddr, gemAmt);
+        IERC20(usdsAddr).approve(psmAddr, 0);
         vm.stopBroadcast();
 
-        VmSafe.Log[] memory logs = vm.getRecordedLogs();
-        bool foundBatchDonated = false;
-        bytes32 batchDonatedTopic = keccak256("BatchDonated(address,uint256,uint256,uint256,address)");
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics.length > 0 && logs[i].topics[0] == batchDonatedTopic) {
-                foundBatchDonated = true;
-                break;
-            }
-        }
-        require(foundBatchDonated, "BatchDonated event not emitted");
-        console.log("BatchDonated event observed");
-
-        uint256 postPoolBatchMinterUSDC = usdc.balanceOf(batchNFTMinterAddr);
-        uint256 usdcDelta = postPoolBatchMinterUSDC - initialBatchMinterUSDC;
-        console.log("BatchNFTMinter USDC after pool():", postPoolBatchMinterUSDC);
+        uint256 postBatchMinterUSDC = usdc.balanceOf(batchNFTMinterAddr);
+        uint256 usdcDelta = postBatchMinterUSDC - initialBatchMinterUSDC;
+        console.log("BatchNFTMinter USDC after buyGem:", postBatchMinterUSDC);
         console.log("USDC delta (donation delivered):", usdcDelta);
-        require(usdcDelta == expectedUsdcOut, "donation USDC mismatch");
-
-        // --- Step 5: Slippage-revert boundary ---
-        // The canonical revert string is verified inside the BalancerPoolerV2
-        // donation phase via the call trace (look for
-        // `"BalancerPoolerV2: USDC slippage"` in the inner revert). The mock
-        // vault's `unlock` wraps this as `"MockBalancerVault: unlock callback failed"`
-        // because the low-level `call` returned false; we accept either string.
-        //
-        // IMPORTANT: We do NOT use `vm.startBroadcast` for the failing pool()
-        // call. forge --broadcast will refuse to publish a reverting tx, which
-        // would mark the entire script run as failed even though our try/catch
-        // semantically handled it. Using `vm.prank` keeps the call in
-        // simulation-only space, which is exactly what a "deliberately reverts"
-        // assertion needs.
-        console.log("\n--- Step 4: Slippage-revert boundary (simulation-only) ---");
-        console.log("Re-seed sUSDS, force zero swap rate, call pool(0, 1) -> expect revert");
-        vm.startBroadcast(deployerPrivateKey);
-        // Re-seed sUSDS into pooler.
-        usds.mint(deployer, sUsdsSeed);
-        usds.approve(susdsAddr, sUsdsSeed);
-        uint256 mintedShares2 = susds.deposit(sUsdsSeed, deployer);
-        IERC20(susdsAddr).transfer(poolerV2Addr, mintedShares2);
-
-        // Force swap output to ZERO so the donation USDC payout is 0,
-        // guaranteed-below the minUSDC=1 floor regardless of LP-side outcome.
-        // This is the canonical way to deliberately produce a bad rate from a
-        // script — a constant-response mock could not do this.
-        vault.setSwapRate(susdsAddr, waUsdcAddr, 0, 1);
-        vm.stopBroadcast();
-
-        // Use vm.prank (NOT broadcast) so the failing pool() stays in simulation.
-        bool didRevert = false;
-        vm.prank(deployer);
-        try pooler.pool(0, 1) {
-            // No revert — fail loudly.
-        } catch Error(string memory reason) {
-            didRevert = true;
-            console.log("Got Error revert:", reason);
-            require(
-                _eq(reason, "BalancerPoolerV2: USDC slippage")
-                    || _eq(reason, "MockBalancerVault: unlock callback failed"),
-                "Unexpected revert reason"
-            );
-        } catch (bytes memory lowLevelData) {
-            didRevert = true;
-            console.log("Got low-level revert; bytes length:", lowLevelData.length);
-        }
-        require(didRevert, "pool() did not revert despite zero swap rate");
-        console.log("Slippage-revert boundary holds");
-
-        // Restore the original swap rate so subsequent runs aren't poisoned.
-        // (Idempotent: if devnet is reset by clean:local, this is moot.)
-        vm.startBroadcast(deployerPrivateKey);
-        vault.setSwapRate(susdsAddr, waUsdcAddr, 1, 1e12);
-        vm.stopBroadcast();
-        console.log("Restored MockBalancerVault swap rate to 1 / 1e12");
+        require(usdcDelta == gemAmt, "donation USDC mismatch");
 
         // --- Final summary ---
         console.log("\n========================================");
@@ -222,15 +139,9 @@ contract TestBalancerDonation is Script {
         console.log("========================================");
         console.log("batchDonationSize (%%):", onChainDonationSize);
         console.log("Initial USDC at BatchNFTMinter:", initialBatchMinterUSDC);
-        console.log("USDC delivered by donation:", usdcDelta);
-        console.log("Expected USDC out:", expectedUsdcOut);
-        console.log("Slippage-revert boundary tested: YES");
+        console.log("USDC delivered via Sky PSM:", usdcDelta);
         console.log("");
-        console.log("PASS: BalancerPoolerV2 donation phase end-to-end (happy + slippage)");
+        console.log("PASS: BalancerPoolerV2 Sky-PSM donation route end-to-end");
         console.log("========================================\n");
-    }
-
-    function _eq(string memory a, string memory b) private pure returns (bool) {
-        return keccak256(bytes(a)) == keccak256(bytes(b));
     }
 }

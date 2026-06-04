@@ -18,6 +18,7 @@ import "../src/mocks/MockWBTC.sol";
 import "../src/mocks/MockBalancerPool.sol";
 import "../src/mocks/MockBalancerVault.sol";
 import "../src/mocks/MockERC4626Wrapper.sol";
+import "../src/mocks/MockSkyPSM.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
@@ -140,7 +141,13 @@ contract DeployMocks is Script {
 
     // Story 045.5 Phase 7 — BalancerPoolerV2 donation-phase mocks
     // waUSDC mock = ERC4626 wrapper over the existing USDC `rewardToken`.
+    // (Retained for the V1-era BalancerPooler donation path; the V2 Sky-route
+    //  donation no longer uses it — see MockSkyPSM below.)
     MockERC4626Wrapper public mockWaUsdc;
+
+    // Story 056 — BalancerPoolerV2 Sky-PSM donation route mock.
+    // Mock UsdsPsmWrapper: pulls USDS, delivers USDC from its reserve.
+    MockSkyPSM public mockSkyPSM;
 
     // Progress tracking structure
     struct ContractDeployment {
@@ -523,24 +530,35 @@ contract DeployMocks is Script {
         rewardToken.mint(address(mockWaUsdc), 1_000_000 * 10 ** 6);
         console.log("Pre-funded MockWaUSDC with 1,000,000 USDC for redeem backing");
 
-        // Configure mock swap rate sUSDS -> waUSDC.
-        // sUSDS has 18 decimals (MockSUSDS uses ERC4626's default), waUSDC has 6 decimals.
-        // 1 sUSDS share -> 1 waUSDC share (decimal scale-down): num = 1, den = 1e12.
-        // This means donationSUSDS / 1e12 waUSDC shares are minted, then redeemed 1:1
-        // for USDC at 6 decimals — preserving USD value across the swap+unwrap.
-        mockBalancerVault.setSwapRate(address(susds), address(mockWaUsdc), 1, 1e12);
-        console.log("MockBalancerVault.setSwapRate(sUSDS -> waUSDC) -> 1 / 1e12 (decimal scale)");
-
-        // Wire swap config on BalancerPoolerV2 (recipient comes later in Phase 3.7).
-        // Note: the swap-pool address is opaque to MockBalancerVault.swap (which
-        // keys off (tokenIn, tokenOut)), so we reuse mockBalancerPool as the
-        // placeholder identifier rather than deploying a separate stub.
-        balancerPoolerV2.setSwapConfig(
-            address(mockBalancerPool), // swapPool placeholder identifier (opaque to mock)
-            address(mockWaUsdc),       // waUsdc
-            address(rewardToken)       // usdc
+        // ---- Story 056: BalancerPoolerV2 Sky-PSM donation route ----
+        // The V2 batch donation no longer swaps sUSDS->waUSDC on Balancer (that route
+        // was structurally dead). It now routes raw USDS -> USDC via the Sky PSM
+        // (`buyGem`). The contract's `_dispatch` carves a `batchDonationSize`% slice of
+        // the dispatched USDS and sends the resulting USDC to `batchMinter`.
+        //
+        // Deploy a MockSkyPSM (USDS in -> USDC out, fixed-rate, reserve-backed) and
+        // pre-fund its USDC reserve so `buyGem` payouts succeed during dispatch.
+        gasBefore = gasleft();
+        mockSkyPSM = new MockSkyPSM(
+            address(rewardToken), // gem  = USDC (6dp)
+            address(usds)         // usds = USDS (18dp)
         );
-        console.log("BalancerPoolerV2.setSwapConfig(mockBalancerPool, mockWaUsdc, USDC)");
+        _trackDeployment("MockSkyPSM", address(mockSkyPSM), gasBefore - gasleft());
+        console.log("MockSkyPSM deployed at:", address(mockSkyPSM));
+
+        // Pre-fund the PSM's USDC reserve so it can deliver USDC on `buyGem`.
+        rewardToken.mint(address(mockSkyPSM), 1_000_000 * 10 ** 6);
+        console.log("Pre-funded MockSkyPSM with 1,000,000 USDC reserve");
+
+        // Wire the Sky-route config on BalancerPoolerV2 (recipient comes later in
+        // Phase 3.7). `setPSM` enables the route; `setMaxTout(0.01e18)` mirrors the
+        // contract's default 1% buy-fee ceiling so a fee spike parks USDS rather than
+        // shipping a worse rate. The mock PSM's tout defaults to 0 (well under the cap).
+        balancerPoolerV2.setPSM(address(mockSkyPSM));
+        console.log("BalancerPoolerV2.setPSM -> MockSkyPSM");
+
+        balancerPoolerV2.setMaxTout(0.01e18);
+        console.log("BalancerPoolerV2.setMaxTout -> 0.01e18 (1%)");
 
         gatherWBTCV2.setMinter(address(nftMinterV2));
         console.log("GatherWBTCV2.setMinter -> NFTMinterV2");
@@ -1093,6 +1111,7 @@ contract DeployMocks is Script {
         _markConfigured("BurnerFlaxV2", 0);
         _markConfigured("BalancerPoolerV2", 0);
         _markConfigured("MockWaUSDC", 0);
+        _markConfigured("MockSkyPSM", 0);
         _markConfigured("GatherWBTCV2", 0);
         _markConfigured("NFTMigrator", 0);
         _markConfigured("BalancerPoolerMintDebtHook", 0);

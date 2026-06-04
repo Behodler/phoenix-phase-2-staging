@@ -177,7 +177,10 @@
     "migrate:ss-initiate-mainnet": "forge script script/InitiateYieldStrategyWithdrawal.s.sol:InitiateYieldStrategyWithdrawal --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "//ss-migrate-execute": "Story 055 — migration set 2/2: execute withdrawals, deploy new yield strategies, cut over minter+SYA (incl. remove old), re-deposit principal, deploy+wire StableStaker (USDe 5 / USDC 4 / DOLA 1 phUSD-day, 10% buffer), update mainnet-addresses",
     "migrate:ss-execute-mainnet-preview": "PREVIEW_MODE=true forge script script/MigrateStableStakerMainnet.s.sol:MigrateStableStakerMainnet --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate:ss-execute-mainnet": "node scripts/backup-mainnet-addresses.js && forge script script/MigrateStableStakerMainnet.s.sol:MigrateStableStakerMainnet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-stable-staker.js"
+    "migrate:ss-execute-mainnet": "node scripts/backup-mainnet-addresses.js && forge script script/MigrateStableStakerMainnet.s.sol:MigrateStableStakerMainnet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-stable-staker.js",
+    "//dispatcher-replace-sky-pooler": "Story 056 — cut index-4 dispatcher over to a Sky-PSM BalancerPoolerV2 + new MintDebtHook (migrate BPT+sUSDS, manual Sky-route validation, final pool())",
+    "dispatcher-replace-sky-pooler:dry": "PREVIEW_MODE=true forge script script/DispatcherReplaceSkyPoolerAtIndex4.s.sol:DispatcherReplaceSkyPoolerAtIndex4 --rpc-url $RPC_MAINNET --slow -vvv",
+    "dispatcher-replace-sky-pooler:broadcast": "node scripts/backup-mainnet-addresses.js && forge script script/DispatcherReplaceSkyPoolerAtIndex4.s.sol:DispatcherReplaceSkyPoolerAtIndex4 --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-dispatcher-replace-sky-pooler.js"
   },
   "keywords": [
     "phoenix",
