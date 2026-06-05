@@ -37,6 +37,7 @@ import {BalancerPooler} from "@yield-claim-nft/dispatchers/BalancerPooler.sol";
 import {Gather} from "@yield-claim-nft/dispatchers/Gather.sol";
 import "../src/mocks/MockBalancerRouter.sol";
 import {NFTMinterV2} from "@yield-claim-nft/V2/NFTMinterV2.sol";
+import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol";
 import {BurnerV2} from "@yield-claim-nft/V2/dispatchers/BurnerV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/V2/dispatchers/GatherV2.sol";
@@ -657,6 +658,18 @@ contract DeployMocks is Script {
 
         batchNFTMinter.setNudgeSize(MOCK_NUDGE_SIZE);
         console.log("BatchNFTMinter.setNudgeSize ->", MOCK_NUDGE_SIZE);
+
+        // Pin the trusted minter + dispatcher index so batchMint is enabled.
+        // Without these, batchMint reverts BatchMint__MinterNotConfigured /
+        // BatchMint__DispatcherNotConfigured before pulling any funds. The
+        // BalancerPoolerV2 was registered at index 4 above; derive it rather
+        // than hard-coding so a registration-order change can't silently break.
+        uint256 batchDispatcherIndex = nftMinterV2.dispatcherToIndex(address(balancerPoolerV2));
+        require(batchDispatcherIndex != 0, "BalancerPoolerV2 not registered with NFTMinterV2");
+        batchNFTMinter.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
+        console.log("BatchNFTMinter.setTokenMinter -> NFTMinterV2");
+        batchNFTMinter.setDispatcherIndex(batchDispatcherIndex);
+        console.log("BatchNFTMinter.setDispatcherIndex ->", batchDispatcherIndex);
 
         // ---- Story 045.5 Phase 7: Finalise BalancerPoolerV2 batch-donation wiring ----
         // BatchNFTMinter is now deployed — point the donation recipient at it and
