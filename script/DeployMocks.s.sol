@@ -19,11 +19,14 @@ import "../src/mocks/MockBalancerPool.sol";
 import "../src/mocks/MockBalancerVault.sol";
 import "../src/mocks/MockERC4626Wrapper.sol";
 import "../src/mocks/MockSkyPSM.sol";
+import "../src/mocks/MockMarketAMMAdapter.sol";
 import "@phlimbo-ea/Phlimbo.sol";
 import "@phlimbo-ea/interfaces/IPhlimbo.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
 import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
+import {ERC4626MarketYieldStrategy} from "@vault/concreteYieldStrategies/ERC4626MarketYieldStrategy.sol";
+import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import "../src/views/DepositView.sol";
 import "../src/views/ViewRouter.sol";
@@ -97,7 +100,10 @@ contract DeployMocks is Script {
     MockAutoDOLA public mockAutoUSDC;  // Reusing MockAutoDOLA pattern for USDC
     ERC4626YieldStrategy public yieldStrategyDola;
     ERC4626YieldStrategy public yieldStrategyUSDC;
-    ERC4626YieldStrategy public yieldStrategyUSDe;
+    // USDe uses the AMM-market strategy (not the plain 1:1 ERC4626YieldStrategy) to mirror
+    // mainnet, where sUSDe is reached via a Curve AMM that imposes slippage on every leg.
+    ERC4626MarketYieldStrategy public yieldStrategyUSDe;
+    MockMarketAMMAdapter public usdeAmmAdapter;
     PhusdStableMinter public minter;
     PhlimboEA public phlimbo;
     MockEYE public eyeToken;
@@ -296,18 +302,47 @@ contract DeployMocks is Script {
         _trackDeployment("YieldStrategyUSDC", address(yieldStrategyUSDC), gasBefore - gasleft());
         console.log("YieldStrategyUSDC (ERC4626YieldStrategy) deployed at:", address(yieldStrategyUSDC));
 
-        // ====== PHASE 2.7: USDe ERC4626 Infrastructure for USDe YieldStrategy ======
-        console.log("\n=== Phase 2.7: Deploying USDe ERC4626 Infrastructure ===");
+        // ====== PHASE 2.7: USDe AMM-Market Infrastructure for USDe YieldStrategy ======
+        console.log("\n=== Phase 2.7: Deploying USDe AMM-Market Infrastructure ===");
 
-        // Deploy ERC4626YieldStrategy wrapping the USDe vault (MockSUSDe)
+        // Configuration Safety (CLAUDE.md): both values are deliberately chosen, not defaults.
+        //   - usdeSlippageToleranceBps mirrors mainnet's ERC4626MarketYieldStrategy (120 bps,
+        //     story 043 principal haircut). Source: script/interactions/governance/
+        //     DeployUSDeMarketYieldStrategy.s.sol (SLIPPAGE_BPS = 120).
+        //   - usdeAmmSlippageBps is the simulated per-leg AMM loss. It MUST stay <= the
+        //     tolerance or deposits revert on the strategy's minOut check (and the strategy
+        //     would otherwise be left underwater). 50 bps gives visible-but-safe slippage.
+        uint256 usdeSlippageToleranceBps = 120; // 1.2% principal haircut (matches mainnet)
+        uint256 usdeAmmSlippageBps = 50;         // 0.5% simulated AMM slippage per swap leg
+        require(usdeAmmSlippageBps <= usdeSlippageToleranceBps, "AMM slippage exceeds tolerance (would brick USDe deposits)");
+
+        // Deploy the mock Curve-style AMM adapter (USDe<->sUSDe). Routes through MockSUSDe so
+        // share pricing tracks the vault, while skimming a slippage haircut on every leg.
         gasBefore = gasleft();
-        yieldStrategyUSDe = new ERC4626YieldStrategy(
-            deployer,           // owner
-            address(usde),      // underlyingToken (USDe)
-            address(susde)      // erc4626Vault (MockSUSDe)
+        usdeAmmAdapter = new MockMarketAMMAdapter(address(usde), address(susde), usdeAmmSlippageBps);
+        _trackDeployment("USDeAMMAdapter", address(usdeAmmAdapter), gasBefore - gasleft());
+        console.log("MockMarketAMMAdapter (USDe<->sUSDe) deployed at:", address(usdeAmmAdapter));
+        console.log("  Simulated AMM slippage (bps):", usdeAmmSlippageBps);
+
+        // Deploy ERC4626MarketYieldStrategy wrapping the USDe vault via the AMM adapter.
+        // Unlike ERC4626YieldStrategy (1:1, no haircut), this credits principal at a haircut so
+        // AMM slippage cannot leave the strategy underwater; the surplus surfaces as yield, and
+        // the UI sees that deposits are NOT perfectly preserved.
+        gasBefore = gasleft();
+        yieldStrategyUSDe = new ERC4626MarketYieldStrategy(
+            deployer,                  // owner
+            address(usde),             // underlyingToken (USDe)
+            address(susde),            // erc4626Vault (MockSUSDe)
+            address(usdeAmmAdapter)    // ammAdapter
         );
         _trackDeployment("YieldStrategyUSDe", address(yieldStrategyUSDe), gasBefore - gasleft());
-        console.log("YieldStrategyUSDe (ERC4626YieldStrategy) deployed at:", address(yieldStrategyUSDe));
+        console.log("YieldStrategyUSDe (ERC4626MarketYieldStrategy) deployed at:", address(yieldStrategyUSDe));
+
+        // Set the principal haircut. Left unset it defaults to 0 bps => principal == amount,
+        // which is exactly the "perfectly preserved / immediately underwater" bug being fixed.
+        yieldStrategyUSDe.setSlippageTolerance(usdeSlippageToleranceBps);
+        require(yieldStrategyUSDe.slippageToleranceBps() == usdeSlippageToleranceBps, "USDe slippage tolerance unset");
+        console.log("YieldStrategyUSDe slippage tolerance set (bps):", usdeSlippageToleranceBps);
 
         // ====== PHASE 3: Core Contract Deployment ======
         console.log("\n=== Phase 3: Deploying Core Contracts ===");
@@ -704,7 +739,11 @@ contract DeployMocks is Script {
         //    DOLA and USDe pools get 10/day; the USDC (rewardToken) pool gets 5/day so
         //    the reduced rate is visible in the UI (story 051 Concerns).
         address[3] memory ssTokens = [address(dola), address(rewardToken), address(usde)];
-        ERC4626YieldStrategy[3] memory ssStrats = [yieldStrategyDola, yieldStrategyUSDC, yieldStrategyUSDe];
+        // Heterogeneous strategies (DOLA/USDC are ERC4626YieldStrategy; USDe is the
+        // ERC4626MarketYieldStrategy) — upcast to the shared base so the loop's setClient /
+        // setSetAsideBuffer calls (both defined on AYieldStrategy) apply uniformly.
+        AYieldStrategy[3] memory ssStrats =
+            [AYieldStrategy(yieldStrategyDola), AYieldStrategy(yieldStrategyUSDC), AYieldStrategy(yieldStrategyUSDe)];
         for (uint256 i = 0; i < 3; i++) {
             stableStaker.addToken(ssTokens[i]);
             ssStrats[i].setClient(address(stableStaker), true); // client added ON the yield strategy
@@ -1104,6 +1143,7 @@ contract DeployMocks is Script {
         _markConfigured("YieldStrategyDola", 0);
         _markConfigured("YieldStrategyUSDC", 0);
         _markConfigured("YieldStrategyUSDe", 0);
+        _markConfigured("USDeAMMAdapter", 0);
         _markConfigured("PhusdStableMinter", 0);
         _markConfigured("PhlimboEA", 0);
         _markConfigured("StableYieldAccumulator", 0);

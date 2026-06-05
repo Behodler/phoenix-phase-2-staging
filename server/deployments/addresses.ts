@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-06-05T04:59:52.485Z
+// Generated interface from local.json on 2026-06-05T06:08:47.298Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -28,6 +28,7 @@ export interface ContractAddresses {
   YieldStrategyDola: string;
   AutoUSDC: string;
   YieldStrategyUSDC: string;
+  USDeAMMAdapter: string;
   YieldStrategyUSDe: string;
   PhusdStableMinter: string;
   PhlimboEA: string;

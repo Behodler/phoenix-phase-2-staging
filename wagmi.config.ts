@@ -52,6 +52,8 @@ export default defineConfig({
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',
         'ERC4626YieldStrategy.sol/ERC4626YieldStrategy.json',
+        // USDe strategy uses the AMM-market variant (slippage haircut + principalOf/totalBalanceOf)
+        'ERC4626MarketYieldStrategy.sol/ERC4626MarketYieldStrategy.json',
         'Pauser.sol/Pauser.json',
 
         // View contracts for UI polling
