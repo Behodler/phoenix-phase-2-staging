@@ -1,8 +1,35 @@
 {
+  "lib/flax-token-v2": {
+    "rev": "f5300117e94bd30349fb88f426d434ef1ccddce0"
+  },
   "lib/forge-std": {
     "tag": {
       "name": "v1.12.0",
       "rev": "7117c90c8cf6c68e5acce4f09a6b24715cea4de6"
     }
+  },
+  "lib/nft-staking": {
+    "rev": "5f863d27ebbab5df20131a4592996537cd8bf503"
+  },
+  "lib/pauser": {
+    "rev": "545928d067a3dd7ffb853ce41ced7177a34febf1"
+  },
+  "lib/phUSD-stable-minter": {
+    "rev": "d6ed11561e14d2d43adfe481e01357fbd800e218"
+  },
+  "lib/phlimbo-ea": {
+    "rev": "6cb0bc0c2c26982a09d9dba2a01a9819bf65190c"
+  },
+  "lib/stable-staker": {
+    "rev": "f5f6039a682b0fb627355a5173502259d68967ba"
+  },
+  "lib/stable-yield-accumulator": {
+    "rev": "0fef726ed9178754ce7b038a31037418078097d4"
+  },
+  "lib/vault": {
+    "rev": "a65dbf0d1c4bbfd19bca33b63ed913438094a442"
+  },
+  "lib/yield-claim-nft": {
+    "rev": "cf75ec9520fd16b19e20c4b77ada2be28d7d4382"
   }
 }
