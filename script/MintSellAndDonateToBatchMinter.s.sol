@@ -4,7 +4,9 @@ pragma solidity ^0.8.20;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {
+    SafeERC20
+} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IFlax} from "@flax-token/IFlax.sol";
 import {ISkyPSM} from "@yield-claim-nft/V2/interfaces/ISkyPSM.sol";
@@ -37,7 +39,12 @@ interface IBalancerRouter {
 
 /// @notice Uniswap Permit2 allowance approval (Balancer V3 pulls via Permit2).
 interface IPermit2 {
-    function approve(address token, address spender, uint160 amount, uint48 expiration) external;
+    function approve(
+        address token,
+        address spender,
+        uint160 amount,
+        uint48 expiration
+    ) external;
 }
 
 /// @notice Subset of the live BalancerPoolerV2 config we cross-check against.
@@ -139,12 +146,15 @@ contract MintSellDonateHelper {
      * @return gemAmt         USDC (6dp) donated to the batchMinter.
      * @return ownerUsdsPaid  USDS handed to the owner as gas compensation.
      */
-    function execute(uint256 phusdToSwap, uint256 minSusdsOut, uint256 ownerCompPhusd)
-        external
-        onlyOwner
-        returns (uint256 gemAmt, uint256 ownerUsdsPaid)
-    {
-        require(ownerCompPhusd == 0 || ownerCompPhusd < phusdToSwap, "owner comp must be < swap amount");
+    function execute(
+        uint256 phusdToSwap,
+        uint256 minSusdsOut,
+        uint256 ownerCompPhusd
+    ) external onlyOwner returns (uint256 gemAmt, uint256 ownerUsdsPaid) {
+        require(
+            ownerCompPhusd == 0 || ownerCompPhusd < phusdToSwap,
+            "owner comp must be < swap amount"
+        );
 
         // ---- Sweep the owner's pre-existing sUSDS into this contract ----
         // Recovers e.g. sUSDS stranded by a previously-failed multi-tx run.
@@ -158,18 +168,33 @@ contract MintSellDonateHelper {
         if (phusdToSwap > 0) {
             require(minSusdsOut > 0, "swap floor unset"); // never an unprotected swap
             IERC20(phusd).forceApprove(permit2, type(uint256).max);
-            IPermit2(permit2).approve(phusd, router, type(uint160).max, type(uint48).max);
-            swapOut = IBalancerRouter(router)
-                .swapSingleTokenExactIn(
-                    pool, IERC20(phusd), IERC20(susds), phusdToSwap, minSusdsOut, block.timestamp + 300, false, ""
-                );
+            IPermit2(permit2).approve(
+                phusd,
+                router,
+                type(uint160).max,
+                type(uint48).max
+            );
+            swapOut = IBalancerRouter(router).swapSingleTokenExactIn(
+                pool,
+                IERC20(phusd),
+                IERC20(susds),
+                phusdToSwap,
+                minSusdsOut,
+                block.timestamp + 300,
+                false,
+                ""
+            );
             require(swapOut >= minSusdsOut, "swap below minAmountOut");
         }
 
         // ---- Redeem ALL sUSDS this contract now holds -> USDS (live amount) ----
         uint256 totalSusds = IERC20(susds).balanceOf(address(this));
         require(totalSusds > 0, "no sUSDS to process");
-        uint256 redeemed = IERC4626(susds).redeem(totalSusds, address(this), address(this));
+        uint256 redeemed = IERC4626(susds).redeem(
+            totalSusds,
+            address(this),
+            address(this)
+        );
         require(redeemed > 0, "redeem returned 0 USDS");
 
         // ---- Carve the owner's gas-comp slice out of the SWAP proceeds only ----
@@ -181,7 +206,10 @@ contract MintSellDonateHelper {
             uint256 ownerSusdsShare = (swapOut * ownerCompPhusd) / phusdToSwap;
             ownerUsdsPaid = (redeemed * ownerSusdsShare) / totalSusds;
             require(ownerUsdsPaid > 0, "owner comp rounds to dust");
-            require(ownerUsdsPaid < redeemed, "owner comp consumes whole redeem");
+            require(
+                ownerUsdsPaid < redeemed,
+                "owner comp consumes whole redeem"
+            );
             donationUsds = redeemed - ownerUsdsPaid;
             IERC20(usds).safeTransfer(owner, ownerUsdsPaid);
         }
@@ -195,13 +223,19 @@ contract MintSellDonateHelper {
         gemAmt = (donationUsds * WAD) / (conv * (WAD + tout));
         require(gemAmt > 0, "donation rounds to dust");
         uint256 usdsSpent = (gemAmt * conv * (WAD + tout)) / WAD;
-        require(usdsSpent <= donationUsds, "PSM would pull more USDS than donation");
+        require(
+            usdsSpent <= donationUsds,
+            "PSM would pull more USDS than donation"
+        );
 
         uint256 minterBefore = IERC20(usdc).balanceOf(batchMinter);
         IERC20(usds).forceApprove(skyPsm, usdsSpent);
         ISkyPSM(skyPsm).buyGem(batchMinter, gemAmt);
         IERC20(usds).forceApprove(skyPsm, 0);
-        require(IERC20(usdc).balanceOf(batchMinter) - minterBefore == gemAmt, "USDC delta != gemAmt");
+        require(
+            IERC20(usdc).balanceOf(batchMinter) - minterBefore == gemAmt,
+            "USDC delta != gemAmt"
+        );
 
         // ---- Return residual USDS dust (from flooring) to the owner ----
         uint256 dust = IERC20(usds).balanceOf(address(this));
@@ -288,15 +322,24 @@ contract MintSellAndDonateToBatchMinter is Script {
     function run() external {
         require(block.chainid == 1, "Wrong chain id - expected Mainnet (1)");
 
-        uint256 donationPhusd = vm.envOr("BATCH_DONATION_PHUSD_WEI", uint256(130e18));
+        uint256 donationPhusd = vm.envOr(
+            "BATCH_DONATION_PHUSD_WEI",
+            uint256(105e18)
+        );
         uint256 ownerCompPhusd = vm.envOr("OWNER_COMP_PHUSD_WEI", uint256(0));
         uint256 phusdAmount = donationPhusd + ownerCompPhusd; // total to mint + sell
         uint256 slippageBps = vm.envOr("SLIPPAGE_BPS", uint256(100)); // 1%
         require(slippageBps < 10_000, "SLIPPAGE_BPS >= 100%");
         // A pure sweep zeroes BOTH portions; otherwise the donation must be > 0 so
         // the owner-comp carve (which must be < total) can never starve the donation.
-        require(phusdAmount == 0 || donationPhusd > 0, "donation portion must be > 0");
-        require(ownerCompPhusd == 0 || ownerCompPhusd < phusdAmount, "owner comp must be < total minted");
+        require(
+            phusdAmount == 0 || donationPhusd > 0,
+            "donation portion must be > 0"
+        );
+        require(
+            ownerCompPhusd == 0 || ownerCompPhusd < phusdAmount,
+            "owner comp must be < total minted"
+        );
 
         console.log("===== MintSellAndDonateToBatchMinter (atomic) =====");
         console.log("phUSD to mint+sell (wei):  ", phusdAmount);
@@ -305,7 +348,10 @@ contract MintSellAndDonateToBatchMinter is Script {
         console.log("Slippage (bps):            ", slippageBps);
 
         // ---- Cross-check our constants against the live pooler's config ----
-        require(IPoolerCfg(LIVE_POOLER).batchMinter() == BATCH_MINTER, "batchMinter != live pooler");
+        require(
+            IPoolerCfg(LIVE_POOLER).batchMinter() == BATCH_MINTER,
+            "batchMinter != live pooler"
+        );
         require(IPoolerCfg(LIVE_POOLER).psm() == SKY_PSM, "PSM != live pooler");
         require(IERC4626(SUSDS).asset() == USDS, "sUSDS.asset() != USDS");
         require(ISkyPSM(SKY_PSM).gem() == USDC, "PSM gem != USDC");
@@ -342,19 +388,30 @@ contract MintSellAndDonateToBatchMinter is Script {
                 vm.revertToState(snap);
                 require(ok, "querySwap failed - pass MIN_SUSDS_OUT_WEI");
                 uint256 quoted = abi.decode(ret, (uint256));
-                require(quoted > 0, "querySwap returned 0 - pass MIN_SUSDS_OUT_WEI");
+                require(
+                    quoted > 0,
+                    "querySwap returned 0 - pass MIN_SUSDS_OUT_WEI"
+                );
                 minSusdsOut = (quoted * (10_000 - slippageBps)) / 10_000;
                 console.log("querySwap sUSDS out:      ", quoted);
             }
-            require(minSusdsOut > 0, "minSusdsOut resolved to 0 - refusing unprotected swap");
+            require(
+                minSusdsOut > 0,
+                "minSusdsOut resolved to 0 - refusing unprotected swap"
+            );
             console.log("Swap minAmountOut (sUSDS):", minSusdsOut);
         } else {
-            console.log("*** PURE SWEEP MODE - no minting, donating only wallet sUSDS ***");
+            console.log(
+                "*** PURE SWEEP MODE - no minting, donating only wallet sUSDS ***"
+            );
         }
 
         uint256 ownerSusds = IERC20(SUSDS).balanceOf(OWNER);
         console.log("OWNER sUSDS to be swept:  ", ownerSusds);
-        require(phusdAmount > 0 || ownerSusds > 0, "nothing to do: no mint amount and no sUSDS to sweep");
+        require(
+            phusdAmount > 0 || ownerSusds > 0,
+            "nothing to do: no mint amount and no sUSDS to sweep"
+        );
 
         bool isPreview = vm.envOr("PREVIEW_MODE", false);
         if (isPreview) {
@@ -365,15 +422,27 @@ contract MintSellAndDonateToBatchMinter is Script {
         }
 
         // ---- Deploy the per-run atomic executor ----
-        MintSellDonateHelper helper =
-            new MintSellDonateHelper(OWNER, PHUSD, SUSDS, USDS, USDC, POOL, ROUTER, PERMIT2, SKY_PSM, BATCH_MINTER);
+        MintSellDonateHelper helper = new MintSellDonateHelper(
+            OWNER,
+            PHUSD,
+            SUSDS,
+            USDS,
+            USDC,
+            POOL,
+            ROUTER,
+            PERMIT2,
+            SKY_PSM,
+            BATCH_MINTER
+        );
         console.log("Helper deployed at:       ", address(helper));
 
         // ---- Mint fresh phUSD straight into the helper (signer's minter role) ----
         if (phusdAmount > 0) {
             IFlax phUSD = IFlax(PHUSD);
             if (!phUSD.authorizedMinters(OWNER).canMint) {
-                console.log("OWNER not authorized minter - calling setMinter(OWNER, true)");
+                console.log(
+                    "OWNER not authorized minter - calling setMinter(OWNER, true)"
+                );
                 phUSD.setMinter(OWNER, true);
             }
             phUSD.mint(address(helper), phusdAmount);
@@ -389,7 +458,11 @@ contract MintSellAndDonateToBatchMinter is Script {
         uint256 ownerUsdsBefore = IERC20(USDS).balanceOf(OWNER);
 
         // ---- The atomic swap -> sweep -> redeem -> owner gas-comp -> donate ----
-        (uint256 donated, uint256 ownerPaid) = helper.execute(phusdAmount, minSusdsOut, ownerCompPhusd);
+        (uint256 donated, uint256 ownerPaid) = helper.execute(
+            phusdAmount,
+            minSusdsOut,
+            ownerCompPhusd
+        );
 
         // ---- Revoke the sweep approval (helper is throwaway, but be tidy) ----
         if (ownerSusds > 0) {
@@ -402,15 +475,20 @@ contract MintSellAndDonateToBatchMinter is Script {
             vm.stopBroadcast();
         }
 
-        uint256 usdcDelta = IERC20(USDC).balanceOf(BATCH_MINTER) - minterUsdcBefore;
+        uint256 usdcDelta = IERC20(USDC).balanceOf(BATCH_MINTER) -
+            minterUsdcBefore;
         require(usdcDelta == donated, "USDC delta != donated");
         // Owner USDS delta = the gas-comp slice + any flooring dust returned.
-        uint256 ownerUsdsDelta = IERC20(USDS).balanceOf(OWNER) - ownerUsdsBefore;
+        uint256 ownerUsdsDelta = IERC20(USDS).balanceOf(OWNER) -
+            ownerUsdsBefore;
         require(ownerUsdsDelta >= ownerPaid, "owner USDS delta < comp paid");
         console.log("USDC donated to BatchNFTMinter:  ", donated);
         console.log("USDS paid to owner (gas comp):   ", ownerPaid);
         console.log("Owner USDS delta (incl dust):    ", ownerUsdsDelta);
-        console.log("BatchNFTMinter USDC balance now: ", IERC20(USDC).balanceOf(BATCH_MINTER));
+        console.log(
+            "BatchNFTMinter USDC balance now: ",
+            IERC20(USDC).balanceOf(BATCH_MINTER)
+        );
         console.log("===== Done =====");
     }
 }
