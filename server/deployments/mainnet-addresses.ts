@@ -36,8 +36,14 @@ export const mainnetAddresses: ContractAddresses = {
   YieldStrategyDola: "0xE7aEC21BF6420FF483107adCB9360C4b31d69D78",
   YieldStrategyUSDe: "0xFc629bC5F6339F77635f4F656FBb114A31F7bCB3",
   YieldStrategyUSDC: "0x8b4A75290A1C4935eC1dfd990374AC4BD4D33952",
+  // USDe<->sUSDe market AMM adapter — interface key (declared by ContractAddresses
+  // via the local MockMarketAMMAdapter). Not yet deployed to mainnet; placeholder
+  // so mainnet-addresses.ts satisfies the interface (mirrors StableStaker below).
+  USDeAMMAdapter: "0x0000000000000000000000000000000000000000",
 
   // External protocol contracts
+  // Sky USDS PSM wrapper (USDS<->USDC). Real mainnet address — NOT the local mock (0xc351…1181).
+  SkyPSM: "0xA188EEC8F81263234dA3622A406892F3D630f98c",
   USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   Dola: "0x865377367054516e17014CcdED1e7d814EDC9ce4",
   AutoDOLA: "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",

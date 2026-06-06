@@ -1,0 +1,20 @@
+{
+  "_comment": "Canonical external/immutable mainnet addresses that no deployment broadcast ever produces (third-party contracts) plus the Phase-1 immutable PhUSD. This file is the durable preservation source merged into mainnet-addresses.ts on every chainId-1 codegen run (server/generate-ts-addresses.js). Values must match the current mainnet-addresses.ts. Do NOT use the local mock SkyPSM (0xc351...1181) here — the real mainnet Sky USDS PSM wrapper is 0xA188EEC8F81263234dA3622A406892F3D630f98c.",
+  "PhUSD": "0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605",
+  "SkyPSM": "0xA188EEC8F81263234dA3622A406892F3D630f98c",
+  "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "Dola": "0x865377367054516e17014CcdED1e7d814EDC9ce4",
+  "AutoDOLA": "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",
+  "AutoUSDC": "0xa7569A44f348d3D70d8ad5889e50F78E33d80D35",
+  "USDS": "0xdC035D45d973E3EC169d2276DDab16f1e407384F",
+  "SCX": "0x1B8568FbB47708E9E9D31Ff303254f748805bF21",
+  "Flax": "0x0cf758D4303295C43CD95e1232f0101ADb3DA9E8",
+  "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+  "EYE": "0x155ff1A85F440EE0A382eA949f24CE4E0b751c65",
+  "USDe": "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3",
+  "SUSDe": "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497",
+  "SUSDS": "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD",
+  "BalancerPool": "0x642BB6860b4776CC10b26B8f361Fd139E7f0db04",
+  "BalancerVault": "0xbA1333333333a1BA1108E8412f11850A5C319bA9",
+  "BalancerRouter": "0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd"
+}
