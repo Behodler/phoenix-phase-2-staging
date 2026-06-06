@@ -324,7 +324,7 @@ contract MintSellAndDonateToBatchMinter is Script {
 
         uint256 donationPhusd = vm.envOr(
             "BATCH_DONATION_PHUSD_WEI",
-            uint256(105e18)
+            uint256(75e18)
         );
         uint256 ownerCompPhusd = vm.envOr("OWNER_COMP_PHUSD_WEI", uint256(0));
         uint256 phusdAmount = donationPhusd + ownerCompPhusd; // total to mint + sell
