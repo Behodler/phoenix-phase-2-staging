@@ -167,8 +167,20 @@ contract InitiateYieldStrategyWithdrawal is Script {
         require(principal > 0, "preflight: no principal to withdraw");
 
         (uint256 initiatedAt, uint8 status,) = strategy.withdrawalStates(token, PHUSD_STABLE_MINTER);
-        // 0 = None, 3 = Expired are the only states from which initiation is valid.
-        require(status == 0 || status == 3, "preflight: withdrawal window already open (status != None/Expired)");
+        // Initiation is valid from None(0)/Expired(3). It is ALSO valid from a stored
+        // Initiated(1)/Executable(2) that has already passed the 72h TOTAL_DURATION:
+        // `Expired` is a LAZY transition the contract only writes on the next
+        // totalWithdrawal call (via _updateWithdrawalStatus), so the public getter still
+        // returns the stale pre-expiry enum. Mirror that time check here, otherwise this
+        // preflight rejects a re-initiation the contract would itself happily perform
+        // (it re-runs _updateWithdrawalStatus first, flips to Expired, then re-initiates).
+        // NOTE: re-initiation snapshots principal and resets the timer — it does NOT move
+        // funds. Draining only happens from Executable, which this guard still blocks.
+        bool timeExpired = (status == 1 || status == 2) && block.timestamp > initiatedAt + 72 hours;
+        require(
+            status == 0 || status == 3 || timeExpired,
+            "preflight: withdrawal window already open (status != None/Expired and not time-expired)"
+        );
 
         console.log("  owner OK (== deployer)");
         console.log("  underlyingToken OK (== token)");
