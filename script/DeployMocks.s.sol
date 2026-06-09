@@ -33,18 +33,13 @@ import "../src/views/ViewRouter.sol";
 import "../src/views/DepositPageView.sol";
 import {MintPageView} from "../src/views/MintPageView.sol";
 import {INFTMinter as INFTMinterView} from "@yield-claim-nft/interfaces/INFTMinter.sol";
-import {NFTMinter} from "@yield-claim-nft/NFTMinter.sol";
 import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
-import {Burner} from "@yield-claim-nft/dispatchers/Burner.sol";
-import {BalancerPooler} from "@yield-claim-nft/dispatchers/BalancerPooler.sol";
-import {Gather} from "@yield-claim-nft/dispatchers/Gather.sol";
 import "../src/mocks/MockBalancerRouter.sol";
 import {NFTMinterV2} from "@yield-claim-nft/V2/NFTMinterV2.sol";
 import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol";
 import {BurnerV2} from "@yield-claim-nft/V2/dispatchers/BurnerV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/V2/dispatchers/GatherV2.sol";
-import {NFTMigrator} from "@yield-claim-nft/V2/NFTMigrator.sol";
 import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPoolerMintDebtHook.sol";
 import {IDispatchHook} from "@yield-claim-nft/V2/interfaces/IDispatchHook.sol";
 import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalancerPoolerMintDebtHook.sol";
@@ -114,19 +109,13 @@ contract DeployMocks is Script {
     DepositPageView public depositPageView;
     MintPageView public mintPageView;
 
-    // NFTMinter infrastructure
+    // NFTMinter infrastructure (V2 only — V1 removed in story 059)
     MockSCX public mockSCX;
     MockFlax public mockFlax;
     MockWBTC public mockWBTC;
     MockBalancerPool public mockBalancerPool;
     MockBalancerVault public mockBalancerVault;
-    NFTMinter public nftMinter;
     BurnRecorder public burnRecorder;
-    Burner public burnerEYE;
-    Burner public burnerSCX;
-    Burner public burnerFlax;
-    BalancerPooler public balancerPooler;
-    Gather public gatherWBTC;
 
     // V2 NFTMinter infrastructure
     MockBalancerRouter public mockBalancerRouter;
@@ -136,7 +125,6 @@ contract DeployMocks is Script {
     BurnerV2 public burnerFlaxV2;
     BalancerPoolerV2 public balancerPoolerV2;
     GatherV2 public gatherWBTCV2;
-    NFTMigrator public nftMigrator;
 
     // NFT Staking infrastructure
     BalancerPoolerMintDebtHook public balancerPoolerHook;
@@ -372,16 +360,17 @@ contract DeployMocks is Script {
         _trackDeployment("StableYieldAccumulator", address(stableYieldAccumulator), gasBefore - gasleft());
         console.log("StableYieldAccumulator deployed at:", address(stableYieldAccumulator));
 
-        // ====== PHASE 3.5: NFTMinter Infrastructure ======
-        console.log("\n=== Phase 3.5: Deploying NFTMinter Infrastructure ===");
+        // ====== PHASE 3.6: V2 NFTMinter Infrastructure ======
+        // (Phase 3.5 V1 NFTMinter infra removed in story 059 — V1 is decommissioned)
+        console.log("\n=== Phase 3.6: Deploying V2 NFTMinter Infrastructure ===");
 
-        // 1. Deploy MockBalancerPool (ERC20 BPT)
+        // Deploy MockBalancerPool (ERC20 BPT)
         gasBefore = gasleft();
         mockBalancerPool = new MockBalancerPool();
         _trackDeployment("MockBalancerPool", address(mockBalancerPool), gasBefore - gasleft());
         console.log("MockBalancerPool deployed at:", address(mockBalancerPool));
 
-        // 2. Deploy MockBalancerVault
+        // Deploy MockBalancerVault
         gasBefore = gasleft();
         mockBalancerVault = new MockBalancerVault(address(mockBalancerPool));
         _trackDeployment("MockBalancerVault", address(mockBalancerVault), gasBefore - gasleft());
@@ -391,67 +380,11 @@ contract DeployMocks is Script {
         mockBalancerPool.setVault(address(mockBalancerVault));
         console.log("Wired MockBalancerPool to recognize MockBalancerVault");
 
-        // 3. Deploy NFTMinter
-        gasBefore = gasleft();
-        nftMinter = new NFTMinter(deployer);
-        _trackDeployment("NFTMinter", address(nftMinter), gasBefore - gasleft());
-        console.log("NFTMinter deployed at:", address(nftMinter));
-
-        // 4. Deploy BurnRecorder
+        // Deploy BurnRecorder
         gasBefore = gasleft();
         burnRecorder = new BurnRecorder(deployer);
         _trackDeployment("BurnRecorder", address(burnRecorder), gasBefore - gasleft());
         console.log("BurnRecorder deployed at:", address(burnRecorder));
-
-        // 5. Deploy 4 Dispatchers
-        // Burner #1: burns MockEYE (prime token = EYE)
-        gasBefore = gasleft();
-        burnerEYE = new Burner(address(eyeToken), address(burnRecorder), deployer);
-        _trackDeployment("BurnerEYE", address(burnerEYE), gasBefore - gasleft());
-        console.log("BurnerEYE deployed at:", address(burnerEYE));
-
-        // Burner #2: burns MockSCX (prime token = SCX)
-        gasBefore = gasleft();
-        burnerSCX = new Burner(address(mockSCX), address(burnRecorder), deployer);
-        _trackDeployment("BurnerSCX", address(burnerSCX), gasBefore - gasleft());
-        console.log("BurnerSCX deployed at:", address(burnerSCX));
-
-        // Burner #3: burns MockFlax (prime token = Flax)
-        gasBefore = gasleft();
-        burnerFlax = new Burner(address(mockFlax), address(burnRecorder), deployer);
-        _trackDeployment("BurnerFlax", address(burnerFlax), gasBefore - gasleft());
-        console.log("BurnerFlax deployed at:", address(burnerFlax));
-
-        // BalancerPooler: user sends sUSDS, single-sided add to phUSD/sUSDS pool boosts phUSD price + liquidity
-        gasBefore = gasleft();
-        balancerPooler = new BalancerPooler(
-            address(susds),              // primeToken_ (sUSDS ERC4626 vault - single-sided add boosts phUSD price)
-            address(mockBalancerPool),   // pool_ (BPT token for phUSD/sUSDS pool)
-            address(mockBalancerVault),  // vault_
-            true,                        // primeTokenIsFirst_
-            deployer                     // initialOwner
-        );
-        _trackDeployment("BalancerPooler", address(balancerPooler), gasBefore - gasleft());
-        console.log("BalancerPooler deployed at:", address(balancerPooler));
-
-        // Gather: accumulates WBTC, sends to deployer
-        gasBefore = gasleft();
-        gatherWBTC = new Gather(
-            address(mockWBTC),      // token_ (WBTC)
-            deployer,               // recipient_ (deployer)
-            deployer                // initialOwner
-        );
-        _trackDeployment("GatherWBTC", address(gatherWBTC), gasBefore - gasleft());
-        console.log("GatherWBTC deployed at:", address(gatherWBTC));
-
-        // 6. Authorize burner dispatchers on BurnRecorder
-        burnRecorder.setBurner(address(burnerEYE), true);
-        burnRecorder.setBurner(address(burnerSCX), true);
-        burnRecorder.setBurner(address(burnerFlax), true);
-        console.log("Authorized BurnerEYE, BurnerSCX, BurnerFlax as burners on BurnRecorder");
-
-        // ====== PHASE 3.6: V2 NFTMinter Infrastructure ======
-        console.log("\n=== Phase 3.6: Deploying V2 NFTMinter Infrastructure ===");
 
         // 1. Deploy MockBalancerRouter
         gasBefore = gasleft();
@@ -604,32 +537,6 @@ contract DeployMocks is Script {
         burnRecorder.setBurner(address(burnerSCXV2), true);
         burnRecorder.setBurner(address(burnerFlaxV2), true);
         console.log("Authorized BurnerEYEV2, BurnerSCXV2, BurnerFlaxV2 as burners on BurnRecorder");
-
-        // 7. Deploy NFTMigrator
-        gasBefore = gasleft();
-        nftMigrator = new NFTMigrator(address(nftMinter), address(nftMinterV2), deployer);
-        _trackDeployment("NFTMigrator", address(nftMigrator), gasBefore - gasleft());
-        console.log("NFTMigrator deployed at:", address(nftMigrator));
-
-        // 8. Configure NFTMigrator permissions
-        // NFTMigrator needs to burn V1 NFTs
-        nftMinter.setAuthorizedBurner(address(nftMigrator), true);
-        console.log("NFTMinter.setAuthorizedBurner(NFTMigrator, true)");
-
-        // NFTMigrator needs to mint V2 NFTs via mintFor()
-        nftMinterV2.setAuthorizedMinter(address(nftMigrator), true);
-        console.log("NFTMinterV2.setAuthorizedMinter(NFTMigrator, true)");
-
-        // 9. Configure V1-to-V2 index mapping on NFTMigrator (1:1 mapping)
-        uint256[] memory v1Indexes = new uint256[](5);
-        uint256[] memory v2Indexes = new uint256[](5);
-        for (uint256 i = 0; i < 5; i++) {
-            v1Indexes[i] = i + 1;
-            v2Indexes[i] = i + 1;
-        }
-        nftMigrator.setMappings(v1Indexes, v2Indexes);
-        nftMigrator.setInitialized();
-        console.log("NFTMigrator index mappings set and initialized (1:1 for indices 1-5)");
 
         // ====== PHASE 3.7: NFT Staking Stack ======
         console.log("\n=== Phase 3.7: NFT Staking Stack ===");
@@ -903,11 +810,6 @@ contract DeployMocks is Script {
         // Step 2: Register with pauser
         pauser.register(address(stableYieldAccumulator));
         console.log("Pauser.register(StableYieldAccumulator) completed");
-        // Register NFTMinter with Pauser
-        nftMinter.setPauser(address(pauser));
-        console.log("NFTMinter.setPauser() called");
-        pauser.register(address(nftMinter));
-        console.log("Pauser.register(NFTMinter) completed");
 
         // Register NFTMinterV2 with Pauser
         nftMinterV2.setPauser(address(pauser));
@@ -931,88 +833,16 @@ contract DeployMocks is Script {
 
         console.log("All protocol contracts registered with Pauser");
 
-        // ====== PHASE 8.5: NFTMinter Configuration ======
-        console.log("\n=== Phase 8.5: NFTMinter V1 Configuration ===");
+        // ====== PHASE 8.7: SYA Integration — V2 NFTMinter ======
+        console.log("\n=== Phase 8.7: SYA Integration - V2 NFTMinter ===");
 
-        // Register each dispatcher with NFTMinter (initialPrice = 100e18, varying growthBps)
-        uint256 initialPrice = 100 * 10 ** 18;
-        uint256 wbtcInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
-
-        nftMinter.registerDispatcher(address(burnerEYE), initialPrice, 200); // 2% growth
-        console.log("Registered BurnerEYE dispatcher with NFTMinter (index 1, 2% growth)");
-
-        nftMinter.registerDispatcher(address(burnerSCX), initialPrice, 200); // 2% growth
-        console.log("Registered BurnerSCX dispatcher with NFTMinter (index 2, 2% growth)");
-
-        nftMinter.registerDispatcher(address(burnerFlax), initialPrice, 200); // 2% growth
-        console.log("Registered BurnerFlax dispatcher with NFTMinter (index 3, 2% growth)");
-
-        nftMinter.registerDispatcher(address(balancerPooler), initialPrice, 10); // 0.1% growth
-        console.log("Registered BalancerPooler dispatcher with NFTMinter (index 4, 0.1% growth)");
-
-        nftMinter.registerDispatcher(address(gatherWBTC), wbtcInitialPrice, 1000); // 10% growth
-        console.log("Registered GatherWBTC dispatcher with NFTMinter (index 5, 10% growth)");
-
-        // Set minter on each dispatcher
-        burnerEYE.setMinter(address(nftMinter));
-        console.log("BurnerEYE.setMinter -> NFTMinter");
-
-        burnerSCX.setMinter(address(nftMinter));
-        console.log("BurnerSCX.setMinter -> NFTMinter");
-
-        burnerFlax.setMinter(address(nftMinter));
-        console.log("BurnerFlax.setMinter -> NFTMinter");
-
-        balancerPooler.setMinter(address(nftMinter));
-        console.log("BalancerPooler.setMinter -> NFTMinter");
-
-        gatherWBTC.setMinter(address(nftMinter));
-        console.log("GatherWBTC.setMinter -> NFTMinter");
-
-        // ====== PHASE 8.6: Mint V1 Test NFTs for Migration Testing ======
-        console.log("\n=== Phase 8.6: Mint V1 Test NFTs for Migration Testing ===");
-
-        // Mint V1 NFTs for dispatcher indices 1-3, 5 for migration testing.
-        // Index 4 (BalancerPooler) is skipped because its dispatch triggers the Balancer vault
-        // unlock/callback flow which doesn't work cleanly with MockBalancerVault encoding.
-
-        // Index 1: BurnerEYE — approve EYE, mint
-        eyeToken.approve(address(nftMinter), initialPrice);
-        nftMinter.mint(address(eyeToken), 1, deployer);
-        console.log("Minted V1 NFT index 1 (BurnerEYE) for deployer");
-
-        // Index 2: BurnerSCX — approve SCX, mint
-        mockSCX.approve(address(nftMinter), initialPrice);
-        nftMinter.mint(address(mockSCX), 2, deployer);
-        console.log("Minted V1 NFT index 2 (BurnerSCX) for deployer");
-
-        // Index 3: BurnerFlax — approve Flax, mint
-        mockFlax.approve(address(nftMinter), initialPrice);
-        nftMinter.mint(address(mockFlax), 3, deployer);
-        console.log("Minted V1 NFT index 3 (BurnerFlax) for deployer");
-
-        // Index 5: GatherWBTC — priced in 8-decimal WBTC
-        mockWBTC.mint(deployer, wbtcInitialPrice);
-        mockWBTC.approve(address(nftMinter), wbtcInitialPrice);
-        nftMinter.mint(address(mockWBTC), 5, deployer);
-        console.log("Minted V1 NFT index 5 (GatherWBTC) for deployer");
-
-        console.log("4 V1 test NFTs minted for migration testing (indices 1,2,3,5; index 4 skipped due to mock vault limitation)");
-
-        // ====== PHASE 8.7: SYA Integration — V2 Replaces V1 ======
-        console.log("\n=== Phase 8.7: SYA Integration - V2 Replaces V1 ===");
-
-        // Set V2 NFTMinter on StableYieldAccumulator (replaces V1)
+        // Set V2 NFTMinter on StableYieldAccumulator
         stableYieldAccumulator.setNFTMinter(address(nftMinterV2));
-        console.log("StableYieldAccumulator.setNFTMinter -> NFTMinterV2 (V2 replaces V1)");
+        console.log("StableYieldAccumulator.setNFTMinter -> NFTMinterV2");
 
         // Set StableYieldAccumulator as authorized burner on V2 NFTMinter
         nftMinterV2.setAuthorizedBurner(address(stableYieldAccumulator), true);
         console.log("NFTMinterV2.setAuthorizedBurner(StableYieldAccumulator, true)");
-
-        // Revoke SYA's burner authorization on V1 NFTMinter
-        nftMinter.setAuthorizedBurner(address(stableYieldAccumulator), false);
-        console.log("NFTMinter.setAuthorizedBurner(StableYieldAccumulator, false) - V1 deregistered");
 
         // ====== PHASE 9: Seed YieldStrategyDola with PhUSD Minting ======
         console.log("\n=== Phase 9: Seed YieldStrategyDola with PhUSD Minting ===");
@@ -1150,13 +980,7 @@ contract DeployMocks is Script {
         _markConfigured("Pauser", 0);
         _markConfigured("MockBalancerPool", 0);
         _markConfigured("MockBalancerVault", 0);
-        _markConfigured("NFTMinter", 0);
         _markConfigured("BurnRecorder", 0);
-        _markConfigured("BurnerEYE", 0);
-        _markConfigured("BurnerSCX", 0);
-        _markConfigured("BurnerFlax", 0);
-        _markConfigured("BalancerPooler", 0);
-        _markConfigured("GatherWBTC", 0);
         _markConfigured("MockBalancerRouter", 0);
         _markConfigured("NFTMinterV2", 0);
         _markConfigured("BurnerEYEV2", 0);
@@ -1166,7 +990,6 @@ contract DeployMocks is Script {
         _markConfigured("MockWaUSDC", 0);
         _markConfigured("MockSkyPSM", 0);
         _markConfigured("GatherWBTCV2", 0);
-        _markConfigured("NFTMigrator", 0);
         _markConfigured("BalancerPoolerMintDebtHook", 0);
         _markConfigured("NFTStaker", 0);
         _markConfigured("BatchNFTMinter", 0);

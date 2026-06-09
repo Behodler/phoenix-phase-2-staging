@@ -2,8 +2,8 @@
 // Updated 2026-03-20 for NFT infrastructure redeployment (WBTC address fix)
 // Chain ID: 1 (mainnet)
 // Updated 2026-03-20: NFT addresses patched from progress.1.json after broadcast
-// Updated 2026-04-16: Restructured for NFT V2 (nftsV1/nftsV2 sub-objects)
 // Updated 2026-04-20: NFT V2 addresses patched from broadcast
+// Updated 2026-06-09: Flattened NFT V2 addresses to top-level; removed V1 and NFTMigrator (story 059)
 // Updated 2026-05-02: BalancerPool repointed to phUSD/sUSDS 50/50 pool
 // Updated 2026-05-01: NFT staking addresses patched from broadcast
 // Updated 2026-05-13: nudge-pooler addresses patched from broadcast
@@ -66,27 +66,14 @@ export const mainnetAddresses: ContractAddresses = {
 
   // NFT infrastructure — common
   BurnRecorder: "0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F",
-  NFTMigrator: "0x22c0fc1aae66873abd029448eaf15a2fd7eed140",
 
-  // NFT V1
-  nftsV1: {
-    NFTMinter: "0xd936461f1C15eA9f34Ca1F20ecD54A0819068811",
-    BurnerEYE: "0xA592e074f990c87E10b3Bba1DACFB9187899575b",
-    BurnerSCX: "0xbe2fbBb49b26C20E3aEE3b0608cB5116aeD5d297",
-    BurnerFlax: "0xD3B630cBA76AEA5Aadb4cB71732227E073C8338C",
-    BalancerPooler: "0xC2d1a82C66Fd535ae218b59F77a1B716919a46C3",
-    GatherWBTC: "0xb304e2E63820D4f7B41219D2C39123E20444D0C9",
-  },
-
-  // NFT V2 — not yet deployed
-  nftsV2: {
-    NFTMinter: "0x39af088408e815844c567037c157b31d48d2e10f",
-    BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
-    BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
-    BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
-    BalancerPooler: "0x7f74388bc970de5e2822036a1ad06fccd156786b",
-    GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
-  },
+  // NFT V2 contracts (flattened)
+  NFTMinter: "0x39af088408e815844c567037c157b31d48d2e10f",
+  BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
+  BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
+  BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
+  BalancerPooler: "0x26f89f4b46eb164303985795ee20b15bb1edb38a",
+  GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
 
   // View contracts
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",

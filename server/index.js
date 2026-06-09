@@ -112,25 +112,11 @@ app.get('/contracts', (req, res) => {
         });
     }
 
-    // Return structured object matching ContractAddresses interface
+    // Return structured object matching ContractAddresses interface (flat — no nested nfts)
     const addresses = {};
     if (extracted.contracts) {
         for (const [name, data] of Object.entries(extracted.contracts)) {
             addresses[name] = data.address;
-        }
-    }
-
-    // Add nested nftsV1/nftsV2
-    if (extracted.nftsV1) {
-        addresses.nftsV1 = {};
-        for (const [name, data] of Object.entries(extracted.nftsV1)) {
-            addresses.nftsV1[name] = data.address;
-        }
-    }
-    if (extracted.nftsV2) {
-        addresses.nftsV2 = {};
-        for (const [name, data] of Object.entries(extracted.nftsV2)) {
-            addresses.nftsV2[name] = data.address;
         }
     }
 
