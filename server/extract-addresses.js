@@ -23,11 +23,17 @@ const CHAIN_NAME_MAP = {
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 /**
- * NFT contract base names that should be nested under nftsV1/nftsV2.
- * Names without "V2" suffix go to nftsV1; names with "V2" suffix get stripped and go to nftsV2.
- * BurnRecorder, NFTMigrator, and BalancerRouter stay flat.
+ * NFT contract base names (V2 only). Contracts with a "V2" suffix matching these names
+ * are written to flat `contracts` under the stripped base name. Bare-name (V1) contracts
+ * and NFTMigrator are dropped entirely.
  */
 const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "BalancerPooler", "GatherWBTC"];
+
+/**
+ * Contracts to drop from extraction entirely (V1 NFTs are handled via NFT_BASE_NAMES;
+ * NFTMigrator is explicitly dropped here as a belt-and-suspenders guard).
+ */
+const DROPPED_CONTRACT_NAMES = ["NFTMigrator"];
 
 /**
  * Extract contract addresses from progress file and generate deployment JSON
@@ -55,9 +61,7 @@ function extractAddresses(chainId = 31337) {
         networkName: progressData.networkName,
         deploymentStatus: progressData.deploymentStatus,
         extractedAt: new Date().toISOString(),
-        contracts: {},
-        nftsV1: {},
-        nftsV2: {}
+        contracts: {}
     };
 
     // Track filtered entries for logging
@@ -75,6 +79,18 @@ function extractAddresses(chainId = 31337) {
         // Strip "Mock" prefix for UI compatibility (e.g., MockPhUSD -> PhUSD, MockUSDS -> USDS)
         const displayName = name.startsWith('Mock') ? name.slice(4) : name;
 
+        // Drop explicitly excluded contracts (NFTMigrator and bare V1 NFT names)
+        if (DROPPED_CONTRACT_NAMES.includes(displayName)) {
+            console.log(`  Dropping excluded contract: ${displayName}`);
+            continue;
+        }
+
+        // Drop bare-name V1 NFT contracts (e.g. "NFTMinter" without V2 suffix)
+        if (NFT_BASE_NAMES.includes(displayName)) {
+            console.log(`  Dropping V1 NFT contract: ${displayName}`);
+            continue;
+        }
+
         const contractData = {
             address: data.address,
             deployed: data.deployed,
@@ -84,15 +100,10 @@ function extractAddresses(chainId = 31337) {
         };
 
         // Check if this is a V2 NFT contract (e.g., "NFTMinterV2" -> base "NFTMinter")
+        // Route to flat contracts under the stripped base name.
         const v2Match = displayName.endsWith('V2') ? displayName.slice(0, -2) : null;
         if (v2Match && NFT_BASE_NAMES.includes(v2Match)) {
-            extracted.nftsV2[v2Match] = contractData;
-            continue;
-        }
-
-        // Check if this is a V1 NFT contract (e.g., "NFTMinter" without V2 suffix)
-        if (NFT_BASE_NAMES.includes(displayName)) {
-            extracted.nftsV1[displayName] = contractData;
+            extracted.contracts[v2Match] = contractData;
             continue;
         }
 
@@ -115,30 +126,12 @@ function extractAddresses(chainId = 31337) {
     }
 
     const flatCount = Object.keys(extracted.contracts).length;
-    const v1Count = Object.keys(extracted.nftsV1).length;
-    const v2Count = Object.keys(extracted.nftsV2).length;
-    console.log(`\nExtracted ${flatCount} flat contracts, ${v1Count} nftsV1, ${v2Count} nftsV2:`);
+    console.log(`\nExtracted ${flatCount} flat contracts:`);
 
     console.log('\n  Flat contracts:');
     for (const [displayName, data] of Object.entries(extracted.contracts)) {
         const status = data.configured ? '✓ configured' : '⚠ not configured';
         console.log(`  - ${displayName.padEnd(25)} ${data.address} (${status})`);
-    }
-
-    if (v1Count > 0) {
-        console.log('\n  nftsV1:');
-        for (const [displayName, data] of Object.entries(extracted.nftsV1)) {
-            const status = data.configured ? '✓ configured' : '⚠ not configured';
-            console.log(`  - ${displayName.padEnd(25)} ${data.address} (${status})`);
-        }
-    }
-
-    if (v2Count > 0) {
-        console.log('\n  nftsV2:');
-        for (const [displayName, data] of Object.entries(extracted.nftsV2)) {
-            const status = data.configured ? '✓ configured' : '⚠ not configured';
-            console.log(`  - ${displayName.padEnd(25)} ${data.address} (${status})`);
-        }
     }
 
     console.log('==============================================\n');

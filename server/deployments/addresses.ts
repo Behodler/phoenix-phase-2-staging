@@ -1,15 +1,6 @@
-// Generated interface from local.json on 2026-06-02T21:05:18.780Z
+// Generated interface from local.json on 2026-06-03T09:40:11.901Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
-
-export interface YieldNFTAddresses {
-  NFTMinter: string;
-  BurnerEYE: string;
-  BurnerSCX: string;
-  BurnerFlax: string;
-  BalancerPooler: string;
-  GatherWBTC: string;
-}
 
 export interface ContractAddresses {
   PhUSD: string;
@@ -37,7 +28,6 @@ export interface ContractAddresses {
   BurnRecorder: string;
   BalancerRouter: string;
   WaUSDC: string;
-  NFTMigrator: string;
   BalancerPoolerMintDebtHook: string;
   NFTStaker: string;
   BatchNFTMinter: string;
@@ -46,6 +36,10 @@ export interface ContractAddresses {
   ViewRouter: string;
   DepositPageView: string;
   MintPageView: string;
-  nftsV1: YieldNFTAddresses;
-  nftsV2: YieldNFTAddresses;
+  NFTMinter: string;
+  BurnerEYE: string;
+  BurnerSCX: string;
+  BurnerFlax: string;
+  BalancerPooler: string;
+  GatherWBTC: string;
 }
