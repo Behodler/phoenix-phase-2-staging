@@ -294,14 +294,17 @@ contract DeployMocks is Script {
         console.log("\n=== Phase 2.7: Deploying USDe AMM-Market Infrastructure ===");
 
         // Configuration Safety (CLAUDE.md): both values are deliberately chosen, not defaults.
-        //   - usdeSlippageToleranceBps mirrors mainnet's ERC4626MarketYieldStrategy (120 bps,
-        //     story 043 principal haircut). Source: script/interactions/governance/
-        //     DeployUSDeMarketYieldStrategy.s.sol (SLIPPAGE_BPS = 120).
+        //   - usdeSlippageToleranceBps = 30: target go-live tolerance chosen 2026-06-10 from
+        //     live Curve route measurement (USDe->crvUSD->sUSDe at ~6k USDe magnitude):
+        //     exit-leg loss observed 5-32 bps over 8 months of block samples, typically
+        //     ~10 bps. Supersedes the old 120 bps mainnet-parity value (story 043); the
+        //     owner can retune the live strategy any time via setSlippageTolerance.
         //   - usdeAmmSlippageBps is the simulated per-leg AMM loss. It MUST stay <= the
         //     tolerance or deposits revert on the strategy's minOut check (and the strategy
-        //     would otherwise be left underwater). 50 bps gives visible-but-safe slippage.
-        uint256 usdeSlippageToleranceBps = 120; // 1.2% principal haircut (matches mainnet)
-        uint256 usdeAmmSlippageBps = 50;         // 0.5% simulated AMM slippage per swap leg
+        //     would otherwise be left underwater). 10 bps mirrors the typical observed
+        //     exit slippage on the live route.
+        uint256 usdeSlippageToleranceBps = 30; // 0.3% principal haircut (target go-live value)
+        uint256 usdeAmmSlippageBps = 10;        // 0.1% simulated AMM slippage per swap leg
         require(usdeAmmSlippageBps <= usdeSlippageToleranceBps, "AMM slippage exceeds tolerance (would brick USDe deposits)");
 
         // Deploy the mock Curve-style AMM adapter (USDe<->sUSDe). Routes through MockSUSDe so

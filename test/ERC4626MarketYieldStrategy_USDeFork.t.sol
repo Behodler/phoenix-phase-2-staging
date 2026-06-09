@@ -199,10 +199,16 @@ contract ERC4626MarketYieldStrategy_USDeFork is Test {
     function testHappyPathDeposit() public {
         uint256 depositAmount = 100_000e18;
 
-        vm.prank(client);
-        strategy.deposit(USDE, depositAmount, client);
+        // Conservative principal crediting (vault story 043): the market strategy books
+        // the worst-case fair value `amount * (10_000 - SLIPPAGE_BPS) / 10_000`, NOT the
+        // nominal amount; the gap between worst-case and execution surfaces as protocol yield.
+        uint256 expectedPrincipal = depositAmount * (10_000 - SLIPPAGE_BPS) / 10_000;
 
-        assertEq(strategy.principalOf(USDE, client), depositAmount, "principal should equal deposit");
+        vm.prank(client);
+        uint256 credited = strategy.deposit(USDE, depositAmount, client);
+
+        assertEq(credited, expectedPrincipal, "deposit should return the haircut principal");
+        assertEq(strategy.principalOf(USDE, client), expectedPrincipal, "principal should equal haircut deposit");
         assertGt(IERC20(SUSDE).balanceOf(address(strategy)), 0, "strategy should hold sUSDe shares");
 
         // totalBalanceOf reads convertToAssets on sUSDe: starts roughly equal
@@ -221,24 +227,32 @@ contract ERC4626MarketYieldStrategy_USDeFork is Test {
         uint256 depositAmount = 100_000e18;
 
         vm.prank(client);
-        strategy.deposit(USDE, depositAmount, client);
+        uint256 credited = strategy.deposit(USDE, depositAmount, client);
 
         uint256 clientUsdeBefore = IERC20(USDE).balanceOf(client);
 
+        // Request the nominal deposit; the strategy caps the withdrawal to the
+        // credited (haircut) principal — that cap is the client's full position.
         vm.prank(client);
         strategy.withdraw(USDE, depositAmount, client);
 
         assertEq(strategy.principalOf(USDE, client), 0, "principal should be zero after full withdraw");
 
         uint256 usdeReceived = IERC20(USDE).balanceOf(client) - clientUsdeBefore;
-        // Round-trip across two Curve pools incurs double spread; allow 2 * slippage.
+        // Round-trip across two Curve pools incurs double spread; allow 2 * slippage
+        // around the credited principal (the capped payout), not the nominal deposit.
         uint256 tolerance = (depositAmount * SLIPPAGE_BPS * 2) / 10_000;
-        assertApproxEqAbs(usdeReceived, depositAmount, tolerance, "should receive approximately deposit back");
+        assertApproxEqAbs(usdeReceived, credited, tolerance, "should receive approximately credited principal back");
 
-        // Strategy should hold only dust sUSDe after a full round-trip.
-        // Rounding in convertToShares / convertToAssets can leave up to a few wei.
-        assertLt(
-            IERC20(SUSDE).balanceOf(address(strategy)), 1e12, "strategy sUSDe balance should be dust after round-trip"
+        // Conservative crediting means the haircut gap plus execution surplus stays
+        // behind as protocol-owned sUSDe — the strategy is NOT empty after a round-trip.
+        // Bound it: nonzero, and at most haircut + round-trip spread.
+        uint256 leftoverValue = IERC4626(SUSDE).convertToAssets(IERC20(SUSDE).balanceOf(address(strategy)));
+        assertGt(leftoverValue, 0, "haircut surplus should remain as protocol-owned value");
+        assertLe(
+            leftoverValue,
+            (depositAmount * SLIPPAGE_BPS * 2) / 10_000,
+            "leftover surplus should be bounded by haircut + round-trip spread"
         );
     }
 
