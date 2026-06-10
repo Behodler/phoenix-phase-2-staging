@@ -31,7 +31,7 @@ export const mainnetAddresses: ContractAddresses = {
   PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
   // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol
   PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
-  StableYieldAccumulator: "0x3C690EC3B2524104dE269bf0F9baa7f045eF8270",
+  StableYieldAccumulator: "0x3bbe928340c61a65cb6c4a87b3fb59b6f3f7606a",
   DepositView: "0x0725722b50287f2285b873f534d5848e76c15251",
   // Story 055 migration (executed 2026-06-10: MigrateStableStakerMainnet run txs 1-20 +
   // ResumeStableStakerMigration run, all receipts 0x1). DOLA/USDC are plain

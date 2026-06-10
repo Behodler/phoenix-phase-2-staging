@@ -1,0 +1,10 @@
+{
+  "chainId": 1,
+  "networkName": "mainnet",
+  "newSYA": "0x3C690EC3B2524104dE269bf0F9baa7f045eF8270",
+  "oldSYA": "0x3bBE928340c61a65Cb6C4a87B3fb59B6f3F7606a",
+  "nudgeSplit": 20,
+  "setAsideBufferPercent": 25,
+  "discountRateBps": 3000,
+  "timestamp": 1781087795
+}
