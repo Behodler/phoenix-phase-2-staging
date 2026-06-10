@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-06-03T09:40:11.901Z
+// Generated interface from local.json on 2026-06-09T23:46:13.931Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -28,6 +28,12 @@ export interface ContractAddresses {
   BalancerVault: string;
   BurnRecorder: string;
   BalancerRouter: string;
+  NFTMinter: string;
+  BurnerEYE: string;
+  BurnerSCX: string;
+  BurnerFlax: string;
+  BalancerPooler: string;
+  GatherWBTC: string;
   WaUSDC: string;
   SkyPSM: string;
   BalancerPoolerMintDebtHook: string;
@@ -38,10 +44,4 @@ export interface ContractAddresses {
   ViewRouter: string;
   DepositPageView: string;
   MintPageView: string;
-  NFTMinter: string;
-  BurnerEYE: string;
-  BurnerSCX: string;
-  BurnerFlax: string;
-  BalancerPooler: string;
-  GatherWBTC: string;
 }

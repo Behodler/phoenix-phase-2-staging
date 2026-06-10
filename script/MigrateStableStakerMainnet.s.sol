@@ -4,7 +4,10 @@ pragma solidity ^0.8.20;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 
+import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
 import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
+import {ERC4626MarketYieldStrategy} from "@vault/concreteYieldStrategies/ERC4626MarketYieldStrategy.sol";
+import {CurveAMMAdapter} from "@vault/AMMAdapters/CurveAMMAdapter.sol";
 import {StableStaker} from "stable-staker/StableStaker.sol";
 // StableStaker's constructor takes the flax-token-v2 IFlax; alias to avoid clashing with any
 // transitively-scoped IFlax (mirrors DeployMocks.s.sol).
@@ -22,8 +25,15 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *           PHASE A — drain: re-call totalWithdrawal(token, minter) on each old strategy so it
  *                     falls into the Executable branch and redeems the minter's principal to the
  *                     deployer EOA (owner). Capture the ACTUAL received amount via balance delta.
- *           PHASE B — deploy 3 NEW ERC4626YieldStrategy(deployer, token, vault) reusing the SAME
- *                     external vault + underlying each old strategy used (read on-chain in B-asserts).
+ *           PHASE B — deploy 3 NEW strategies reusing the SAME external vault + underlying each old
+ *                     strategy used (read on-chain in B-asserts). DOLA/USDC: plain
+ *                     ERC4626YieldStrategy. USDe: ERC4626MarketYieldStrategy + fresh CurveAMMAdapter
+ *                     (USDe<->sUSDe via crvUSD, routes from lib/vault/AMMRoutes.json) at 30 bps
+ *                     slippage tolerance — sUSDe redeem is BLOCKED by Ethena's cooldown
+ *                     (cooldownDuration == 86400 on-chain, 2026-06-10), so a plain strategy would
+ *                     brick every USDe withdrawal path; the live USDe strategy is already
+ *                     market-based (asserted in B). Each new strategy is then wired to the global
+ *                     Pauser (setPauser + Pauser.register).
  *           PHASE C — minter cutover + re-deposit: setClient(minter) -> registerStablecoin(token,
  *                     newYS, PRESERVED rate, decimals) -> minter.approveYS(token, newYS) -> deployer
  *                     approves newYS for received -> depositAsOwner(token, received, minter).
@@ -44,7 +54,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *   - deployer == owner() of each old strategy, the minter, and the SYA
  *   - each old strategy underlyingToken()/vault() == the expected (story-confirmed, on-chain-verified) value
  *   - minter exchangeRate preserved == 1e18 (read live; assert == expected) and decimals match
- *   - daily rates USDe=5e18, USDC=4e18, DOLA=1e18 all > 0; buffer == 10 (<=100)
+ *   - daily rates USDe=10e18, USDC=7e18, DOLA=5e18 all > 0; buffer == 10 (<=100)
+ *   - USDe market strategy slippage tolerance set + asserted == 30 bps (user-confirmed 2026-06-10,
+ *     matching the live-route measurement recorded in DeployMocks Phase 2.7)
  *   - phUSD / pauser / minter / SYA != address(0)
  *
  * Re-deposit uses the ACTUAL received amount (deployer balance delta across the drain), NOT the
@@ -87,6 +99,11 @@ interface ILiveYieldStrategy {
     function totalWithdrawal(address token, address client) external;
 }
 
+/// @notice Probe for the LIVE USDe strategy's market-ness (plain strategies have no ammAdapter()).
+interface IOldMarketYS {
+    function ammAdapter() external view returns (address);
+}
+
 /// @notice Minimal interface for the LIVE phUSD minter (PhusdStableMinter).
 /// @dev The DEPLOYED struct has only 4 fields (yieldStrategy, exchangeRate, decimals, enabled) — it
 ///      predates the maxMintPerDay/mintedToday/lastMintTimestamp additions in current source. Reading
@@ -114,6 +131,7 @@ interface ILiveSYA {
 /// @notice Minimal interface for the LIVE Pauser.
 interface ILivePauser {
     function register(address contractToRegister) external;
+    function owner() external view returns (address);
 }
 
 /// @notice Minimal interface for the LIVE phUSD (FlaxToken).
@@ -164,10 +182,25 @@ contract MigrateStableStakerMainnet is Script {
     uint8 public constant DECIMALS_USDC = 6;
     uint8 public constant DECIMALS_USDE = 18;
 
-    // StableStaker daily phUSD emission budgets (phUSD wei/day, 18-dec; user-specified to balance TVL).
-    uint256 public constant DAILY_USDE = 5e18;
-    uint256 public constant DAILY_USDC = 4e18;
-    uint256 public constant DAILY_DOLA = 1e18;
+    // StableStaker daily phUSD emission budgets (phUSD wei/day, 18-dec; user-specified 2026-06-10:
+    // DOLA 5 / USDC 7 / USDe 10 phUSD per day).
+    uint256 public constant DAILY_USDE = 10e18;
+    uint256 public constant DAILY_USDC = 7e18;
+    uint256 public constant DAILY_DOLA = 5e18;
+
+    // ---- USDe market-strategy config (USDe cannot use the plain ERC4626 path: sUSDe redeem is
+    // blocked while Ethena's cooldown is on — cooldownDuration read 86400 on-chain 2026-06-10) ----
+    // Curve Router NG + route hops, transcribed from lib/vault/AMMRoutes.json (Curve.RouterNG),
+    // verified against the adapter's setRoute endpoint checks at run time.
+    address public constant CURVE_ROUTER_NG = 0x16C6521Dff6baB339122a0FE25a9116693265353;
+    address public constant CRVUSD = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E;
+    address public constant POOL_USDE_CRVUSD = 0xF55B0f6F2Da5ffDDb104b58a60F2862745960442;
+    address public constant POOL_CRVUSD_SUSDE = 0x57064F49Ad7123C92560882a45518374ad982e85;
+    // Slippage tolerance for the new USDe market strategy: 30 bps (0.3%), user-confirmed 2026-06-10.
+    // Matches the go-live tolerance measured on the live Curve route (DeployMocks Phase 2.7 notes);
+    // the LIVE (old) strategy runs at 120 bps — this is a deliberate tightening, owner-retunable
+    // later via setSlippageTolerance.
+    uint256 public constant USDE_SLIPPAGE_BPS = 30;
 
     // Set-aside buffer for StableStaker on each strategy: integer PERCENT (require <= 100), NOT bps/wad.
     uint256 public constant SETASIDE_BUFFER = 10;
@@ -193,10 +226,11 @@ contract MigrateStableStakerMainnet is Script {
 
     bool public isPreview;
 
-    // New strategies (deployed in B).
+    // New strategies (deployed in B). USDe is market-based (AMM swap instead of vault redeem).
     ERC4626YieldStrategy public newYsDola;
     ERC4626YieldStrategy public newYsUsdc;
-    ERC4626YieldStrategy public newYsUsde;
+    ERC4626MarketYieldStrategy public newYsUsde;
+    CurveAMMAdapter public usdeAmmAdapter;
 
     // Actual received amounts captured in A (deployer balance deltas).
     uint256 public receivedDola;
@@ -262,6 +296,8 @@ contract MigrateStableStakerMainnet is Script {
         require(ILiveYieldStrategy(OLD_YS_USDE).owner() == OWNER_ADDRESS, "preflight: USDe old strategy owner != deployer");
         require(ILiveMinter(PHUSD_STABLE_MINTER).owner() == OWNER_ADDRESS, "preflight: minter owner != deployer");
         require(ILiveSYA(SYA).owner() == OWNER_ADDRESS, "preflight: SYA owner != deployer");
+        // Pauser.register is onlyOwner on the Pauser itself — needed for the new strategies + staker.
+        require(ILivePauser(PAUSER).owner() == OWNER_ADDRESS, "preflight: Pauser owner != deployer");
 
         // Non-zero critical addresses.
         require(PHUSD != address(0), "preflight: phUSD zero");
@@ -269,10 +305,11 @@ contract MigrateStableStakerMainnet is Script {
         require(PHUSD_STABLE_MINTER != address(0), "preflight: minter zero");
         require(SYA != address(0), "preflight: SYA zero");
 
-        // Rates / buffer.
+        // Rates / buffer / slippage.
         require(DAILY_USDE > 0 && DAILY_USDC > 0 && DAILY_DOLA > 0, "preflight: a daily rate is 0");
-        require(DAILY_USDE == 5e18 && DAILY_USDC == 4e18 && DAILY_DOLA == 1e18, "preflight: daily rate mismatch");
+        require(DAILY_USDE == 10e18 && DAILY_USDC == 7e18 && DAILY_DOLA == 5e18, "preflight: daily rate mismatch");
         require(SETASIDE_BUFFER == 10 && SETASIDE_BUFFER <= 100, "preflight: buffer != 10");
+        require(USDE_SLIPPAGE_BPS > 0 && USDE_SLIPPAGE_BPS <= 100, "preflight: USDe slippage outside (0,100] bps");
     }
 
     // ==========================================
@@ -334,11 +371,24 @@ contract MigrateStableStakerMainnet is Script {
     // ==========================================
 
     function _phaseB_deploy() internal {
-        console.log("=== PHASE B: deploy 3 new ERC4626YieldStrategy ===");
+        console.log("=== PHASE B: deploy 3 new strategies (DOLA/USDC plain, USDe market) ===");
         newYsDola = _deployOne("DOLA", OLD_YS_DOLA, DOLA, VAULT_DOLA);
         newYsUsdc = _deployOne("USDC", OLD_YS_USDC, USDC, VAULT_USDC);
-        newYsUsde = _deployOne("USDe", OLD_YS_USDE, USDe, VAULT_USDE);
+        newYsUsde = _deployUsdeMarket();
+
+        // Global-pauser wiring for each new strategy (AYieldStrategy implements IPausable).
+        // setPauser BEFORE register — Pauser.register validates pauser() == the Pauser contract.
+        _wirePauser("DOLA", newYsDola);
+        _wirePauser("USDC", newYsUsdc);
+        _wirePauser("USDe", newYsUsde);
         console.log("");
+    }
+
+    function _wirePauser(string memory label, AYieldStrategy newYs) internal {
+        newYs.setPauser(PAUSER);
+        ILivePauser(PAUSER).register(address(newYs));
+        require(newYs.pauser() == PAUSER, "Phase B: strategy pauser not set");
+        console.log("  Pauser wired + registered for", label, address(newYs));
     }
 
     /// @dev Reuse the SAME external vault + underlying the live strategy uses — read off the OLD strategy
@@ -359,6 +409,63 @@ contract MigrateStableStakerMainnet is Script {
         return newYs;
     }
 
+    /// @dev USDe MUST stay market-based: sUSDe redeem/withdraw revert while Ethena's cooldown is on
+    ///      (cooldownDuration == 86400, read on-chain 2026-06-10), so a plain ERC4626YieldStrategy
+    ///      would brick every USDe withdrawal path (skimSurplus, totalWithdrawal, staker exits). The
+    ///      LIVE strategy is already an ERC4626MarketYieldStrategy (adapter 0xCd6e87bD…, 120 bps) —
+    ///      asserted below. A FRESH CurveAMMAdapter is deployed (rather than reusing the live one) so
+    ///      the adapter matches the current vault-lib IAMMAdapter and its routes are set from the
+    ///      canonical AMMRoutes.json payloads under this script's control.
+    function _deployUsdeMarket() internal returns (ERC4626MarketYieldStrategy newYs) {
+        ILiveYieldStrategy old = ILiveYieldStrategy(OLD_YS_USDE);
+        require(old.underlyingToken() == USDe, "Phase B: old USDe underlyingToken mismatch");
+        require(old.vault() == VAULT_USDE, "Phase B: old USDe vault mismatch");
+        require(IOldMarketYS(OLD_YS_USDE).ammAdapter() != address(0), "Phase B: old USDe YS not market-based");
+
+        usdeAmmAdapter = new CurveAMMAdapter(OWNER_ADDRESS, CURVE_ROUTER_NG);
+        _setUsdeRoutes(usdeAmmAdapter);
+
+        newYs = new ERC4626MarketYieldStrategy(OWNER_ADDRESS, USDe, VAULT_USDE, address(usdeAmmAdapter));
+        newYs.setSlippageTolerance(USDE_SLIPPAGE_BPS);
+        require(newYs.slippageToleranceBps() == USDE_SLIPPAGE_BPS, "Phase B: USDe slippage tolerance unset");
+
+        console.log("--- deployed new USDe (market) ---");
+        console.log("  newYS:", address(newYs));
+        console.log("  ammAdapter:", address(usdeAmmAdapter));
+        console.log("  vault:", VAULT_USDE);
+        console.log("  slippage tolerance (bps):", USDE_SLIPPAGE_BPS);
+        return newYs;
+    }
+
+    /// @dev Route payloads transcribed verbatim from lib/vault/AMMRoutes.json (Curve.RouterNG):
+    ///      USDe <-> sUSDe via crvUSD, two stable-ng hops each way. setRoute validates the path
+    ///      endpoints (path[0] == tokenIn, last non-zero == tokenOut) on-chain.
+    function _setUsdeRoutes(CurveAMMAdapter adapter) internal {
+        address[5] memory noBasePools; // all zero — no meta-swaps on this route
+
+        // USDe -> sUSDe (deposit leg): USDe -[0xF55B…0442]-> crvUSD -[0x5706…2e85]-> sUSDe
+        address[11] memory pathIn = [
+            USDe, POOL_USDE_CRVUSD, CRVUSD, POOL_CRVUSD_SUSDE, VAULT_USDE,
+            address(0), address(0), address(0), address(0), address(0), address(0)
+        ];
+        uint256[5][5] memory paramsIn;
+        paramsIn[0] = [uint256(0), 1, 1, 10, 2];
+        paramsIn[1] = [uint256(0), 1, 1, 10, 2];
+        adapter.setRoute(USDe, VAULT_USDE, pathIn, paramsIn, noBasePools);
+
+        // sUSDe -> USDe (withdraw leg): the reverse hops with flipped (i, j) coin indices.
+        address[11] memory pathOut = [
+            VAULT_USDE, POOL_CRVUSD_SUSDE, CRVUSD, POOL_USDE_CRVUSD, USDe,
+            address(0), address(0), address(0), address(0), address(0), address(0)
+        ];
+        uint256[5][5] memory paramsOut;
+        paramsOut[0] = [uint256(1), 0, 1, 10, 2];
+        paramsOut[1] = [uint256(1), 0, 1, 10, 2];
+        adapter.setRoute(VAULT_USDE, USDe, pathOut, paramsOut, noBasePools);
+
+        console.log("  CurveAMMAdapter routes set (USDe<->sUSDe via crvUSD)");
+    }
+
     // ==========================================
     //   PHASE C — minter cutover + re-deposit
     // ==========================================
@@ -374,7 +481,7 @@ contract MigrateStableStakerMainnet is Script {
     function _cutoverMinter(
         string memory label,
         address token,
-        ERC4626YieldStrategy newYs,
+        AYieldStrategy newYs,
         uint256 received,
         uint8 expectedDecimals
     ) internal {
@@ -396,7 +503,10 @@ contract MigrateStableStakerMainnet is Script {
         minter.approveYS(token, address(newYs));
 
         // 4. re-deposit the ACTUAL drained principal: deployer approves the new strategy, then
-        //    depositAsOwner credits the minter as client 1:1 (no phUSD minted).
+        //    depositAsOwner credits the minter as client (no phUSD minted). NOTE: for USDe the
+        //    market strategy credits the slippage-haircut principal (received * (1 - 30bps)) and
+        //    swaps in via Curve — the principalOf log below will show the haircut figure. This
+        //    mirrors how the LIVE USDe market strategy already books principal (at 120 bps).
         IERC20(token).approve(address(newYs), received);
         newYs.depositAsOwner(token, received, PHUSD_STABLE_MINTER);
 
@@ -427,7 +537,7 @@ contract MigrateStableStakerMainnet is Script {
         console.log("");
     }
 
-    function _syaAdd(ILiveSYA sya, string memory label, ERC4626YieldStrategy newYs, address token) internal {
+    function _syaAdd(ILiveSYA sya, string memory label, AYieldStrategy newYs, address token) internal {
         sya.addYieldStrategy(address(newYs), token);
         newYs.setWithdrawer(SYA, true); // authorize SYA to skimSurplus on the new strategy
         console.log("  SYA + new", label, address(newYs));
@@ -473,14 +583,14 @@ contract MigrateStableStakerMainnet is Script {
 
         // 4. per-token wiring loop. addToken -> setClient ON strategy -> setYieldStrategy ->
         //    setSetAsideBuffer(ss, 10) ON strategy -> phUSDPerDay. Mirrors DeployMocks Phase 3.7,
-        //    with the mainnet daily rates (USDe 5 / USDC 4 / DOLA 1 phUSD/day).
+        //    with the mainnet daily rates (USDe 10 / USDC 7 / DOLA 5 phUSD/day, user 2026-06-10).
         _wirePool("DOLA", DOLA, newYsDola, DAILY_DOLA);
         _wirePool("USDC", USDC, newYsUsdc, DAILY_USDC);
         _wirePool("USDe", USDe, newYsUsde, DAILY_USDE);
         console.log("");
     }
 
-    function _wirePool(string memory label, address token, ERC4626YieldStrategy newYs, uint256 dailyRate) internal {
+    function _wirePool(string memory label, address token, AYieldStrategy newYs, uint256 dailyRate) internal {
         stableStaker.addToken(token);
         newYs.setClient(address(stableStaker), true); // client added ON the strategy (two-sided wiring)
         stableStaker.setYieldStrategy(token, IYieldStrategy(address(newYs)));
