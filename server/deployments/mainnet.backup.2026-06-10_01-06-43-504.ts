@@ -33,15 +33,13 @@ export const mainnetAddresses: ContractAddresses = {
   PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
   StableYieldAccumulator: "0x3bbe928340c61a65cb6c4a87b3fb59b6f3f7606a",
   DepositView: "0x0725722b50287f2285b873f534d5848e76c15251",
-  // Story 055 migration (executed 2026-06-10: MigrateStableStakerMainnet run txs 1-20 +
-  // ResumeStableStakerMigration run, all receipts 0x1). DOLA/USDC are plain
-  // ERC4626YieldStrategy; USDe is ERC4626MarketYieldStrategy @ 30 bps (sUSDe cooldown
-  // blocks plain redeem). Old strategies (0xE7aE…, 0x8b4A…, 0xFc62…) drained + retired.
-  YieldStrategyDola: "0x90ce274b20A2aF4265152B369d09ce6E6Dc177F9",
-  YieldStrategyUSDe: "0xaC2e5936Eca286eC364d4D5Bcca33145fBe57f95",
-  YieldStrategyUSDC: "0x90af002Ee537Ad5C2c9817Ebd4EF22B2e8952470",
-  // USDe<->sUSDe CurveAMMAdapter (Router NG, via crvUSD) backing YieldStrategyUSDe.
-  USDeAMMAdapter: "0x2D024e0d03Fb6Ead4F8E7Ba1EBECF6db0E755D6f",
+  YieldStrategyDola: "0xE7aEC21BF6420FF483107adCB9360C4b31d69D78",
+  YieldStrategyUSDe: "0xFc629bC5F6339F77635f4F656FBb114A31F7bCB3",
+  YieldStrategyUSDC: "0x8b4A75290A1C4935eC1dfd990374AC4BD4D33952",
+  // USDe<->sUSDe market AMM adapter — interface key (declared by ContractAddresses
+  // via the local MockMarketAMMAdapter). Not yet deployed to mainnet; placeholder
+  // so mainnet-addresses.ts satisfies the interface (mirrors StableStaker below).
+  USDeAMMAdapter: "0x0000000000000000000000000000000000000000",
 
   // External protocol contracts
   // Sky USDS PSM wrapper (USDS<->USDC). Real mainnet address — NOT the local mock (0xc351…1181).
@@ -89,9 +87,8 @@ export const mainnetAddresses: ContractAddresses = {
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
   BatchNFTMinter: "0x6e9886AfDF07DD67dc70b8335E4e9DF14B445071",
-  // Stable Staking — deployed 2026-06-10 by ResumeStableStakerMigration (story 055).
-  // Pools: DOLA 5 / USDC 7 / USDe 10 phUSD per day, 10% set-aside buffer.
-  StableStaker: "0xbce8ABC09BaEDCabE93419bF875f6186e182079A",
+  // Stable Staking (story 051) — not yet deployed to mainnet; placeholder.
+  StableStaker: "0x0000000000000000000000000000000000000000",
 
 };
 
