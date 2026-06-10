@@ -88,7 +88,7 @@ export const mainnetAddresses: ContractAddresses = {
   BalancerPoolerMintDebtHook: "0x4a26ad83306a2f17155799fdd9449f77eb3f8bd7",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
-  BatchNFTMinter: "0x86866e01a115C17892Ed04c548F2e8638851029d",
+  BatchNFTMinter: "0x6e9886AfDF07DD67dc70b8335E4e9DF14B445071",
   // Stable Staking — deployed 2026-06-10 by ResumeStableStakerMigration (story 055).
   // Pools: DOLA 5 / USDC 7 / USDe 10 phUSD per day, 10% set-aside buffer.
   StableStaker: "0xbce8ABC09BaEDCabE93419bF875f6186e182079A",
