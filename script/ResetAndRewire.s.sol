@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
 import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
 
@@ -85,6 +86,10 @@ contract ResetAndRewire is Script {
     // ==========================================
 
     bool public isPreview;
+    // Idle base-token balances swept into the V2 strategies by setYieldStrategy (captured in Step 2,
+    // verified against strategy principalOf in the post-assert).
+    uint256 public dolaIdleSwept;
+    uint256 public usdcIdleSwept;
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "ResetAndRewire: wrong chain - expected mainnet (1)");
@@ -186,11 +191,18 @@ contract ResetAndRewire is Script {
         console.log("");
 
         // ---- Step 2: wire new V2 yield strategies ----
+        // Capture the idle base-token balance sitting on the original staker IMMEDIATELY before each
+        // setYieldStrategy call. `setYieldStrategy` synchronously sweeps this idle balance into the new
+        // strategy (StableStaker.setYieldStrategy: `strategy.deposit(token, idleBalance, this)`), so the
+        // post-assert can deterministically check the swept amount became strategy principal. This idle
+        // balance is the skim surplus parked during leg1 (plus any leg1 migration dust left behind).
         console.log("=== Step 2: setYieldStrategy (V2) ===");
+        dolaIdleSwept = IERC20(DOLA).balanceOf(ORIGINAL_STABLE_STAKER);
         IStakerOwnable(ORIGINAL_STABLE_STAKER).setYieldStrategy(DOLA, IYieldStrategy(ysDolaV2));
-        console.log("  setYieldStrategy(DOLA, ysDolaV2) done");
+        console.log("  setYieldStrategy(DOLA, ysDolaV2) done; idle swept:", dolaIdleSwept);
+        usdcIdleSwept = IERC20(USDC).balanceOf(ORIGINAL_STABLE_STAKER);
         IStakerOwnable(ORIGINAL_STABLE_STAKER).setYieldStrategy(USDC, IYieldStrategy(ysUsdcV2));
-        console.log("  setYieldStrategy(USDC, ysUsdcV2) done");
+        console.log("  setYieldStrategy(USDC, ysUsdcV2) done; idle swept:", usdcIdleSwept);
         console.log("");
 
         // ---- Step 3: wire migrator2 for the return leg ----
@@ -210,12 +222,20 @@ contract ResetAndRewire is Script {
         // ---- Post-assert (reads only, no more txs) ----
         console.log("=== Post-assert ===");
 
+        // The setYieldStrategy idle sweep is SYNCHRONOUS: it deposited `*IdleSwept` into the V2 strategy,
+        // crediting `vault.previewRedeem(sharesReceived)` as principal (fixed ERC4626YieldStrategy). So
+        // principalOf must equal the swept amount minus only ERC4626 round-trip rounding dust — never more,
+        // and never zero when a non-zero balance was swept. This deterministically proves the sweep fired
+        // and folded the skim surplus into the V2 strategy as the unattributed principal buffer. (If the
+        // skim found no surplus, *IdleSwept == 0 and principalOf == 0 — the checks still hold.)
         uint256 dolaP = IYSView(ysDolaV2).principalOf(DOLA, ORIGINAL_STABLE_STAKER);
-        // Note: principalOf can be 0 on empty pool right after setYieldStrategy before any deposits.
-        // The set-aside buffer accumulates on future staking actions. This is expected at reset time.
+        require(dolaP <= dolaIdleSwept, "Post-assert: DOLA principal > swept idle (over-credit)");
+        require(dolaIdleSwept == 0 || dolaP > 0, "Post-assert: DOLA idle swept but principal == 0 (sweep failed)");
         console.log("  ysDolaV2.principalOf(DOLA, original): ", dolaP);
 
         uint256 usdcP = IYSView(ysUsdcV2).principalOf(USDC, ORIGINAL_STABLE_STAKER);
+        require(usdcP <= usdcIdleSwept, "Post-assert: USDC principal > swept idle (over-credit)");
+        require(usdcIdleSwept == 0 || usdcP > 0, "Post-assert: USDC idle swept but principal == 0 (sweep failed)");
         console.log("  ysUsdcV2.principalOf(USDC, original): ", usdcP);
 
         (, , , uint256 dolaTotalStaked) = IStakerOwnable(ORIGINAL_STABLE_STAKER).poolInfo(DOLA);

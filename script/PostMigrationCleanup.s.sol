@@ -47,6 +47,7 @@ interface IStakerFull {
     function owner() external view returns (address);
     function stakerCount(address token) external view returns (uint256);
     function withdrawDisabled(address token) external view returns (bool);
+    function poolInfo(address token) external view returns (uint256, uint256, uint256, uint256);
 }
 
 /// @dev Minimal interface for V2 strategy view.
@@ -107,6 +108,18 @@ contract PostMigrationCleanup is Script {
         try vm.parseJsonUint(deploymentsRaw, ".usdeSkimmed") returns (uint256 v) {
             usdeSkimmed = v;
         } catch {}
+        uint256 dolaSkimmed = 0;
+        bool dolaSkimRecorded = false;
+        try vm.parseJsonUint(deploymentsRaw, ".dolaSkimmed") returns (uint256 v) {
+            dolaSkimmed = v;
+            dolaSkimRecorded = true;
+        } catch {}
+        uint256 usdcSkimmed = 0;
+        bool usdcSkimRecorded = false;
+        try vm.parseJsonUint(deploymentsRaw, ".usdcSkimmed") returns (uint256 v) {
+            usdcSkimmed = v;
+            usdcSkimRecorded = true;
+        } catch {}
 
         // Read expected staker counts from leg2.
         string memory leg2Raw = vm.readFile("script/migration-inputs/leg2-stakers.json");
@@ -152,6 +165,41 @@ contract PostMigrationCleanup is Script {
         require(usdcP > 0, "Verify 5 FAILED: ysUsdcV2.principalOf == 0");
         console.log("  4. ysDolaV2.principalOf > 0:", dolaP, "OK");
         console.log("  5. ysUsdcV2.principalOf > 0:", usdcP, "OK");
+
+        // 4b-5b. Buffer-intact check. The unattributed principal buffer is the excess of strategy-side
+        // principal over staker-side totalStaked: every user deposit credits the SAME amount to both
+        // principalOf and totalStaked, so their difference is exactly the swept skim surplus (folded in
+        // by ResetAndRewire's setYieldStrategy idle sweep) plus migration rounding dust.
+        //
+        //   buffer = principalOf(token, original) - poolInfo(token).totalStaked  ≈  <token>Skimmed
+        //
+        // Hard solvency invariant (no magic tolerance): principalOf >= totalStaked. A negative buffer
+        // would mean user credits exceed strategy principal — i.e. the strategy is insolvent w.r.t. its
+        // stakers — and must abort cleanup. When the skim amount was recorded, also gate against gross
+        // misaccounting / drainage with a generous sanity band (½×..2× skimmed); the precise "≈" match is
+        // diagnostic-only and logged, since per-user min(R,P) and ERC4626 rounding dust make it inexact.
+        (, , , uint256 dolaTotalStaked) = IStakerFull(ORIGINAL_STABLE_STAKER).poolInfo(DOLA);
+        (, , , uint256 usdcTotalStaked) = IStakerFull(ORIGINAL_STABLE_STAKER).poolInfo(USDC);
+        require(dolaP >= dolaTotalStaked, "Verify 4b FAILED: ysDolaV2 principal < totalStaked (insolvent)");
+        require(usdcP >= usdcTotalStaked, "Verify 5b FAILED: ysUsdcV2 principal < totalStaked (insolvent)");
+        uint256 dolaBufferActual = dolaP - dolaTotalStaked;
+        uint256 usdcBufferActual = usdcP - usdcTotalStaked;
+        console.log("  4b. DOLA buffer (principal - totalStaked):", dolaBufferActual, "expected ~dolaSkimmed");
+        console.log("      dolaSkimmed:", dolaSkimmed);
+        console.log("  5b. USDC buffer (principal - totalStaked):", usdcBufferActual, "expected ~usdcSkimmed");
+        console.log("      usdcSkimmed:", usdcSkimmed);
+        if (dolaSkimRecorded && dolaSkimmed > 0) {
+            require(
+                dolaBufferActual >= dolaSkimmed / 2 && dolaBufferActual <= dolaSkimmed * 2,
+                "Verify 4b FAILED: DOLA buffer not within sanity band of dolaSkimmed"
+            );
+        }
+        if (usdcSkimRecorded && usdcSkimmed > 0) {
+            require(
+                usdcBufferActual >= usdcSkimmed / 2 && usdcBufferActual <= usdcSkimmed * 2,
+                "Verify 5b FAILED: USDC buffer not within sanity band of usdcSkimmed"
+            );
+        }
 
         // 6-7. Withdrawals enabled (migration complete, not underwater).
         bool dolaWdDisabled = IStakerFull(ORIGINAL_STABLE_STAKER).withdrawDisabled(DOLA);

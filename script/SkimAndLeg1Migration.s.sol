@@ -279,6 +279,26 @@ contract SkimAndLeg1Migration is Script {
         console.log("  original staker DOLA stakerCount: 0 OK");
         console.log("  original staker USDC stakerCount: 0 OK");
 
+        // Surplus must still be parked on the original staker: the skim sent it straight there as idle
+        // balance, and leg1's batchMigrate only pays out min(R,P) user credits (≤ realized principal),
+        // so the parked surplus cannot have leaked to exiting users. ResetAndRewire's setYieldStrategy
+        // sweep later folds this idle balance into the V2 strategies as the principal buffer.
+        require(
+            IERC20(DOLA).balanceOf(ORIGINAL_STABLE_STAKER) >= dolaSkimmed,
+            "Post-assert: original DOLA balance < dolaSkimmed - surplus leaked"
+        );
+        require(
+            IERC20(USDC).balanceOf(ORIGINAL_STABLE_STAKER) >= usdcSkimmed,
+            "Post-assert: original USDC balance < usdcSkimmed - surplus leaked"
+        );
+        require(
+            IERC20(USDe).balanceOf(ORIGINAL_STABLE_STAKER) >= usdeSkimmed,
+            "Post-assert: original USDe balance < usdeSkimmed - surplus leaked"
+        );
+        console.log("  original staker DOLA balance >= dolaSkimmed OK");
+        console.log("  original staker USDC balance >= usdcSkimmed OK");
+        console.log("  original staker USDe balance >= usdeSkimmed OK");
+
         uint256 tempDolaCount = IStakerView(tempStakerAddr).stakerCount(DOLA);
         uint256 tempUsdcCount = IStakerView(tempStakerAddr).stakerCount(USDC);
         console.log("  tempStaker DOLA stakerCount:", tempDolaCount);
