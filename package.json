@@ -207,7 +207,20 @@
     "replace-sya:preview": "PREVIEW_MODE=true forge script script/ReplaceSYAMainnet.s.sol:ReplaceSYAMainnet --rpc-url $RPC_MAINNET --slow -vvv",
     "replace-sya:broadcast": "node scripts/backup-mainnet-addresses.js && forge script script/ReplaceSYAMainnet.s.sol:ReplaceSYAMainnet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-replace-sya.js",
     "//preview-sya-claim-scx": "NO_STORY — mainnet fork diagnostic (never broadcast): impersonates the deployer (holder of 1 SCX NFT, dispatcher index 2), grants unlimited USDC approval, and attempts SYA.claim(2, 0, []) — logging per-strategy getYield vs the true all-client surplus first. Against the OLD SYA (default) this proves the claim revert is the missing withdrawFrom selector, not insufficient USDC. After replace-sya, run with SYA_ADDRESS=<new SYA> to confirm the claim succeeds and sweeps minter + StableStaker yield.",
-    "preview-sya-claim-scx": "forge script script/PreviewSYAClaimSCX.s.sol:PreviewSYAClaimSCX --rpc-url $RPC_MAINNET -vvv"
+    "preview-sya-claim-scx": "forge script script/PreviewSYAClaimSCX.s.sol:PreviewSYAClaimSCX --rpc-url $RPC_MAINNET -vvv",
+    "//ys-swap-migration": "Story 060 — yield-strategy swap migration (June 12 2026): replace buggy ERC4626YieldStrategy DOLA/USDC instances on StableStaker via two-leg bounce through a temp staker",
+    "migrate:ys-swap-gather-leg1": "node scripts/gather-migration-inputs.js --leg 1",
+    "migrate:ys-swap-gather-leg2": "node scripts/gather-migration-inputs.js --leg 2",
+    "migrate:ys-swap-deploy-preview": "PREVIEW_MODE=true forge script script/DeployTempStableStakerAndMigrators.s.sol:DeployTempStableStakerAndMigrators --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:ys-swap-deploy": "forge script script/DeployTempStableStakerAndMigrators.s.sol:DeployTempStableStakerAndMigrators --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "migrate:ys-swap-leg1-preview": "PREVIEW_MODE=true forge script script/SkimAndLeg1Migration.s.sol:SkimAndLeg1Migration --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:ys-swap-leg1": "forge script script/SkimAndLeg1Migration.s.sol:SkimAndLeg1Migration --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "migrate:ys-swap-reset-preview": "PREVIEW_MODE=true forge script script/ResetAndRewire.s.sol:ResetAndRewire --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:ys-swap-reset": "node scripts/backup-mainnet-addresses.js && forge script script/ResetAndRewire.s.sol:ResetAndRewire --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-ys-swap.js",
+    "migrate:ys-swap-leg2-preview": "PREVIEW_MODE=true forge script script/Leg2Migration.s.sol:Leg2Migration --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:ys-swap-leg2": "forge script script/Leg2Migration.s.sol:Leg2Migration --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "migrate:ys-swap-cleanup-preview": "PREVIEW_MODE=true forge script script/PostMigrationCleanup.s.sol:PostMigrationCleanup --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:ys-swap-cleanup": "forge script script/PostMigrationCleanup.s.sol:PostMigrationCleanup --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
