@@ -74,7 +74,10 @@ export const mainnetAddresses: ContractAddresses = {
   BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
   BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
   BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
-  BalancerPooler: "0x26f89f4b46eb164303985795ee20b15bb1edb38a",
+  // Story 056 (2026-06-04): index-4 dispatcher cut over to the Sky-PSM BalancerPoolerV2.
+  // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
+  // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).
+  BalancerPooler: "0x7f74388bc970de5e2822036a1ad06fccd156786b",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
 
   // View contracts
