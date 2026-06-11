@@ -177,7 +177,7 @@ contract ReplaceSYAMainnet is Script {
             '  "newSYA": "', vm.toString(newSYA), '",\n',
             '  "oldSYA": "', vm.toString(OLD_SYA), '",\n',
             '  "nudgeSplit": ', vm.toString(NUDGE_SPLIT_PERCENT), ',\n',
-            '  "setAsideBufferPercent": ', vm.toString(SET_ASIDE_BUFFER_PERCENT), ',\n',
+            '  "setAsideBufferPercent": ', vm.toString(STAKER_BUFFER_PERCENT), ',\n',
             '  "discountRateBps": ', vm.toString(DISCOUNT_RATE_BPS), ',\n',
             '  "timestamp": ', vm.toString(block.timestamp), '\n',
             '}\n'
