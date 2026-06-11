@@ -4,7 +4,6 @@ node_modules
 out/
 .npmrc
 .envrc
-docs/
 
 # Story 049: per-run staker snapshot artifacts. Regenerate via
 # `npm run snapshot:phlimbo-v1` immediately before broadcasting

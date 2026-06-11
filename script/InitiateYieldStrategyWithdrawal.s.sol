@@ -81,10 +81,14 @@ contract InitiateYieldStrategyWithdrawal is Script {
     // principal-holding client on all three strategies.
     address public constant PHUSD_STABLE_MINTER = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
 
-    // Active yield strategies (the 3 to drain) — from server/deployments/mainnet-addresses.ts
-    address public constant YIELD_STRATEGY_DOLA = 0xE7aEC21BF6420FF483107adCB9360C4b31d69D78;
-    address public constant YIELD_STRATEGY_USDC = 0x8b4A75290A1C4935eC1dfd990374AC4BD4D33952;
-    address public constant YIELD_STRATEGY_USDE = 0xFc629bC5F6339F77635f4F656FBb114A31F7bCB3;
+    // Active yield strategies (the 3 to drain) — from server/deployments/mainnet-addresses.ts.
+    // Refreshed 2026-06-10 to the story-055 replacements (the prior 0xE7aE…/0x8b4A…/0xFc62…
+    // strategies were drained + retired). DOLA/USDC are plain ERC4626YieldStrategy; USDe is
+    // ERC4626MarketYieldStrategy — the phase-1 initiate path below is identical for all three
+    // (shared AYieldStrategy.totalWithdrawal); only phase-2 execution differs for USDe.
+    address public constant YIELD_STRATEGY_DOLA = 0x90ce274b20A2aF4265152B369d09ce6E6Dc177F9;
+    address public constant YIELD_STRATEGY_USDC = 0x90af002Ee537Ad5C2c9817Ebd4EF22B2e8952470;
+    address public constant YIELD_STRATEGY_USDE = 0xaC2e5936Eca286eC364d4D5Bcca33145fBe57f95;
 
     // Underlying tokens (must match each strategy's underlyingToken()).
     // USDe address confirmed on-chain in pre-flight: YieldStrategyUSDe.underlyingToken().
