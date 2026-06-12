@@ -46,7 +46,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *     --ledger --hd-paths "m/44'/60'/46'/0/0" -vvv
  */
 
-/// @dev Minimal interface for onlyOwner calls on the already-deployed original StableStaker.
+/// @dev Minimal interface for onlyOwner calls + idempotency/pause reads on a StableStaker.
+///      Used for BOTH the original staker and the freshly-deployed temp staker.
 interface IStakerOwnable {
     function owner() external view returns (address);
     function setMigrator(address _migrator) external;
@@ -57,12 +58,33 @@ interface IStakerOwnable {
     function migrator() external view returns (address);
     function poolInfo(address token) external view returns (uint256, uint256, uint256, uint256);
     function withdrawDisabled(address token) external view returns (bool);
+    // YS-09 pause/restore + idempotent wiring reads.
+    function pauser() external view returns (address);
+    function paused() external view returns (bool);
+    function setPauser(address _pauser) external;
+    function pause() external;
+    function getStakedTokens() external view returns (address[] memory);
 }
 
-/// @dev Minimal interface for phUSD minter gating.
+/// @dev MinterInfo mirror for the phUSD authorizedMinters getter (flax-token IFlax.MinterInfo).
+struct MinterInfo {
+    bool canMint;
+    uint256 mintVersion;
+}
+
+/// @dev Minimal interface for phUSD minter gating + idempotency read.
 interface IPhUSDSetMinter {
     function owner() external view returns (address);
     function setMinter(address minter, bool canMint) external;
+    function authorizedMinters(address minter) external view returns (MinterInfo memory);
+}
+
+/// @dev Minimal idempotency-read interface for the V2 yield strategies (AYieldStrategy getters).
+interface IYSWiringView {
+    function authorizedClients(address client) external view returns (bool);
+    function setAsideBufferRecipient() external view returns (address);
+    function setAsideBufferSize(address client) external view returns (uint256);
+    function authorizedWithdrawers(address withdrawer) external view returns (bool);
 }
 
 /// @dev Minimal admin/view interface for the live StableYieldAccumulator (SYA).
@@ -184,49 +206,101 @@ contract DeployTempStableStakerAndMigrators is Script {
         console.log("  migrator2:   ", address(migrator2));
 
         // ---- Step 3: wiring ----
+        // YS-09: every wiring call is guarded to skip when already in the target state, so a re-run
+        // of this step (against contracts/state that were partially wired on a prior attempt) is a
+        // loud no-op rather than a revert or a duplicate. The freshly-deployed tempStaker / V2
+        // strategies start virgin, so their guards normally fire the action; the guards on persistent
+        // external state (phUSD minter, original.migrator, SYA strategy list) are the load-bearing ones.
         console.log("--- wiring phUSD minter for tempStaker ---");
-        IPhUSDSetMinter(PHUSD).setMinter(address(tempStaker), true);
+        if (!IPhUSDSetMinter(PHUSD).authorizedMinters(address(tempStaker)).canMint) {
+            IPhUSDSetMinter(PHUSD).setMinter(address(tempStaker), true);
+        } else {
+            console.log("  setMinter(tempStaker, true) SKIPPED - already minter (resume)");
+        }
 
         console.log("--- registering tokens on tempStaker ---");
-        tempStaker.addToken(DOLA);
-        tempStaker.addToken(USDC);
+        _addTokenIdempotent(tempStaker, DOLA);
+        _addTokenIdempotent(tempStaker, USDC);
 
         console.log("--- setting migrator1 on tempStaker ---");
-        tempStaker.setMigrator(address(migrator1));
+        if (tempStaker.migrator() != address(migrator1)) {
+            tempStaker.setMigrator(address(migrator1));
+        } else {
+            console.log("  tempStaker.setMigrator(migrator1) SKIPPED - already set (resume)");
+        }
 
         console.log("--- setting migrator1 on original staker ---");
-        IStakerOwnable(ORIGINAL_STABLE_STAKER).setMigrator(address(migrator1));
+        if (IStakerOwnable(ORIGINAL_STABLE_STAKER).migrator() != address(migrator1)) {
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).setMigrator(address(migrator1));
+        } else {
+            console.log("  original.setMigrator(migrator1) SKIPPED - already set (resume)");
+        }
 
         console.log("--- wiring ysDolaV2 to original staker (setClient + buffer) ---");
-        ysDolaV2.setClient(ORIGINAL_STABLE_STAKER, true);
-        ysDolaV2.setSetAsideBufferRecipient(ORIGINAL_STABLE_STAKER);
-        ysDolaV2.setSetAsideBuffer(ORIGINAL_STABLE_STAKER, SETASIDE_BUFFER);
-
-        // YS-03: authorize the live SYA to skim surplus from ysDolaV2, and register it in the
-        // SYA's strategy list. Without these the migrated principal is invisible/un-skimmable to
-        // the SYA and the 10% buffer above can never trigger (a buffer with no consumer is dead).
-        console.log("--- YS-03: authorizing + registering ysDolaV2 on SYA ---");
-        ysDolaV2.setWithdrawer(SYA, true);
-        ISYAAdmin(SYA).addYieldStrategy(address(ysDolaV2), DOLA);
+        _wireStrategyToOriginal(ysDolaV2, DOLA);
 
         console.log("--- wiring ysUsdcV2 to original staker (setClient + buffer) ---");
-        ysUsdcV2.setClient(ORIGINAL_STABLE_STAKER, true);
-        ysUsdcV2.setSetAsideBufferRecipient(ORIGINAL_STABLE_STAKER);
-        ysUsdcV2.setSetAsideBuffer(ORIGINAL_STABLE_STAKER, SETASIDE_BUFFER);
+        _wireStrategyToOriginal(ysUsdcV2, USDC);
 
-        // YS-03: same for ysUsdcV2.
-        console.log("--- YS-03: authorizing + registering ysUsdcV2 on SYA ---");
-        ysUsdcV2.setWithdrawer(SYA, true);
-        ISYAAdmin(SYA).addYieldStrategy(address(ysUsdcV2), USDC);
+        // ---- Step 4: pause both stakers for the migration window (YS-09) ----
+        // Record each staker's CURRENT pauser, take ownership of the pauser role (owner-only), and
+        // pause both stakers so stake()'s whenNotPaused gate cannot be used to grief the empty-pool
+        // gate (totalStaked == 0 re-lock) during the leg1->leg2 halt window. PostMigrationCleanup
+        // unpauses and restores these recorded pausers. All three calls are idempotent.
+        //
+        // Pause is contract-global, so this also freezes the un-migrated USDe pool on the original
+        // staker for the window — accepted (short window, anti-grief). The recorded pausers are
+        // persisted into the deployments JSON so cleanup can restore the exact original wiring.
+        console.log("--- YS-09: pausing both stakers for migration window ---");
+        address origPauser = IStakerOwnable(ORIGINAL_STABLE_STAKER).pauser();
+        address tempPauser = IStakerOwnable(address(tempStaker)).pauser();
+        console.log("  recorded original pauser:", origPauser);
+        console.log("  recorded temp pauser:    ", tempPauser);
+        // Fail loudly if the original pauser is a contract we could not restore as-is. (A non-EOA
+        // pauser is fine to restore — we just write the same address back — but a zero pauser would
+        // mean restore is a no-op; flagged for the operator rather than silently accepted.)
+        require(origPauser != address(0), "Pause: original staker pauser is zero - cannot restore");
 
-        // ---- Step 4: write deployments JSON ----
+        if (IStakerOwnable(ORIGINAL_STABLE_STAKER).pauser() != OWNER_ADDRESS) {
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).setPauser(OWNER_ADDRESS);
+            console.log("  original.setPauser(deployer) done");
+        } else {
+            console.log("  original.setPauser(deployer) SKIPPED - already deployer (resume)");
+        }
+        if (IStakerOwnable(address(tempStaker)).pauser() != OWNER_ADDRESS) {
+            IStakerOwnable(address(tempStaker)).setPauser(OWNER_ADDRESS);
+            console.log("  tempStaker.setPauser(deployer) done");
+        } else {
+            console.log("  tempStaker.setPauser(deployer) SKIPPED - already deployer (resume)");
+        }
+        if (!IStakerOwnable(ORIGINAL_STABLE_STAKER).paused()) {
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).pause();
+            console.log("  original.pause() done");
+        } else {
+            console.log("  original.pause() SKIPPED - already paused (resume)");
+        }
+        if (!IStakerOwnable(address(tempStaker)).paused()) {
+            IStakerOwnable(address(tempStaker)).pause();
+            console.log("  tempStaker.pause() done");
+        } else {
+            console.log("  tempStaker.pause() SKIPPED - already paused (resume)");
+        }
+        console.log("");
+
+        // ---- Step 5: write deployments JSON ----
+        // Persist recorded pausers so PostMigrationCleanup can restore the original wiring. A freshly
+        // deployed tempStaker's pauser is address(0) by default; persist it anyway (cleanup treats a
+        // zero recorded temp pauser as "restore to zero", which matches the as-deployed state and is
+        // a harmless no-op since the temp staker is decommissioned at cleanup).
         string memory json = string(
             abi.encodePacked(
                 '{"tempStaker":"', vm.toString(address(tempStaker)), '"',
                 ',"migrator1":"', vm.toString(address(migrator1)), '"',
                 ',"migrator2":"', vm.toString(address(migrator2)), '"',
                 ',"ysDolaV2":"', vm.toString(address(ysDolaV2)), '"',
-                ',"ysUsdcV2":"', vm.toString(address(ysUsdcV2)), '"}'
+                ',"ysUsdcV2":"', vm.toString(address(ysUsdcV2)), '"',
+                ',"origPauser":"', vm.toString(origPauser), '"',
+                ',"tempPauser":"', vm.toString(tempPauser), '"}'
             )
         );
 
@@ -247,6 +321,60 @@ contract DeployTempStableStakerAndMigrators is Script {
         _verifySyaWiring();
 
         _printSummary();
+    }
+
+    /// @dev YS-09 idempotent addToken: addToken reverts "token exists" on a duplicate, so skip when
+    ///      the token is already in the staker's registered set.
+    function _addTokenIdempotent(StableStaker staker, address token) internal {
+        address[] memory registered = IStakerOwnable(address(staker)).getStakedTokens();
+        for (uint256 i = 0; i < registered.length; i++) {
+            if (registered[i] == token) {
+                console.log("  addToken SKIPPED - already registered (resume):", token);
+                return;
+            }
+        }
+        staker.addToken(token);
+        console.log("  addToken done:", token);
+    }
+
+    /// @dev YS-09 idempotent strategy wiring: setClient / buffer recipient / buffer size / SYA
+    ///      withdrawer / SYA strategy-list registration each skipped when already in target state.
+    function _wireStrategyToOriginal(ERC4626YieldStrategy ys, address token) internal {
+        IYSWiringView v = IYSWiringView(address(ys));
+
+        if (!v.authorizedClients(ORIGINAL_STABLE_STAKER)) {
+            ys.setClient(ORIGINAL_STABLE_STAKER, true);
+        } else {
+            console.log("  setClient SKIPPED - already client (resume)");
+        }
+        if (v.setAsideBufferRecipient() != ORIGINAL_STABLE_STAKER) {
+            ys.setSetAsideBufferRecipient(ORIGINAL_STABLE_STAKER);
+        } else {
+            console.log("  setSetAsideBufferRecipient SKIPPED - already set (resume)");
+        }
+        if (v.setAsideBufferSize(ORIGINAL_STABLE_STAKER) != SETASIDE_BUFFER) {
+            ys.setSetAsideBuffer(ORIGINAL_STABLE_STAKER, SETASIDE_BUFFER);
+        } else {
+            console.log("  setSetAsideBuffer SKIPPED - already 10 (resume)");
+        }
+
+        // YS-03: authorize + register the SYA as the buffer's consumer (a buffer with no consumer
+        // is dead). Both guarded so a re-run is a no-op.
+        if (!v.authorizedWithdrawers(SYA)) {
+            ys.setWithdrawer(SYA, true);
+        } else {
+            console.log("  setWithdrawer(SYA) SKIPPED - already authorized (resume)");
+        }
+        address[] memory syaStrategies = ISYAAdmin(SYA).getYieldStrategies();
+        bool registeredOnSya;
+        for (uint256 i = 0; i < syaStrategies.length; i++) {
+            if (syaStrategies[i] == address(ys)) registeredOnSya = true;
+        }
+        if (!registeredOnSya) {
+            ISYAAdmin(SYA).addYieldStrategy(address(ys), token);
+        } else {
+            console.log("  SYA.addYieldStrategy SKIPPED - already registered (resume)");
+        }
     }
 
     /// @dev YS-03 post-asserts: mirror ReplaceSYAMainnet.s.sol:295-301. The SYA must be an

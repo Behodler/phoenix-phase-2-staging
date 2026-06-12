@@ -43,6 +43,13 @@ interface IOldYS {
     function skimSurplus(address token, address recipient) external returns (uint256);
 }
 
+/// @dev StableStaker pool lifecycle (StableStaker.sol: enum PoolState { Active, Migrating }).
+///      Default 0 == Active. Used for the YS-09 resume/idempotency guards.
+enum PoolState {
+    Active,
+    Migrating
+}
+
 /// @dev Minimal interface for StableStakerMigrator (owner-facing).
 interface IMinMigrator {
     function owner() external view returns (address);
@@ -50,11 +57,14 @@ interface IMinMigrator {
     function migrate(address token, address[] calldata users) external;
 }
 
-/// @dev Minimal interface for on-chain staker reads.
+/// @dev Minimal interface for on-chain staker reads + YS-09 pause/resume guards.
 interface IStakerView {
     function migrator() external view returns (address);
     function stakerCount(address token) external view returns (uint256);
     function poolInfo(address token) external view returns (uint256, uint256, uint256, uint256);
+    // YS-09 guards.
+    function poolState(address token) external view returns (PoolState);
+    function paused() external view returns (bool);
 }
 
 /// @dev PhlimboV2 collectReward (USDC → reward pot).
@@ -121,6 +131,20 @@ contract SkimAndLeg1Migration is Script {
         require(
             tempMigrator == migrator1Addr,
             "Preflight: migrator1 not set on tempStaker - re-run step 1"
+        );
+
+        // YS-09 hard pause gate: BOTH stakers must be paused before leg1 migrates, so the
+        // empty-pool gate (totalStaked == 0) cannot be re-locked by a stake() grief during the
+        // leg1->leg2 halt window. The deploy step performs the pause; this is the loud backstop
+        // that proves the grief surface is closed for the whole migration span. initiateMigration /
+        // batchMigrate / depositFor are deliberately NOT whenNotPaused, so the runbook still runs.
+        require(
+            IStakerView(ORIGINAL_STABLE_STAKER).paused(),
+            "Preflight: original staker NOT paused - run deploy step (pause) first"
+        );
+        require(
+            IStakerView(tempStakerAddr).paused(),
+            "Preflight: tempStaker NOT paused - run deploy step (pause) first"
         );
 
         // Verify old strategy owners.
@@ -209,14 +233,30 @@ contract SkimAndLeg1Migration is Script {
         console.log("");
 
         // ---- Step 3: initiate migration for DOLA and USDC ----
+        // YS-09 resume guard: initiateMigration requires PoolState.Active and reverts
+        // "pool not active" once Migrating, so on a re-run we skip pools already engaged. The
+        // chunked migrate loop below is independently re-run-safe (already-migrated users return 0
+        // credit from batchMigrate and are skipped, so re-passing a completed chunk is a no-op).
         console.log("=== Step 3: initiateMigration (DOLA + USDC) ===");
-        IMinMigrator(migrator1Addr).initiateMigration(DOLA);
-        console.log("  initiateMigration(DOLA) called");
-        IMinMigrator(migrator1Addr).initiateMigration(USDC);
-        console.log("  initiateMigration(USDC) called");
+        if (IStakerView(ORIGINAL_STABLE_STAKER).poolState(DOLA) == PoolState.Active) {
+            IMinMigrator(migrator1Addr).initiateMigration(DOLA);
+            console.log("  initiateMigration(DOLA) called");
+        } else {
+            console.log("  initiateMigration(DOLA) SKIPPED - already Migrating (resume)");
+        }
+        if (IStakerView(ORIGINAL_STABLE_STAKER).poolState(USDC) == PoolState.Active) {
+            IMinMigrator(migrator1Addr).initiateMigration(USDC);
+            console.log("  initiateMigration(USDC) called");
+        } else {
+            console.log("  initiateMigration(USDC) SKIPPED - already Migrating (resume)");
+        }
         console.log("");
 
         // ---- Step 4: chunk loop from leg1-stakers.json ----
+        // YS-09 re-run-safe: StableStaker.batchMigrate returns 0 for an already-migrated/empty
+        // position (no per-user flag, no revert) and StableStakerMigrator.migrate early-returns when
+        // the chunk total is 0, so re-passing a chunk that already completed on a prior run is a clean
+        // no-op. No per-chunk progress marker is needed (verified by the YS-09 fork test).
         console.log("=== Step 4: batch migrate from leg1-stakers.json ===");
         string memory leg1Raw = vm.readFile("script/migration-inputs/leg1-stakers.json");
 

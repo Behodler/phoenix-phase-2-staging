@@ -42,12 +42,17 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *     --ledger --hd-paths "m/44'/60'/46'/0/0" -vvv
  */
 
-/// @dev Minimal interface for staker view and owner calls.
+/// @dev Minimal interface for staker view and owner calls + YS-09 unpause/restore.
 interface IStakerFull {
     function owner() external view returns (address);
     function stakerCount(address token) external view returns (uint256);
     function withdrawDisabled(address token) external view returns (bool);
     function poolInfo(address token) external view returns (uint256, uint256, uint256, uint256);
+    // YS-09 unpause + pauser restore.
+    function paused() external view returns (bool);
+    function pauser() external view returns (address);
+    function unpause() external;
+    function setPauser(address _pauser) external;
 }
 
 /// @dev Minimal interface for V2 strategy view.
@@ -112,6 +117,22 @@ contract PostMigrationCleanup is Script {
         address ysDolaV2       = vm.parseJsonAddress(deploymentsRaw, ".ysDolaV2");
         address ysUsdcV2       = vm.parseJsonAddress(deploymentsRaw, ".ysUsdcV2");
         address tempStakerAddr = vm.parseJsonAddress(deploymentsRaw, ".tempStaker");
+
+        // YS-09: recorded original pausers written by the deploy step. Read defensively (a deployments
+        // JSON produced before the YS-09 hardening will not contain them) — if absent, the restore
+        // step is skipped with a loud warning rather than reverting cleanup.
+        address recordedOrigPauser = address(0);
+        bool origPauserRecorded = false;
+        try vm.parseJsonAddress(deploymentsRaw, ".origPauser") returns (address v) {
+            recordedOrigPauser = v;
+            origPauserRecorded = true;
+        } catch {}
+        address recordedTempPauser = address(0);
+        bool tempPauserRecorded = false;
+        try vm.parseJsonAddress(deploymentsRaw, ".tempPauser") returns (address v) {
+            recordedTempPauser = v;
+            tempPauserRecorded = true;
+        } catch {}
 
         // Read skim amounts (may not exist in deployments JSON if step 2 was preview-only).
         uint256 usdeSkimmed = 0;
@@ -302,11 +323,70 @@ contract PostMigrationCleanup is Script {
         console.log("  phUSD.setMinter(tempStaker, false) done");
         console.log("");
 
+        // ---- YS-09: unpause both stakers + restore recorded pausers ----
+        // The deploy step paused both stakers (and took the pauser role) to close the stake() grief
+        // surface for the migration window. Now that migration is complete, reopen staking and hand
+        // the pauser role back to the originally-wired pauser (e.g. the global Pauser contract from
+        // story 052). All calls idempotent so a re-run of cleanup is a clean no-op.
+        console.log("=== YS-09: unpause + restore pausers ===");
+        if (IStakerFull(ORIGINAL_STABLE_STAKER).paused()) {
+            IStakerFull(ORIGINAL_STABLE_STAKER).unpause();
+            console.log("  original.unpause() done");
+        } else {
+            console.log("  original.unpause() SKIPPED - already unpaused (resume)");
+        }
+        if (IStakerFull(tempStakerAddr).paused()) {
+            IStakerFull(tempStakerAddr).unpause();
+            console.log("  tempStaker.unpause() done");
+        } else {
+            console.log("  tempStaker.unpause() SKIPPED - already unpaused (resume)");
+        }
+
+        if (origPauserRecorded) {
+            if (IStakerFull(ORIGINAL_STABLE_STAKER).pauser() != recordedOrigPauser) {
+                IStakerFull(ORIGINAL_STABLE_STAKER).setPauser(recordedOrigPauser);
+                console.log("  original.setPauser(recorded) done:", recordedOrigPauser);
+            } else {
+                console.log("  original.setPauser(recorded) SKIPPED - already restored (resume)");
+            }
+        } else {
+            console.log("  WARNING: origPauser not recorded in deployments JSON - pauser NOT restored");
+        }
+        if (tempPauserRecorded) {
+            if (IStakerFull(tempStakerAddr).pauser() != recordedTempPauser) {
+                IStakerFull(tempStakerAddr).setPauser(recordedTempPauser);
+                console.log("  tempStaker.setPauser(recorded) done:", recordedTempPauser);
+            } else {
+                console.log("  tempStaker.setPauser(recorded) SKIPPED - already restored (resume)");
+            }
+        } else {
+            console.log("  WARNING: tempPauser not recorded in deployments JSON - pauser NOT restored");
+        }
+        console.log("");
+
         if (isPreview) {
             vm.stopPrank();
         } else {
             vm.stopBroadcast();
         }
+
+        // ---- YS-09 post-assert: both stakers unpaused and pausers restored ----
+        require(!IStakerFull(ORIGINAL_STABLE_STAKER).paused(), "Post-assert: original staker still paused");
+        require(!IStakerFull(tempStakerAddr).paused(), "Post-assert: tempStaker still paused");
+        if (origPauserRecorded) {
+            require(
+                IStakerFull(ORIGINAL_STABLE_STAKER).pauser() == recordedOrigPauser,
+                "Post-assert: original staker pauser not restored to recorded value"
+            );
+        }
+        if (tempPauserRecorded) {
+            require(
+                IStakerFull(tempStakerAddr).pauser() == recordedTempPauser,
+                "Post-assert: tempStaker pauser not restored to recorded value"
+            );
+        }
+        console.log("YS-09: both stakers unpaused; pausers restored OK");
+        console.log("");
 
         _printSummary(ysDolaV2, ysUsdcV2, dolaP, usdcP);
     }

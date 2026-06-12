@@ -37,6 +37,13 @@ import "@forge-std/console.sol";
  *     --ledger --hd-paths "m/44'/60'/46'/0/0" -vvv
  */
 
+/// @dev StableStaker pool lifecycle (StableStaker.sol: enum PoolState { Active, Migrating }).
+///      Default 0 == Active. Used for the YS-09 resume/idempotency guards.
+enum PoolState {
+    Active,
+    Migrating
+}
+
 /// @dev Minimal interface for StableStakerMigrator (owner-facing).
 interface IMinMigrator {
     function owner() external view returns (address);
@@ -44,11 +51,12 @@ interface IMinMigrator {
     function migrate(address token, address[] calldata users) external;
 }
 
-/// @dev Minimal interface for on-chain staker reads.
+/// @dev Minimal interface for on-chain staker reads + YS-09 resume guard.
 interface IStakerView {
     function owner() external view returns (address);
     function migrator() external view returns (address);
     function stakerCount(address token) external view returns (uint256);
+    function poolState(address token) external view returns (PoolState);
 }
 
 /// @dev Minimal interface for V2 strategy view.
@@ -186,14 +194,29 @@ contract Leg2Migration is Script {
         }
 
         // ---- Step 1: initiate migration on tempStaker ----
+        // YS-09 resume guard: migrator2.initiateMigration engages terminal migration on the
+        // tempStaker (migrator2's oldStaker). It requires PoolState.Active and reverts once
+        // Migrating, so on a re-run we skip pools already engaged. Read poolState on the TEMP staker
+        // (not original). The chunked migrate loop below is independently re-run-safe.
         console.log("=== Step 1: initiateMigration on tempStaker ===");
-        IMinMigrator(migrator2Addr).initiateMigration(DOLA);
-        console.log("  initiateMigration(DOLA) called");
-        IMinMigrator(migrator2Addr).initiateMigration(USDC);
-        console.log("  initiateMigration(USDC) called");
+        if (IStakerView(tempStakerAddr).poolState(DOLA) == PoolState.Active) {
+            IMinMigrator(migrator2Addr).initiateMigration(DOLA);
+            console.log("  initiateMigration(DOLA) called");
+        } else {
+            console.log("  initiateMigration(DOLA) SKIPPED - already Migrating (resume)");
+        }
+        if (IStakerView(tempStakerAddr).poolState(USDC) == PoolState.Active) {
+            IMinMigrator(migrator2Addr).initiateMigration(USDC);
+            console.log("  initiateMigration(USDC) called");
+        } else {
+            console.log("  initiateMigration(USDC) SKIPPED - already Migrating (resume)");
+        }
         console.log("");
 
         // ---- Step 2: chunk loop DOLA ----
+        // YS-09 re-run-safe: batchMigrate returns 0 for already-migrated/empty positions and
+        // StableStakerMigrator.migrate early-returns on a zero-total chunk, so re-passing a chunk
+        // that completed on a prior run is a clean no-op. No per-chunk progress marker needed.
         console.log("=== Step 2: batch migrate DOLA from leg2-stakers.json ===");
         for (uint256 i = 0; i < dolaChunkCount; i++) {
             address[] memory chunk = vm.parseJsonAddressArray(

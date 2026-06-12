@@ -212,15 +212,15 @@
     "migrate:ys-swap-gather-leg1": "node scripts/gather-migration-inputs.js --leg 1",
     "migrate:ys-swap-gather-leg2": "node scripts/gather-migration-inputs.js --leg 2",
     "migrate:ys-swap-deploy-preview": "PREVIEW_MODE=true forge script script/DeployTempStableStakerAndMigrators.s.sol:DeployTempStableStakerAndMigrators --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate:ys-swap-deploy": "forge script script/DeployTempStableStakerAndMigrators.s.sol:DeployTempStableStakerAndMigrators --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "migrate:ys-swap-deploy": "npm run migrate:ys-swap-deploy-preview && forge script script/DeployTempStableStakerAndMigrators.s.sol:DeployTempStableStakerAndMigrators --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "migrate:ys-swap-leg1-preview": "PREVIEW_MODE=true forge script script/SkimAndLeg1Migration.s.sol:SkimAndLeg1Migration --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate:ys-swap-leg1": "forge script script/SkimAndLeg1Migration.s.sol:SkimAndLeg1Migration --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "migrate:ys-swap-leg1": "npm run migrate:ys-swap-leg1-preview && forge script script/SkimAndLeg1Migration.s.sol:SkimAndLeg1Migration --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "migrate:ys-swap-reset-preview": "PREVIEW_MODE=true forge script script/ResetAndRewire.s.sol:ResetAndRewire --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate:ys-swap-reset": "node scripts/backup-mainnet-addresses.js && forge script script/ResetAndRewire.s.sol:ResetAndRewire --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-ys-swap.js",
+    "migrate:ys-swap-reset": "npm run migrate:ys-swap-reset-preview && node scripts/backup-mainnet-addresses.js && forge script script/ResetAndRewire.s.sol:ResetAndRewire --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-ys-swap.js",
     "migrate:ys-swap-leg2-preview": "PREVIEW_MODE=true forge script script/Leg2Migration.s.sol:Leg2Migration --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate:ys-swap-leg2": "forge script script/Leg2Migration.s.sol:Leg2Migration --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "migrate:ys-swap-leg2": "npm run migrate:ys-swap-leg2-preview && forge script script/Leg2Migration.s.sol:Leg2Migration --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "migrate:ys-swap-cleanup-preview": "PREVIEW_MODE=true forge script script/PostMigrationCleanup.s.sol:PostMigrationCleanup --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate:ys-swap-cleanup": "forge script script/PostMigrationCleanup.s.sol:PostMigrationCleanup --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "migrate:ys-swap-cleanup": "npm run migrate:ys-swap-cleanup-preview && forge script script/PostMigrationCleanup.s.sol:PostMigrationCleanup --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",

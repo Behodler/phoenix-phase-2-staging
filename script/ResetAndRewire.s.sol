@@ -38,7 +38,14 @@ import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
  *   node scripts/patch-mainnet-addresses-ys-swap.js
  */
 
-/// @dev Minimal interface for owner calls on the original StableStaker.
+/// @dev StableStaker pool lifecycle (StableStaker.sol: enum PoolState { Active, Migrating }).
+///      Default 0 == Active. Used for the YS-09 resume/idempotency guards.
+enum PoolState {
+    Active,
+    Migrating
+}
+
+/// @dev Minimal interface for owner calls + idempotency reads on the original StableStaker.
 interface IStakerOwnable {
     function owner() external view returns (address);
     function migrator() external view returns (address);
@@ -47,6 +54,9 @@ interface IStakerOwnable {
     function setYieldStrategy(address token, IYieldStrategy strategy) external;
     function stakerCount(address token) external view returns (uint256);
     function poolInfo(address token) external view returns (uint256, uint256, uint256, uint256);
+    // YS-09 resume guards.
+    function poolState(address token) external view returns (PoolState);
+    function yieldStrategy(address token) external view returns (IYieldStrategy);
 }
 
 /// @dev Minimal interface for owner calls on the temp staker.
@@ -183,11 +193,23 @@ contract ResetAndRewire is Script {
         }
 
         // ---- Step 1: finalizeAndReset ----
+        // YS-09 resume guard: finalizeAndReset requires PoolState.Migrating and reverts
+        // "pool not migrating" once Active, so on a re-run after a mid-suite halt we must skip
+        // the pools that were already revived to Active. Skipping is a true no-op (the pool is
+        // already in the post-finalize state).
         console.log("=== Step 1: finalizeAndReset ===");
-        IStakerOwnable(ORIGINAL_STABLE_STAKER).finalizeAndReset(DOLA);
-        console.log("  finalizeAndReset(DOLA) done");
-        IStakerOwnable(ORIGINAL_STABLE_STAKER).finalizeAndReset(USDC);
-        console.log("  finalizeAndReset(USDC) done");
+        if (IStakerOwnable(ORIGINAL_STABLE_STAKER).poolState(DOLA) == PoolState.Migrating) {
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).finalizeAndReset(DOLA);
+            console.log("  finalizeAndReset(DOLA) done");
+        } else {
+            console.log("  finalizeAndReset(DOLA) SKIPPED - pool already Active (resume)");
+        }
+        if (IStakerOwnable(ORIGINAL_STABLE_STAKER).poolState(USDC) == PoolState.Migrating) {
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).finalizeAndReset(USDC);
+            console.log("  finalizeAndReset(USDC) done");
+        } else {
+            console.log("  finalizeAndReset(USDC) SKIPPED - pool already Active (resume)");
+        }
         console.log("");
 
         // ---- Step 2: wire new V2 yield strategies ----
@@ -196,21 +218,48 @@ contract ResetAndRewire is Script {
         // strategy (StableStaker.setYieldStrategy: `strategy.deposit(token, idleBalance, this)`), so the
         // post-assert can deterministically check the swept amount became strategy principal. This idle
         // balance is the skim surplus parked during leg1 (plus any leg1 migration dust left behind).
+        // YS-09 resume guards: setYieldStrategy is the YS-01 brick point. On a re-run after a halt
+        // here, the pool may already be wired to V2 (the call landed) — re-calling would attempt to
+        // swap an already-set strategy (and, with idle already swept, mis-account). Skip when the live
+        // wiring already points at the V2 address. `*Wired` records whether THIS run performed the
+        // sweep so the post-assert only applies the swept-amount invariant to freshly-wired pools.
         console.log("=== Step 2: setYieldStrategy (V2) ===");
-        dolaIdleSwept = IERC20(DOLA).balanceOf(ORIGINAL_STABLE_STAKER);
-        IStakerOwnable(ORIGINAL_STABLE_STAKER).setYieldStrategy(DOLA, IYieldStrategy(ysDolaV2));
-        console.log("  setYieldStrategy(DOLA, ysDolaV2) done; idle swept:", dolaIdleSwept);
-        usdcIdleSwept = IERC20(USDC).balanceOf(ORIGINAL_STABLE_STAKER);
-        IStakerOwnable(ORIGINAL_STABLE_STAKER).setYieldStrategy(USDC, IYieldStrategy(ysUsdcV2));
-        console.log("  setYieldStrategy(USDC, ysUsdcV2) done; idle swept:", usdcIdleSwept);
+        bool dolaWired;
+        bool usdcWired;
+        if (address(IStakerOwnable(ORIGINAL_STABLE_STAKER).yieldStrategy(DOLA)) != ysDolaV2) {
+            dolaIdleSwept = IERC20(DOLA).balanceOf(ORIGINAL_STABLE_STAKER);
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).setYieldStrategy(DOLA, IYieldStrategy(ysDolaV2));
+            dolaWired = true;
+            console.log("  setYieldStrategy(DOLA, ysDolaV2) done; idle swept:", dolaIdleSwept);
+        } else {
+            console.log("  setYieldStrategy(DOLA, ysDolaV2) SKIPPED - already V2 (resume)");
+        }
+        if (address(IStakerOwnable(ORIGINAL_STABLE_STAKER).yieldStrategy(USDC)) != ysUsdcV2) {
+            usdcIdleSwept = IERC20(USDC).balanceOf(ORIGINAL_STABLE_STAKER);
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).setYieldStrategy(USDC, IYieldStrategy(ysUsdcV2));
+            usdcWired = true;
+            console.log("  setYieldStrategy(USDC, ysUsdcV2) done; idle swept:", usdcIdleSwept);
+        } else {
+            console.log("  setYieldStrategy(USDC, ysUsdcV2) SKIPPED - already V2 (resume)");
+        }
         console.log("");
 
         // ---- Step 3: wire migrator2 for the return leg ----
+        // YS-09 resume guards: setMigrator is idempotent-by-value (re-setting the same migrator is
+        // harmless) but we skip+log to keep the re-run loud and side-effect-free.
         console.log("=== Step 3: setMigrator(migrator2) on both stakers ===");
-        ITempStakerOwnable(tempStakerAddr).setMigrator(migrator2Addr);
-        console.log("  tempStaker.setMigrator(migrator2) done");
-        IStakerOwnable(ORIGINAL_STABLE_STAKER).setMigrator(migrator2Addr);
-        console.log("  original.setMigrator(migrator2) done");
+        if (ITempStakerOwnable(tempStakerAddr).migrator() != migrator2Addr) {
+            ITempStakerOwnable(tempStakerAddr).setMigrator(migrator2Addr);
+            console.log("  tempStaker.setMigrator(migrator2) done");
+        } else {
+            console.log("  tempStaker.setMigrator(migrator2) SKIPPED - already migrator2 (resume)");
+        }
+        if (IStakerOwnable(ORIGINAL_STABLE_STAKER).migrator() != migrator2Addr) {
+            IStakerOwnable(ORIGINAL_STABLE_STAKER).setMigrator(migrator2Addr);
+            console.log("  original.setMigrator(migrator2) done");
+        } else {
+            console.log("  original.setMigrator(migrator2) SKIPPED - already migrator2 (resume)");
+        }
         console.log("");
 
         if (isPreview) {
@@ -228,14 +277,30 @@ contract ResetAndRewire is Script {
         // and never zero when a non-zero balance was swept. This deterministically proves the sweep fired
         // and folded the skim surplus into the V2 strategy as the unattributed principal buffer. (If the
         // skim found no surplus, *IdleSwept == 0 and principalOf == 0 — the checks still hold.)
+        // The swept-amount invariant (principal == swept ± dust) only holds for a pool THIS run wired:
+        // dolaIdleSwept is captured immediately before the sweep. On a resume-skip the sweep already
+        // happened on a prior run, dolaIdleSwept reads 0, and principal is non-zero — so the swept-amount
+        // check is gated on dolaWired/usdcWired. The strategy is V2 in either case (asserted below).
         uint256 dolaP = IYSView(ysDolaV2).principalOf(DOLA, ORIGINAL_STABLE_STAKER);
-        require(dolaP <= dolaIdleSwept, "Post-assert: DOLA principal > swept idle (over-credit)");
-        require(dolaIdleSwept == 0 || dolaP > 0, "Post-assert: DOLA idle swept but principal == 0 (sweep failed)");
+        if (dolaWired) {
+            require(dolaP <= dolaIdleSwept, "Post-assert: DOLA principal > swept idle (over-credit)");
+            require(dolaIdleSwept == 0 || dolaP > 0, "Post-assert: DOLA idle swept but principal == 0 (sweep failed)");
+        }
+        require(
+            address(IStakerOwnable(ORIGINAL_STABLE_STAKER).yieldStrategy(DOLA)) == ysDolaV2,
+            "Post-assert: original DOLA strategy != ysDolaV2"
+        );
         console.log("  ysDolaV2.principalOf(DOLA, original): ", dolaP);
 
         uint256 usdcP = IYSView(ysUsdcV2).principalOf(USDC, ORIGINAL_STABLE_STAKER);
-        require(usdcP <= usdcIdleSwept, "Post-assert: USDC principal > swept idle (over-credit)");
-        require(usdcIdleSwept == 0 || usdcP > 0, "Post-assert: USDC idle swept but principal == 0 (sweep failed)");
+        if (usdcWired) {
+            require(usdcP <= usdcIdleSwept, "Post-assert: USDC principal > swept idle (over-credit)");
+            require(usdcIdleSwept == 0 || usdcP > 0, "Post-assert: USDC idle swept but principal == 0 (sweep failed)");
+        }
+        require(
+            address(IStakerOwnable(ORIGINAL_STABLE_STAKER).yieldStrategy(USDC)) == ysUsdcV2,
+            "Post-assert: original USDC strategy != ysUsdcV2"
+        );
         console.log("  ysUsdcV2.principalOf(USDC, original): ", usdcP);
 
         (, , , uint256 dolaTotalStaked) = IStakerOwnable(ORIGINAL_STABLE_STAKER).poolInfo(DOLA);
