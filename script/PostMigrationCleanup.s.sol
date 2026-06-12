@@ -20,7 +20,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *           2. original.stakerCount(DOLA) == expected from leg2 JSON
  *           3. original.stakerCount(USDC) == expected from leg2 JSON
  *           4. ysDolaV2.principalOf(DOLA, original) > 0
+ *              4b. ysDolaV2 principal >= original.poolInfo(DOLA).totalStaked (solvent)
  *           5. ysUsdcV2.principalOf(USDC, original) > 0
+ *              5b. ysUsdcV2 principal >= original.poolInfo(USDC).totalStaked (solvent)
  *           6. original.withdrawDisabled(DOLA) == false
  *           7. original.withdrawDisabled(USDC) == false
  *           8. ysDolaV2.setAsideBufferSize(original) == 10
@@ -28,6 +30,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *          10. ysUsdcV2.setAsideBufferSize(original) == 10
  *          11. ysUsdcV2.setAsideBufferRecipient() == original
  *          12. IERC20(USDe).balanceOf(original) >= usdeSkimmed (if usdeSkimmed > 0)
+ *
+ *         The per-token "buffer" (principal - totalStaked) is logged as a diagnostic only,
+ *         NOT bounded by a sanity band. It is EXPECTED to exceed the recorded skim: leg-1
+ *         initiateMigration realizes the old strategy's accrued-yield surplus over credited
+ *         principal, and ResetAndRewire's setYieldStrategy idle-sweep folds that surplus into
+ *         V2 principal, so buffer = skim + realize-over-credit surplus (surplus dominating).
  *
  *         Execute:
  *           - phUSD.setMinter(tempStaker, false)  - revoke temp minter authorization
@@ -139,17 +147,15 @@ contract PostMigrationCleanup is Script {
         try vm.parseJsonUint(deploymentsRaw, ".usdeSkimmed") returns (uint256 v) {
             usdeSkimmed = v;
         } catch {}
+        // Skims are read purely for the 4b/5b diagnostic logs below — they no longer gate any
+        // require (the buffer sanity band was removed, YS-10). Default 0 if not recorded.
         uint256 dolaSkimmed = 0;
-        bool dolaSkimRecorded = false;
         try vm.parseJsonUint(deploymentsRaw, ".dolaSkimmed") returns (uint256 v) {
             dolaSkimmed = v;
-            dolaSkimRecorded = true;
         } catch {}
         uint256 usdcSkimmed = 0;
-        bool usdcSkimRecorded = false;
         try vm.parseJsonUint(deploymentsRaw, ".usdcSkimmed") returns (uint256 v) {
             usdcSkimmed = v;
-            usdcSkimRecorded = true;
         } catch {}
 
         // Read expected staker counts from leg2.
@@ -197,40 +203,31 @@ contract PostMigrationCleanup is Script {
         console.log("  4. ysDolaV2.principalOf > 0:", dolaP, "OK");
         console.log("  5. ysUsdcV2.principalOf > 0:", usdcP, "OK");
 
-        // 4b-5b. Buffer-intact check. The unattributed principal buffer is the excess of strategy-side
-        // principal over staker-side totalStaked: every user deposit credits the SAME amount to both
-        // principalOf and totalStaked, so their difference is exactly the swept skim surplus (folded in
-        // by ResetAndRewire's setYieldStrategy idle sweep) plus migration rounding dust.
+        // 4b-5b. Hard solvency invariant (the real safety property): strategy-side principal must
+        // cover staker-side totalStaked. Every user deposit credits the SAME amount to both
+        // principalOf and totalStaked, so a negative difference would mean user credits exceed
+        // strategy principal — the strategy is insolvent w.r.t. its stakers — and cleanup must abort.
         //
-        //   buffer = principalOf(token, original) - poolInfo(token).totalStaked  ≈  <token>Skimmed
+        //   solvent  <=>  principalOf(token, original) >= poolInfo(token).totalStaked
         //
-        // Hard solvency invariant (no magic tolerance): principalOf >= totalStaked. A negative buffer
-        // would mean user credits exceed strategy principal — i.e. the strategy is insolvent w.r.t. its
-        // stakers — and must abort cleanup. When the skim amount was recorded, also gate against gross
-        // misaccounting / drainage with a generous sanity band (½×..2× skimmed); the precise "≈" match is
-        // diagnostic-only and logged, since per-user min(R,P) and ERC4626 rounding dust make it inexact.
+        // The "buffer" (principalOf - totalStaked) is a pure DIAGNOSTIC, logged but NOT bounded. There
+        // is deliberately NO sanity band: the buffer is EXPECTED to far exceed the recorded skim.
+        // leg-1 initiateMigration realizes the old strategy's whole position into idle, which exceeds
+        // credited principal by the strategy's accrued yield; ResetAndRewire's setYieldStrategy
+        // idle-sweep then folds that entire excess into V2 principal. So buffer = skim +
+        // realize-over-credit surplus, with the surplus dominating (on fork the USDC buffer was ~51x
+        // the skim). The earlier [skim/2, skim*2] band was built on the false premise buffer ≈ skim and
+        // would revert valid migrated state before the minter-revocation mutation could run.
         (, , , uint256 dolaTotalStaked) = IStakerFull(ORIGINAL_STABLE_STAKER).poolInfo(DOLA);
         (, , , uint256 usdcTotalStaked) = IStakerFull(ORIGINAL_STABLE_STAKER).poolInfo(USDC);
         require(dolaP >= dolaTotalStaked, "Verify 4b FAILED: ysDolaV2 principal < totalStaked (insolvent)");
         require(usdcP >= usdcTotalStaked, "Verify 5b FAILED: ysUsdcV2 principal < totalStaked (insolvent)");
         uint256 dolaBufferActual = dolaP - dolaTotalStaked;
         uint256 usdcBufferActual = usdcP - usdcTotalStaked;
-        console.log("  4b. DOLA buffer (principal - totalStaked):", dolaBufferActual, "expected ~dolaSkimmed");
-        console.log("      dolaSkimmed:", dolaSkimmed);
-        console.log("  5b. USDC buffer (principal - totalStaked):", usdcBufferActual, "expected ~usdcSkimmed");
-        console.log("      usdcSkimmed:", usdcSkimmed);
-        if (dolaSkimRecorded && dolaSkimmed > 0) {
-            require(
-                dolaBufferActual >= dolaSkimmed / 2 && dolaBufferActual <= dolaSkimmed * 2,
-                "Verify 4b FAILED: DOLA buffer not within sanity band of dolaSkimmed"
-            );
-        }
-        if (usdcSkimRecorded && usdcSkimmed > 0) {
-            require(
-                usdcBufferActual >= usdcSkimmed / 2 && usdcBufferActual <= usdcSkimmed * 2,
-                "Verify 5b FAILED: USDC buffer not within sanity band of usdcSkimmed"
-            );
-        }
+        console.log("  4b. DOLA buffer (principal - totalStaked):", dolaBufferActual);
+        console.log("      dolaSkimmed (diagnostic only; buffer = skim + realize-over-credit surplus):", dolaSkimmed);
+        console.log("  5b. USDC buffer (principal - totalStaked):", usdcBufferActual);
+        console.log("      usdcSkimmed (diagnostic only; buffer = skim + realize-over-credit surplus):", usdcSkimmed);
 
         // 6-7. Withdrawals enabled (migration complete, not underwater).
         bool dolaWdDisabled = IStakerFull(ORIGINAL_STABLE_STAKER).withdrawDisabled(DOLA);
