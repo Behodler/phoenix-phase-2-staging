@@ -65,6 +65,15 @@ interface IPhUSDSetMinter {
     function setMinter(address minter, bool canMint) external;
 }
 
+/// @dev Minimal admin/view interface for the live StableYieldAccumulator (SYA).
+///      Mirrors the local-interface pattern used in ReplaceSYAMainnet.s.sol (IStrategyAdmin et al.)
+///      rather than heavy-importing the whole StableYieldAccumulator contract. YS-03.
+interface ISYAAdmin {
+    function owner() external view returns (address);
+    function addYieldStrategy(address strategy, address token) external;
+    function getYieldStrategies() external view returns (address[] memory);
+}
+
 contract DeployTempStableStakerAndMigrators is Script {
     // ==========================================
     //   LIVE MAINNET ADDRESSES
@@ -79,6 +88,12 @@ contract DeployTempStableStakerAndMigrators is Script {
 
     address public constant AUTODOLA_VAULT       = 0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d;
     address public constant AUTOUSDC_VAULT       = 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35;
+
+    // YS-03: live StableYieldAccumulator (replace-sya deployment; mainnet-addresses.ts:34).
+    // The SYA is the only authorized withdrawer in the yield pipeline; after migration it must
+    // be able to see + skim the V2 strategies. Owner == OWNER_ADDRESS, so addYieldStrategy on it
+    // is callable in this script's single broadcast.
+    address public constant SYA                  = 0x3C690EC3B2524104dE269bf0F9baa7f045eF8270;
 
     uint256 public constant CHAIN_ID             = 1;
     uint256 public constant SETASIDE_BUFFER      = 10;
@@ -187,10 +202,22 @@ contract DeployTempStableStakerAndMigrators is Script {
         ysDolaV2.setSetAsideBufferRecipient(ORIGINAL_STABLE_STAKER);
         ysDolaV2.setSetAsideBuffer(ORIGINAL_STABLE_STAKER, SETASIDE_BUFFER);
 
+        // YS-03: authorize the live SYA to skim surplus from ysDolaV2, and register it in the
+        // SYA's strategy list. Without these the migrated principal is invisible/un-skimmable to
+        // the SYA and the 10% buffer above can never trigger (a buffer with no consumer is dead).
+        console.log("--- YS-03: authorizing + registering ysDolaV2 on SYA ---");
+        ysDolaV2.setWithdrawer(SYA, true);
+        ISYAAdmin(SYA).addYieldStrategy(address(ysDolaV2), DOLA);
+
         console.log("--- wiring ysUsdcV2 to original staker (setClient + buffer) ---");
         ysUsdcV2.setClient(ORIGINAL_STABLE_STAKER, true);
         ysUsdcV2.setSetAsideBufferRecipient(ORIGINAL_STABLE_STAKER);
         ysUsdcV2.setSetAsideBuffer(ORIGINAL_STABLE_STAKER, SETASIDE_BUFFER);
+
+        // YS-03: same for ysUsdcV2.
+        console.log("--- YS-03: authorizing + registering ysUsdcV2 on SYA ---");
+        ysUsdcV2.setWithdrawer(SYA, true);
+        ISYAAdmin(SYA).addYieldStrategy(address(ysUsdcV2), USDC);
 
         // ---- Step 4: write deployments JSON ----
         string memory json = string(
@@ -217,7 +244,28 @@ contract DeployTempStableStakerAndMigrators is Script {
             vm.stopBroadcast();
         }
 
+        _verifySyaWiring();
+
         _printSummary();
+    }
+
+    /// @dev YS-03 post-asserts: mirror ReplaceSYAMainnet.s.sol:295-301. The SYA must be an
+    ///      authorized withdrawer on both V2 strategies and both must appear in its strategy list.
+    ///      Never assert a buffer size (done above) without asserting a consumer for it.
+    function _verifySyaWiring() internal view {
+        require(ysDolaV2.authorizedWithdrawers(SYA), "ysDolaV2: SYA not authorized withdrawer");
+        require(ysUsdcV2.authorizedWithdrawers(SYA), "ysUsdcV2: SYA not authorized withdrawer");
+
+        address[] memory registered = ISYAAdmin(SYA).getYieldStrategies();
+        bool dolaRegistered;
+        bool usdcRegistered;
+        for (uint256 i = 0; i < registered.length; i++) {
+            if (registered[i] == address(ysDolaV2)) dolaRegistered = true;
+            if (registered[i] == address(ysUsdcV2)) usdcRegistered = true;
+        }
+        require(dolaRegistered, "SYA: ysDolaV2 not registered in strategy list");
+        require(usdcRegistered, "SYA: ysUsdcV2 not registered in strategy list");
+        console.log("YS-03: SYA wiring verified (both V2 strategies authorized + registered)");
     }
 
     function _printSummary() internal view {

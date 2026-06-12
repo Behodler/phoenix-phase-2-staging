@@ -55,6 +55,13 @@ interface IYSView {
     function principalOf(address token, address account) external view returns (uint256);
     function setAsideBufferSize(address client) external view returns (uint256);
     function setAsideBufferRecipient() external view returns (address);
+    // YS-03: a configured buffer is dead unless a consumer (the SYA withdrawer) exists for it.
+    function authorizedWithdrawers(address withdrawer) external view returns (bool);
+}
+
+/// @dev YS-03: minimal view interface for the live StableYieldAccumulator (SYA) strategy list.
+interface ISYAAdmin {
+    function getYieldStrategies() external view returns (address[] memory);
 }
 
 /// @dev Minimal interface for phUSD minter authorization.
@@ -75,6 +82,9 @@ contract PostMigrationCleanup is Script {
     address public constant DOLA                   = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
     address public constant USDC                   = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address public constant USDe                   = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
+
+    // YS-03: live StableYieldAccumulator (replace-sya deployment; mainnet-addresses.ts:34).
+    address public constant SYA                    = 0x3C690EC3B2524104dE269bf0F9baa7f045eF8270;
 
     uint256 public constant CHAIN_ID               = 1;
     uint256 public constant EXPECTED_BUFFER        = 10;
@@ -230,6 +240,31 @@ contract PostMigrationCleanup is Script {
         );
         console.log("  10. ysUsdcV2 bufferSize:", usdcBuffer, "OK");
         console.log("  11. ysUsdcV2 bufferRecipient:", usdcRecipient, "OK");
+
+        // 11a-11b. YS-03 consumer-exists post-conditions. A configured buffer (verify 8-11 above)
+        // is dead value-leakage unless a consumer can actually skim it: the SYA must be an
+        // authorized withdrawer on each V2 strategy AND each must be registered in the SYA's
+        // strategy list. These are asserted right next to the buffer-size checks so the two can
+        // never drift apart. (Old YS_DOLA/YS_USDC entries are deliberately left in the SYA list
+        // until YS-12; their presence is benign and not checked here.)
+        require(
+            IYSView(ysDolaV2).authorizedWithdrawers(SYA),
+            "Verify 11a FAILED: ysDolaV2 has buffer but no SYA consumer (not authorized withdrawer)"
+        );
+        require(
+            IYSView(ysUsdcV2).authorizedWithdrawers(SYA),
+            "Verify 11b FAILED: ysUsdcV2 has buffer but no SYA consumer (not authorized withdrawer)"
+        );
+        address[] memory syaStrategies = ISYAAdmin(SYA).getYieldStrategies();
+        bool dolaRegistered;
+        bool usdcRegistered;
+        for (uint256 i = 0; i < syaStrategies.length; i++) {
+            if (syaStrategies[i] == ysDolaV2) dolaRegistered = true;
+            if (syaStrategies[i] == ysUsdcV2) usdcRegistered = true;
+        }
+        require(dolaRegistered, "Verify 11c FAILED: ysDolaV2 not registered in SYA strategy list");
+        require(usdcRegistered, "Verify 11d FAILED: ysUsdcV2 not registered in SYA strategy list");
+        console.log("  11a-d. SYA consumer exists: both V2 strategies authorized + registered OK");
 
         // 12. USDe skim balance check.
         if (usdeSkimmed > 0) {
