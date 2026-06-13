@@ -268,9 +268,14 @@ async function main() {
         const allStakers = [];
         let start = 0;
 
+        // YS-04 fix (story-065): getStakersRange(start, end) is HALF-OPEN — it returns indices
+        // [start, end) (StableStaker.sol:666 `for (i = start; i < end; i++)`, length `end - start`).
+        // The previous `end = min(start+PAGE, count) - 1` + `start = end + 1` treated it as inclusive
+        // and dropped the last staker of the final page (e.g. count=50 fetched only indices 0..48).
+        // Correct half-open paging: end = min(start+PAGE, count) (exclusive), advance start = end.
         while (start < countNum) {
-            const end = Math.min(start + PAGE_SIZE, countNum) - 1;
-            process.stdout.write(`  getStakersRange(${start}, ${end}) ... `);
+            const end = Math.min(start + PAGE_SIZE, countNum);
+            process.stdout.write(`  getStakersRange(${start}, ${end}) [half-open) ... `);
             const page = await publicClient.readContract({
                 address: stakerAddress,
                 abi: STABLE_STAKER_ABI,
@@ -280,7 +285,7 @@ async function main() {
             const addrs = Array.isArray(page) ? page : [page];
             console.log(`${addrs.length} addresses`);
             allStakers.push(...addrs);
-            start = end + 1;
+            start = end;
         }
 
         if (allStakers.length !== countNum) {

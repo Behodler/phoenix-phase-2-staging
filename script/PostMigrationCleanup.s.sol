@@ -126,9 +126,12 @@ contract PostMigrationCleanup is Script {
         address ysUsdcV2       = vm.parseJsonAddress(deploymentsRaw, ".ysUsdcV2");
         address tempStakerAddr = vm.parseJsonAddress(deploymentsRaw, ".tempStaker");
 
-        // YS-09: recorded original pausers written by the deploy step. Read defensively (a deployments
-        // JSON produced before the YS-09 hardening will not contain them) — if absent, the restore
-        // step is skipped with a loud warning rather than reverting cleanup.
+        // YS-09 / YS-22: recorded original pausers written by the deploy step. Read defensively, but
+        // YS-22 (story-065): a MISSING recorded pauser must FAIL LOUD, not warn-and-skip. The deploy
+        // step took the pauser role (deployer EOA); skipping the restore would strand that EOA as the
+        // live staker's pauser — a non-governance address able to pause user funds. So if either
+        // pauser is unrecorded (or zero), cleanup reverts and the operator must populate the
+        // deployments JSON with the real recorded pausers before re-running.
         address recordedOrigPauser = address(0);
         bool origPauserRecorded = false;
         try vm.parseJsonAddress(deploymentsRaw, ".origPauser") returns (address v) {
@@ -339,25 +342,26 @@ contract PostMigrationCleanup is Script {
             console.log("  tempStaker.unpause() SKIPPED - already unpaused (resume)");
         }
 
-        if (origPauserRecorded) {
-            if (IStakerFull(ORIGINAL_STABLE_STAKER).pauser() != recordedOrigPauser) {
-                IStakerFull(ORIGINAL_STABLE_STAKER).setPauser(recordedOrigPauser);
-                console.log("  original.setPauser(recorded) done:", recordedOrigPauser);
-            } else {
-                console.log("  original.setPauser(recorded) SKIPPED - already restored (resume)");
-            }
+        // YS-22: fail loud rather than leave the deployer EOA as the live staker's pauser.
+        require(
+            origPauserRecorded && recordedOrigPauser != address(0),
+            "YS-22: origPauser not recorded (or zero) in deployments JSON - refusing to leave deployer EOA as staker pauser; populate .origPauser and re-run"
+        );
+        require(
+            tempPauserRecorded && recordedTempPauser != address(0),
+            "YS-22: tempPauser not recorded (or zero) in deployments JSON - refusing to leave deployer EOA as tempStaker pauser; populate .tempPauser and re-run"
+        );
+        if (IStakerFull(ORIGINAL_STABLE_STAKER).pauser() != recordedOrigPauser) {
+            IStakerFull(ORIGINAL_STABLE_STAKER).setPauser(recordedOrigPauser);
+            console.log("  original.setPauser(recorded) done:", recordedOrigPauser);
         } else {
-            console.log("  WARNING: origPauser not recorded in deployments JSON - pauser NOT restored");
+            console.log("  original.setPauser(recorded) SKIPPED - already restored (resume)");
         }
-        if (tempPauserRecorded) {
-            if (IStakerFull(tempStakerAddr).pauser() != recordedTempPauser) {
-                IStakerFull(tempStakerAddr).setPauser(recordedTempPauser);
-                console.log("  tempStaker.setPauser(recorded) done:", recordedTempPauser);
-            } else {
-                console.log("  tempStaker.setPauser(recorded) SKIPPED - already restored (resume)");
-            }
+        if (IStakerFull(tempStakerAddr).pauser() != recordedTempPauser) {
+            IStakerFull(tempStakerAddr).setPauser(recordedTempPauser);
+            console.log("  tempStaker.setPauser(recorded) done:", recordedTempPauser);
         } else {
-            console.log("  WARNING: tempPauser not recorded in deployments JSON - pauser NOT restored");
+            console.log("  tempStaker.setPauser(recorded) SKIPPED - already restored (resume)");
         }
         console.log("");
 
@@ -370,18 +374,16 @@ contract PostMigrationCleanup is Script {
         // ---- YS-09 post-assert: both stakers unpaused and pausers restored ----
         require(!IStakerFull(ORIGINAL_STABLE_STAKER).paused(), "Post-assert: original staker still paused");
         require(!IStakerFull(tempStakerAddr).paused(), "Post-assert: tempStaker still paused");
-        if (origPauserRecorded) {
-            require(
-                IStakerFull(ORIGINAL_STABLE_STAKER).pauser() == recordedOrigPauser,
-                "Post-assert: original staker pauser not restored to recorded value"
-            );
-        }
-        if (tempPauserRecorded) {
-            require(
-                IStakerFull(tempStakerAddr).pauser() == recordedTempPauser,
-                "Post-assert: tempStaker pauser not restored to recorded value"
-            );
-        }
+        // YS-22: unconditional — restore is now mandatory (reverts above if unrecorded), so the
+        // deployer EOA can never remain as either staker's pauser.
+        require(
+            IStakerFull(ORIGINAL_STABLE_STAKER).pauser() == recordedOrigPauser,
+            "Post-assert: original staker pauser not restored to recorded value"
+        );
+        require(
+            IStakerFull(tempStakerAddr).pauser() == recordedTempPauser,
+            "Post-assert: tempStaker pauser not restored to recorded value"
+        );
         console.log("YS-09: both stakers unpaused; pausers restored OK");
         console.log("");
 
