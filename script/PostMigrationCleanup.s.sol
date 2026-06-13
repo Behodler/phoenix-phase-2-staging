@@ -347,9 +347,16 @@ contract PostMigrationCleanup is Script {
             origPauserRecorded && recordedOrigPauser != address(0),
             "YS-22: origPauser not recorded (or zero) in deployments JSON - refusing to leave deployer EOA as staker pauser; populate .origPauser and re-run"
         );
+        // YS-22 asymmetry: origPauser (live staker) must never be zero — leaving the deployer EOA as
+        // the LIVE staker's pauser is the real hazard, so its zero-rejection above stays. tempPauser,
+        // by contrast, is legitimately address(0): the freshly deployed tempStaker has no pauser set
+        // (StableStaker constructor leaves it zero), the Step-1 deploy script records that zero by
+        // design, and restoring it to zero here is a harmless no-op on a decommissioned staker. So we
+        // require only that the key was *recorded* (a genuinely missing key still fails loud) and
+        // allow a recorded zero to flow through the restore branch below as restore-to-zero.
         require(
-            tempPauserRecorded && recordedTempPauser != address(0),
-            "YS-22: tempPauser not recorded (or zero) in deployments JSON - refusing to leave deployer EOA as tempStaker pauser; populate .tempPauser and re-run"
+            tempPauserRecorded,
+            "YS-22: tempPauser not recorded in deployments JSON - populate .tempPauser and re-run"
         );
         if (IStakerFull(ORIGINAL_STABLE_STAKER).pauser() != recordedOrigPauser) {
             IStakerFull(ORIGINAL_STABLE_STAKER).setPauser(recordedOrigPauser);
