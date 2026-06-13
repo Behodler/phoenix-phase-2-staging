@@ -462,28 +462,45 @@ contract SkimAndLeg1Migration is Script {
         IOldYS(oldYS).withdrawAsOwner(OLD_MINTER, ORIGINAL_STABLE_STAKER, principalToWithdraw);
         injected = IERC20(token).balanceOf(ORIGINAL_STABLE_STAKER) - balBefore;
 
-        console.log("    token:", token);
-        console.log("    staker booked / realizable:", stakerBooked, stakerRealizable);
-        console.log("    shortfall:", shortfall);
-        console.log("    minter booked / realizable:", minterBooked, minterRealizable);
-        console.log("    principal withdrawn from minter:", principalToWithdraw);
-        console.log("    underlying injected to staker:", injected);
+        console.log("  [PHASE4] token                 :", token);
+        console.log("  [PHASE4] staker booked         :", stakerBooked);
+        console.log("  [PHASE4] staker realizable     :", stakerRealizable);
+        console.log("  [PHASE4] staker SHORTFALL       :", shortfall);
+        console.log("  [PHASE4] minter booked         :", minterBooked);
+        console.log("  [PHASE4] minter realizable     :", minterRealizable);
+        console.log("  [PHASE4] principal pulled (mntr):", principalToWithdraw);
+        console.log("  [PHASE4] underlying injected    :", injected);
         require(injected > 0, "Phase 4: injection delivered 0 underlying to staker");
         // Loud flag if we under-delivered vs the target shortfall (fork test must confirm sufficiency).
         if (injected < shortfall) {
-            console.log("    WARNING: injected < shortfall by:", shortfall - injected);
-            console.log("    (rounding/below-par dust; verify staker is whole on fork before broadcast)");
+            console.log("  [PHASE4] *** WARNING: injected < shortfall by:", shortfall - injected);
+            console.log("  [PHASE4] *** rounding/below-par dust - CONFIRM staker whole on fork before broadcast");
+        } else {
+            console.log("  [PHASE4] OK: injected >= shortfall (staker shortfall fully covered)");
         }
         return injected;
     }
 
     function _printSummary() internal view {
         console.log("==========================================");
-        console.log("  SUMMARY (story 060 step 2)");
+        console.log("  SUMMARY (story 060 step 2 + story 065 Phase 4)");
         console.log("==========================================");
-        console.log("DOLA skimmed:  ", dolaSkimmed);
-        console.log("USDC skimmed:  ", usdcSkimmed);
-        console.log("USDe skimmed:  ", usdeSkimmed);
+        console.log("DOLA skimmed:      ", dolaSkimmed);
+        console.log("USDC skimmed:      ", usdcSkimmed);
+        console.log("USDe skimmed:      ", usdeSkimmed);
+        console.log("DOLA pre-funded:   ", dolaPrefunded);
+        console.log("USDC pre-funded:   ", usdcPrefunded);
+        console.log("");
+        console.log("--- PHASE 4 OPERATOR VERIFICATION (story 065 safety crux) ---");
+        console.log("The pre-funded amounts above are now IDLE on the original staker. They are NOT");
+        console.log("yet booked as principal. The chain of custody to verify on this fork run:");
+        console.log("  1. [HERE] staker idle balance increased by dola/usdcPrefunded (post-assert above).");
+        console.log("  2. [ResetAndRewire] setYieldStrategy sweeps that idle into V2 as staker principal.");
+        console.log("  3. [Leg2Migration] users migrate back onto V2; CONFIRM each token's");
+        console.log("     staker_realized == staker_booked (zero haircut). THIS is the definitive gate.");
+        console.log("If any [PHASE4] WARNING above fired (injected < shortfall), step 3 may NOT hold -");
+        console.log("do not broadcast; revisit _prefundShortfall scaling. See handoff doc in story 065.");
+        console.log("-------------------------------------------------------------");
         console.log("");
         if (isPreview) {
             console.log("PREVIEW complete. No on-chain state changed.");
