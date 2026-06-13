@@ -21,8 +21,10 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *           3. original.stakerCount(USDC) == expected from leg2 JSON
  *           4. ysDolaV2.principalOf(DOLA, original) > 0
  *              4b. ysDolaV2 principal >= original.poolInfo(DOLA).totalStaked (solvent)
+ *              4c. ysDolaV2 principal >= .dolaPreMigBooked (zero-haircut floor, story-067)
  *           5. ysUsdcV2.principalOf(USDC, original) > 0
  *              5b. ysUsdcV2 principal >= original.poolInfo(USDC).totalStaked (solvent)
+ *              5c. ysUsdcV2 principal >= .usdcPreMigBooked (zero-haircut floor, story-067)
  *           6. original.withdrawDisabled(DOLA) == false
  *           7. original.withdrawDisabled(USDC) == false
  *           8. ysDolaV2.setAsideBufferSize(original) == 10
@@ -231,6 +233,29 @@ contract PostMigrationCleanup is Script {
         console.log("      dolaSkimmed (diagnostic only; buffer = skim + realize-over-credit surplus):", dolaSkimmed);
         console.log("  5b. USDC buffer (principal - totalStaked):", usdcBufferActual);
         console.log("      usdcSkimmed (diagnostic only; buffer = skim + realize-over-credit surplus):", usdcSkimmed);
+
+        // 4c-5c. ZERO-HAIRCUT FLOOR GATE (story-067, audit 75e4305a). The 4b/5b checks above anchor to
+        // the POST-leg-2 re-booked totalStaked; this stronger gate anchors to the PRE-MIGRATION booked
+        // total (the original obligation _prefundShortfall was built to cover, captured in leg 1 from
+        // the leg1-stakers.json snapshot and persisted by SkimAndLeg1Migration). It proves the whole
+        // two-leg bounce never haircut a staker: realized principal after migration is never less than
+        // what was booked before it. This is a `>=` FLOOR, NOT equality — realized legitimately exceeds
+        // booked because setYieldStrategy folds the unattributed skim buffer in as surplus; an `==`
+        // assert (the "pointless by construction" check the audit named) would falsely revert. Surplus
+        // stays with the protocol. preMigBooked is read with parseJsonUint, matching the vm.toString
+        // (decimal uint) serialization the leg-1 script writes.
+        uint256 dolaPreMigBooked = vm.parseJsonUint(deploymentsRaw, ".dolaPreMigBooked");
+        uint256 usdcPreMigBooked = vm.parseJsonUint(deploymentsRaw, ".usdcPreMigBooked");
+        require(
+            dolaP >= dolaPreMigBooked,
+            "Zero-haircut gate FAILED: DOLA realized principal < pre-migration booked"
+        );
+        require(
+            usdcP >= usdcPreMigBooked,
+            "Zero-haircut gate FAILED: USDC realized principal < pre-migration booked"
+        );
+        console.log("  4c. Zero-haircut gate OK: DOLA realized >= pre-migration booked:", dolaPreMigBooked);
+        console.log("  5c. Zero-haircut gate OK: USDC realized >= pre-migration booked:", usdcPreMigBooked);
 
         // 6-7. Withdrawals enabled (migration complete, not underwater).
         bool dolaWdDisabled = IStakerFull(ORIGINAL_STABLE_STAKER).withdrawDisabled(DOLA);
