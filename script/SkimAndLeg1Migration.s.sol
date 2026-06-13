@@ -41,6 +41,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 interface IOldYS {
     function owner() external view returns (address);
     function skimSurplus(address token, address recipient) external returns (uint256);
+    // YS-02: owner must be an authorized withdrawer for skimSurplus (onlyAuthorizedWithdrawer).
+    function authorizedWithdrawers(address) external view returns (bool);
+    function setWithdrawer(address withdrawer, bool _auth) external; // onlyOwner
+    // Phase 4 shortfall pre-fund (story-065): read staker/minter positions + owner-evacuate.
+    function principalOf(address token, address account) external view returns (uint256);
+    function totalBalanceOf(address token, address account) external view returns (uint256);
+    function withdrawAsOwner(address client, address recipient, uint256 amount) external; // onlyOwner
 }
 
 /// @dev StableStaker pool lifecycle (StableStaker.sol: enum PoolState { Active, Migrating }).
@@ -79,6 +86,8 @@ contract SkimAndLeg1Migration is Script {
 
     address public constant OWNER_ADDRESS          = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
     address public constant ORIGINAL_STABLE_STAKER = 0xbce8ABC09BaEDCabE93419bF875f6186e182079A;
+    // Phase 4 (story-065): old phUSD minter — the shortfall shock-absorber the pre-fund draws from.
+    address public constant OLD_MINTER             = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
 
     // Old (buggy) yield strategies to skim before the swap.
     address public constant YS_DOLA_OLD            = 0x90ce274b20A2aF4265152B369d09ce6E6Dc177F9;
@@ -102,6 +111,10 @@ contract SkimAndLeg1Migration is Script {
     uint256 public dolaSkimmed;
     uint256 public usdcSkimmed;
     uint256 public usdeSkimmed;
+    // Phase 4 (story-065): shortfall pre-funded from the minter onto the original staker as idle
+    // balance (swept into V2 by ResetAndRewire's setYieldStrategy).
+    uint256 public dolaPrefunded;
+    uint256 public usdcPrefunded;
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "SkimAndLeg1Migration: wrong chain - expected mainnet (1)");
@@ -215,6 +228,19 @@ contract SkimAndLeg1Migration is Script {
         console.log("tempStaker:  ", tempStakerAddr);
         console.log("");
 
+        // ---- Step 0 (YS-02): ensure owner is an authorized WITHDRAWER on all 3 old strategies ----
+        // skimSurplus is onlyAuthorizedWithdrawer; without this the leg-1 skim is DOA (YS-02). The
+        // grant is onlyOwner and idempotent (setting true when already true is harmless).
+        console.log("=== Step 0 (YS-02): grant owner authorizedWithdrawer on old strategies ===");
+        _ensureWithdrawer(YS_DOLA_OLD);
+        _ensureWithdrawer(YS_USDC_OLD);
+        _ensureWithdrawer(YS_USDE);
+        // Assert WITHDRAWER status (not just owner()) per YS-02 before skimming.
+        require(IOldYS(YS_DOLA_OLD).authorizedWithdrawers(OWNER_ADDRESS), "YS-02: owner not withdrawer on YS_DOLA_OLD");
+        require(IOldYS(YS_USDC_OLD).authorizedWithdrawers(OWNER_ADDRESS), "YS-02: owner not withdrawer on YS_USDC_OLD");
+        require(IOldYS(YS_USDE).authorizedWithdrawers(OWNER_ADDRESS), "YS-02: owner not withdrawer on YS_USDE");
+        console.log("");
+
         // ---- Step 1: skim all 3 old strategies ----
         console.log("=== Step 1: skim surplus from old strategies ===");
         dolaSkimmed = IOldYS(YS_DOLA_OLD).skimSurplus(DOLA, ORIGINAL_STABLE_STAKER);
@@ -223,6 +249,26 @@ contract SkimAndLeg1Migration is Script {
         console.log("  USDC skimmed:  ", usdcSkimmed);
         usdeSkimmed = IOldYS(YS_USDE).skimSurplus(USDe, ORIGINAL_STABLE_STAKER);
         console.log("  USDe skimmed:  ", usdeSkimmed);
+        console.log("");
+
+        // ---- Step 1.5 (Phase 4 / story-065): shortfall pre-fund — THE SAFETY CRUX ----
+        // ⚠️ FORK-VALIDATE BEFORE BROADCAST. Getting this wrong harms staker users. Below-par on the
+        // staker must be IMPOSSIBLE after this step; the minter (parked TVL) absorbs the deficit.
+        //
+        // After the skim, the original staker still holds its FULL client position on each old
+        // strategy. If the strategy is below par (over-credit bug), the staker's realizable value
+        // (totalBalanceOf = its pro-rata share of real vault value) is less than its booked principal
+        // (principalOf). That gap is the stakerShortfall. We withdraw exactly that gap from the
+        // MINTER's allotment (owner-gated withdrawAsOwner; works even though Phase 3 already revoked
+        // the minter's client/mint roles) and deliver it to the original staker as idle balance.
+        // ResetAndRewire's setYieldStrategy then sweeps that idle into V2 as principal buffer, so the
+        // staker realizes 100% of booked principal with zero haircut. HARD-REVERT if the minter
+        // cannot cover the shortfall — never silently socialize onto staker users.
+        console.log("=== Step 1.5 (Phase 4): shortfall pre-fund from minter -> staker ===");
+        dolaPrefunded = _prefundShortfall(YS_DOLA_OLD, DOLA);
+        usdcPrefunded = _prefundShortfall(YS_USDC_OLD, USDC);
+        console.log("  DOLA pre-funded:", dolaPrefunded);
+        console.log("  USDC pre-funded:", usdcPrefunded);
         console.log("");
 
         // ---- Step 2: USDC approve + PhlimboV2 collectReward ----
@@ -301,7 +347,18 @@ contract SkimAndLeg1Migration is Script {
                 "script/migration-inputs/ys-swap-deployments.json",
                 ".usdeSkimmed"
             );
-            console.log("  Skim amounts written to ys-swap-deployments.json");
+            // Phase 4 (story-065): persist pre-funded shortfall amounts for the audit trail.
+            vm.writeJson(
+                vm.toString(dolaPrefunded),
+                "script/migration-inputs/ys-swap-deployments.json",
+                ".dolaPrefunded"
+            );
+            vm.writeJson(
+                vm.toString(usdcPrefunded),
+                "script/migration-inputs/ys-swap-deployments.json",
+                ".usdcPrefunded"
+            );
+            console.log("  Skim + pre-fund amounts written to ys-swap-deployments.json");
         }
 
         // ---- Post-assert ----
@@ -323,13 +380,15 @@ contract SkimAndLeg1Migration is Script {
         // balance, and leg1's batchMigrate only pays out min(R,P) user credits (≤ realized principal),
         // so the parked surplus cannot have leaked to exiting users. ResetAndRewire's setYieldStrategy
         // sweep later folds this idle balance into the V2 strategies as the principal buffer.
+        // Idle balance must hold BOTH the skim surplus AND the Phase-4 shortfall pre-fund — both are
+        // parked on the original staker for ResetAndRewire's setYieldStrategy to sweep into V2.
         require(
-            IERC20(DOLA).balanceOf(ORIGINAL_STABLE_STAKER) >= dolaSkimmed,
-            "Post-assert: original DOLA balance < dolaSkimmed - surplus leaked"
+            IERC20(DOLA).balanceOf(ORIGINAL_STABLE_STAKER) >= dolaSkimmed + dolaPrefunded,
+            "Post-assert: original DOLA balance < dolaSkimmed + dolaPrefunded - idle leaked"
         );
         require(
-            IERC20(USDC).balanceOf(ORIGINAL_STABLE_STAKER) >= usdcSkimmed,
-            "Post-assert: original USDC balance < usdcSkimmed - surplus leaked"
+            IERC20(USDC).balanceOf(ORIGINAL_STABLE_STAKER) >= usdcSkimmed + usdcPrefunded,
+            "Post-assert: original USDC balance < usdcSkimmed + usdcPrefunded - idle leaked"
         );
         require(
             IERC20(USDe).balanceOf(ORIGINAL_STABLE_STAKER) >= usdeSkimmed,
@@ -352,6 +411,70 @@ contract SkimAndLeg1Migration is Script {
         }
 
         _printSummary();
+    }
+
+    /// @dev YS-02: idempotently grant the owner authorizedWithdrawer on an old strategy.
+    function _ensureWithdrawer(address ys) internal {
+        if (!IOldYS(ys).authorizedWithdrawers(OWNER_ADDRESS)) {
+            IOldYS(ys).setWithdrawer(OWNER_ADDRESS, true);
+            console.log("  granted withdrawer on:", ys);
+        } else {
+            console.log("  already withdrawer on:", ys);
+        }
+    }
+
+    /// @dev Phase 4 (story-065): pre-fund the staker's below-par shortfall from the minter.
+    ///      Returns the underlying amount delivered to the original staker (idle balance).
+    ///
+    ///      ⚠️ SAFETY CRUX — FORK-VALIDATE. The minter is itself below par on the shared pool, so
+    ///      withdrawing `shortfall` in PRINCIPAL terms would deliver LESS than `shortfall` underlying.
+    ///      We therefore scale the withdrawn principal by the minter's booked/realizable ratio so the
+    ///      staker receives ~`shortfall` actual underlying. The exact delivered amount must be
+    ///      confirmed on a mainnet fork (and the Phase-5 `staker_realized == staker_booked` assert is
+    ///      the ultimate gate). HARD-REVERT if the minter's realizable cannot cover the shortfall.
+    function _prefundShortfall(address oldYS, address token) internal returns (uint256 injected) {
+        uint256 stakerBooked     = IOldYS(oldYS).principalOf(token, ORIGINAL_STABLE_STAKER);
+        uint256 stakerRealizable = IOldYS(oldYS).totalBalanceOf(token, ORIGINAL_STABLE_STAKER);
+        if (stakerBooked <= stakerRealizable) {
+            console.log("  no staker shortfall (booked <= realizable), token:", token);
+            return 0;
+        }
+        uint256 shortfall = stakerBooked - stakerRealizable;
+
+        uint256 minterBooked     = IOldYS(oldYS).principalOf(token, OLD_MINTER);
+        uint256 minterRealizable = IOldYS(oldYS).totalBalanceOf(token, OLD_MINTER);
+        // The minter (parked TVL) must be able to cover the shortfall in REAL underlying terms.
+        require(
+            minterRealizable >= shortfall,
+            "Phase 4: staker shortfall exceeds minter realizable allotment - OPERATOR ESCALATION (never socialize onto stakers)"
+        );
+        require(minterRealizable > 0, "Phase 4: minter has zero realizable - cannot pre-fund");
+
+        // Principal to withdraw so the delivered underlying ~= shortfall:
+        //   principalToWithdraw = shortfall * minterBooked / minterRealizable  (>= shortfall when below par)
+        // Bounded above by minterBooked (since shortfall <= minterRealizable <= minterBooked).
+        uint256 principalToWithdraw = (shortfall * minterBooked) / minterRealizable;
+        if (principalToWithdraw > minterBooked) {
+            principalToWithdraw = minterBooked;
+        }
+
+        uint256 balBefore = IERC20(token).balanceOf(ORIGINAL_STABLE_STAKER);
+        IOldYS(oldYS).withdrawAsOwner(OLD_MINTER, ORIGINAL_STABLE_STAKER, principalToWithdraw);
+        injected = IERC20(token).balanceOf(ORIGINAL_STABLE_STAKER) - balBefore;
+
+        console.log("    token:", token);
+        console.log("    staker booked / realizable:", stakerBooked, stakerRealizable);
+        console.log("    shortfall:", shortfall);
+        console.log("    minter booked / realizable:", minterBooked, minterRealizable);
+        console.log("    principal withdrawn from minter:", principalToWithdraw);
+        console.log("    underlying injected to staker:", injected);
+        require(injected > 0, "Phase 4: injection delivered 0 underlying to staker");
+        // Loud flag if we under-delivered vs the target shortfall (fork test must confirm sufficiency).
+        if (injected < shortfall) {
+            console.log("    WARNING: injected < shortfall by:", shortfall - injected);
+            console.log("    (rounding/below-par dust; verify staker is whole on fork before broadcast)");
+        }
+        return injected;
     }
 
     function _printSummary() internal view {
