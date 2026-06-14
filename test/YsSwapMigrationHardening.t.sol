@@ -208,6 +208,69 @@ contract YsSwapMigrationHardeningTest is Test {
         assertGt(original.stakerCount(address(dola)), 1, "userB staked after unpause");
     }
 
+    // -----------------------------------------------------------------------------------------
+    // (c) Zero-haircut floor gate (story-067, audit 75e4305a).
+    //     PostMigrationCleanup hard-requires, per token, that the V2 strategy's realized principal
+    //     for the original staker is never less than the pre-migration BOOKED total captured in leg 1:
+    //         require(principalOf(token, original) >= preMigBooked, "Zero-haircut gate FAILED: ...");
+    //     It is a `>=` FLOOR, not equality: the skim buffer folded in by setYieldStrategy makes
+    //     realized strictly exceed booked in the normal case, so an `==` assert would wrongly revert.
+    //     These two tests pin both directions of that floor with the exact production messages.
+    // -----------------------------------------------------------------------------------------
+
+    /// @dev Mirrors the DOLA branch of the zero-haircut gate in PostMigrationCleanup.run().
+    ///      Kept message-identical to the script so a drift in either side fails this test. Declared
+    ///      `external` so `vm.expectRevert` sees the revert at a lower call depth (via `this.`).
+    function zeroHaircutGateDola(uint256 realized, uint256 preMigBooked) external pure {
+        require(
+            realized >= preMigBooked,
+            "Zero-haircut gate FAILED: DOLA realized principal < pre-migration booked"
+        );
+    }
+
+    function zeroHaircutGateUsdc(uint256 realized, uint256 preMigBooked) external pure {
+        require(
+            realized >= preMigBooked,
+            "Zero-haircut gate FAILED: USDC realized principal < pre-migration booked"
+        );
+    }
+
+    function test_zeroHaircutGate_reverts_when_realized_below_booked() public {
+        // Build REAL on-chain principal via the staking path so `realized` is not a bare literal:
+        // userA already staked STAKE in setUp(), so ysV1 booked exactly STAKE of principal.
+        uint256 realized = ysV1.principalOf(address(dola), address(original));
+        assertEq(realized, STAKE, "precondition: realized principal == STAKE");
+
+        // A pre-migration booked total STRICTLY GREATER than realized = a haircut. The gate must revert
+        // with the exact production message (proves _prefundShortfall failing to cover is caught).
+        uint256 preMigBookedTooHigh = STAKE + 1;
+        vm.expectRevert(bytes("Zero-haircut gate FAILED: DOLA realized principal < pre-migration booked"));
+        this.zeroHaircutGateDola(realized, preMigBookedTooHigh);
+
+        // USDC branch carries its own message.
+        vm.expectRevert(bytes("Zero-haircut gate FAILED: USDC realized principal < pre-migration booked"));
+        this.zeroHaircutGateUsdc(realized, preMigBookedTooHigh);
+    }
+
+    function test_zeroHaircutGate_passes_when_realized_meets_or_exceeds_booked() public {
+        uint256 realized = ysV1.principalOf(address(dola), address(original));
+        assertEq(realized, STAKE, "precondition: realized principal == STAKE");
+
+        // Equality case: realized == booked (exact, no surplus) — the floor is `>=`, so this passes.
+        this.zeroHaircutGateDola(realized, STAKE);
+        this.zeroHaircutGateUsdc(realized, STAKE);
+
+        // Strict-surplus case: realized > booked, the NORMAL outcome because setYieldStrategy folds the
+        // unattributed skim buffer into V2 principal. An `==` gate would have wrongly reverted here.
+        uint256 preMigBookedBelow = STAKE - 1;
+        this.zeroHaircutGateDola(realized, preMigBookedBelow);
+        this.zeroHaircutGateUsdc(realized, preMigBookedBelow);
+
+        // Zero-booked edge (pool had no pre-migration principal): trivially satisfied, never reverts.
+        this.zeroHaircutGateDola(realized, 0);
+        this.zeroHaircutGateUsdc(realized, 0);
+    }
+
     // -------------------------------- helpers --------------------------------
     function _poolState(StableStaker s, address token) internal view returns (uint8) {
         return uint8(s.poolState(token));

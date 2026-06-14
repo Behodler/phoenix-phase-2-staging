@@ -193,6 +193,31 @@ contract SkimAndLeg1Migration is Script {
             "Preflight: stale USDC staker count in leg1-stakers.json - re-run gather"
         );
 
+        // Zero-haircut floor (story-067): on a FIRST run only (pool not yet drained), hard-require the
+        // leg1-stakers.json totalStaked snapshot matches on-chain poolInfo(token).totalStaked. This is
+        // the source of the pre-migration booked total persisted below and enforced as the floor in
+        // PostMigrationCleanup. The check is gated on stakerCount(token) > 0 so it is SKIPPED (not
+        // failed) on a resume — once leg 1 has drained the pool, poolInfo reads 0 while the snapshot
+        // still holds the original booked total. Both pools are paused across the migration window, so
+        // principal cannot move between snapshot and broadcast. poolInfo returns 4 uints; totalStaked
+        // is the 4th (matches gather-migration-inputs.js: poolInfo[3]).
+        if (IStakerView(ORIGINAL_STABLE_STAKER).stakerCount(DOLA) > 0) {
+            (, , , uint256 onChainDola) = IStakerView(ORIGINAL_STABLE_STAKER).poolInfo(DOLA);
+            uint256 snapDola = vm.parseJsonUint(leg1Raw, ".tokens.DOLA.totalStaked");
+            require(
+                snapDola == onChainDola,
+                "Preflight: stale DOLA totalStaked in leg1-stakers.json - re-run gather"
+            );
+        }
+        if (IStakerView(ORIGINAL_STABLE_STAKER).stakerCount(USDC) > 0) {
+            (, , , uint256 onChainUsdc) = IStakerView(ORIGINAL_STABLE_STAKER).poolInfo(USDC);
+            uint256 snapUsdc = vm.parseJsonUint(leg1Raw, ".tokens.USDC.totalStaked");
+            require(
+                snapUsdc == onChainUsdc,
+                "Preflight: stale USDC totalStaked in leg1-stakers.json - re-run gather"
+            );
+        }
+
         console.log("Preflight OK - deployer USDC balance:", IERC20(USDC).balanceOf(OWNER_ADDRESS));
         console.log("leg1 DOLA stakers:", dolaCount);
         console.log("leg1 USDC stakers:", usdcCount);
@@ -358,7 +383,24 @@ contract SkimAndLeg1Migration is Script {
                 "script/migration-inputs/ys-swap-deployments.json",
                 ".usdcPrefunded"
             );
-            console.log("  Skim + pre-fund amounts written to ys-swap-deployments.json");
+            // Zero-haircut floor (story-067): persist the pre-migration booked total per token, the
+            // anchor PostMigrationCleanup gates against (realized principalOf >= preMigBooked). Source
+            // is the FIXED leg1-stakers.json snapshot (preflight above proved it matches chain on the
+            // first run), NOT a live on-chain read — so a leg-1 resume after a mid-suite halt
+            // re-persists the IDENTICAL value instead of the post-drain 0. Serialized via vm.toString
+            // (decimal uint as JSON string) and read back with vm.parseJsonUint on the cleanup side,
+            // matching the dolaSkimmed convention above.
+            vm.writeJson(
+                vm.toString(vm.parseJsonUint(leg1Raw, ".tokens.DOLA.totalStaked")),
+                "script/migration-inputs/ys-swap-deployments.json",
+                ".dolaPreMigBooked"
+            );
+            vm.writeJson(
+                vm.toString(vm.parseJsonUint(leg1Raw, ".tokens.USDC.totalStaked")),
+                "script/migration-inputs/ys-swap-deployments.json",
+                ".usdcPreMigBooked"
+            );
+            console.log("  Skim + pre-fund + preMigBooked amounts written to ys-swap-deployments.json");
         }
 
         // ---- Post-assert ----
@@ -430,8 +472,14 @@ contract SkimAndLeg1Migration is Script {
     ///      withdrawing `shortfall` in PRINCIPAL terms would deliver LESS than `shortfall` underlying.
     ///      We therefore scale the withdrawn principal by the minter's booked/realizable ratio so the
     ///      staker receives ~`shortfall` actual underlying. The exact delivered amount must be
-    ///      confirmed on a mainnet fork (and the Phase-5 `staker_realized == staker_booked` assert is
-    ///      the ultimate gate). HARD-REVERT if the minter's realizable cannot cover the shortfall.
+    ///      confirmed on a mainnet fork. The floor that this pre-fund must satisfy is enforced
+    ///      downstream in PostMigrationCleanup (story-067):
+    ///      `principalOf(token, original) >= preMigBooked` — realized principal after the whole bounce
+    ///      is never less than the pre-migration booked total. That gate is a `>=` FLOOR, NOT an
+    ///      equality assert: the unattributed skim buffer folded into V2 by setYieldStrategy makes
+    ///      realized >= booked by construction, so an `==` check would wrongly revert (surplus stays
+    ///      with the protocol, never socialized into a per-user credit). HARD-REVERT here if the
+    ///      minter's realizable cannot cover the shortfall.
     function _prefundShortfall(address oldYS, address token) internal returns (uint256 injected) {
         uint256 stakerBooked     = IOldYS(oldYS).principalOf(token, ORIGINAL_STABLE_STAKER);
         uint256 stakerRealizable = IOldYS(oldYS).totalBalanceOf(token, ORIGINAL_STABLE_STAKER);
@@ -496,10 +544,13 @@ contract SkimAndLeg1Migration is Script {
         console.log("yet booked as principal. The chain of custody to verify on this fork run:");
         console.log("  1. [HERE] staker idle balance increased by dola/usdcPrefunded (post-assert above).");
         console.log("  2. [ResetAndRewire] setYieldStrategy sweeps that idle into V2 as staker principal.");
-        console.log("  3. [Leg2Migration] users migrate back onto V2; CONFIRM each token's");
-        console.log("     staker_realized == staker_booked (zero haircut). THIS is the definitive gate.");
-        console.log("If any [PHASE4] WARNING above fired (injected < shortfall), step 3 may NOT hold -");
-        console.log("do not broadcast; revisit _prefundShortfall scaling. See handoff doc in story 065.");
+        console.log("  3. [Leg2Migration] users migrate back onto V2.");
+        console.log("  4. [PostMigrationCleanup] THE GATE (story-067): hard-requires per token");
+        console.log("     principalOf(token, original) >= preMigBooked (realized >= pre-migration booked).");
+        console.log("     This is a >= FLOOR, not equality: the skim buffer makes realized >= booked by");
+        console.log("     construction, so an == assert would wrongly revert. Surplus stays w/ protocol.");
+        console.log("If any [PHASE4] WARNING above fired (injected < shortfall), the cleanup gate may NOT");
+        console.log("hold - do not broadcast; revisit _prefundShortfall scaling. See handoff doc story 065.");
         console.log("-------------------------------------------------------------");
         console.log("");
         if (isPreview) {
