@@ -252,8 +252,10 @@ rates/decimals (§5.6 — read live in-script), the live `executableAt` window f
 - The allotment amounts (`DOLA_ALLOTMENT` / `USDC_ALLOTMENT`) are the knob to set before broadcasting
   2.1 (hardcoded 0 → tripwire reverts until set).
 - Set-aside buffer: BOTH cushions are configured — (1) skimmed surplus → staker idle balance (2.2),
-  and (2) the strategy-level 10% withholding carried forward for the staker (2.1 step 5a), recipient
-  sourced live from the existing old strategy. 2.3 asserts the 10% is in place.
+  and (2) the strategy-level 10% withholding for the staker on the NEW strategies (2.1 step 5a), with
+  the buffer recipient set to the stable-staker. The OLD strategies are not touched (their deployed
+  bytecode predates the global-recipient feature and returns the buffer to the skimmed client). 2.3
+  asserts the 10% is in place.
 - The migrator's top-up feature (stable-staker story-013, now pulled) funds shortfalls during
   `migrateIn` from the migrator's surplus balance — i.e. the allotment transferred in 2.1 — and
   reverts the batch if underfunded.

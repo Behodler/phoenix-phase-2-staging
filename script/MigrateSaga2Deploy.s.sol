@@ -37,9 +37,9 @@ leg (2.2). Steps performed (all as the owner EOA):
  10. Record V1 DOLA/USDC positions and persist deploy addresses to migration-inputs JSON.
 
 NOTE on set-aside buffer: TWO cushions are in play. (1) The skimmed surplus is transferred to the
-staker in 2.2 (raw idle balance == buffer). (2) The strategy-level set-aside withholding is carried
-forward at 10% for the staker client here (step 5a), recipient sourced live from the existing old
-strategy to match the current config.
+staker in 2.2 (raw idle balance == buffer). (2) The strategy-level set-aside withholding is set
+at 10% for the staker client here (step 5a), with the buffer recipient = the stable-staker (the old
+strategies are NOT touched — their bytecode predates the global-recipient feature).
 */
 
 contract MigrateSaga2Deploy is Script {
@@ -134,13 +134,13 @@ contract MigrateSaga2Deploy is Script {
         ysUsdcV2.setClient(address(minterV2), true);
         ysUsdcV2.setWithdrawer(ACCUMULATOR, true);
 
-        // 5a. Carry forward the staker's set-aside buffer (operator-confirmed 10%): on each skim this %
-        //     of the staker's surplus is withheld to the buffer recipient as a below-par reserve. The
-        //     recipient is sourced LIVE from the existing old strategy so it matches the current config
-        //     (fallback: the staker itself, consistent with the idle-balance buffer model). The old
-        //     strategies are still wired here (migration happens in 2.2), so staker.yieldStrategy is old.
-        _carryBuffer(ysDolaV2, IStaker(STAKER).yieldStrategy(DOLA));
-        _carryBuffer(ysUsdcV2, IStaker(STAKER).yieldStrategy(USDC));
+        // 5a. Set the staker's set-aside buffer (operator-confirmed 10%): on each skim this % of the
+        //     staker's surplus is withheld to the buffer recipient as a below-par reserve. The recipient
+        //     is ALWAYS the stable-staker (withheld buffer flows back to it as idle balance == buffer).
+        //     Do NOT read the old strategies — their deployed bytecode predates the global-recipient
+        //     feature (it returns the buffer to the skimmed client) and lacks setAsideBufferRecipient().
+        _setBuffer(ysDolaV2);
+        _setBuffer(ysUsdcV2);
 
         // 6. USDe: add minterV2 as a third client on the existing market strategy (minter V1 stays
         //    authorized as a dormant yield client). Register USDe on V2 against the SAME market YS.
@@ -187,13 +187,9 @@ contract MigrateSaga2Deploy is Script {
         console.log("   rate:", rate, "dec:", dec);
     }
 
-    // Replicate the existing set-aside buffer config from `oldYS` onto `newYS` for the staker client.
-    function _carryBuffer(ERC4626YieldStrategy newYS, address oldYS) internal {
-        uint256 existingPct = IYS(oldYS).setAsideBufferSize(STAKER);
-        address recipient = IYS(oldYS).setAsideBufferRecipient();
-        if (recipient == address(0)) recipient = STAKER;
-        console.log("old buffer % (cross-check):", existingPct, "recipient:", recipient);
-        newYS.setSetAsideBufferRecipient(recipient);
+    // Set the set-aside buffer on `newYS`: recipient AND buffered client are both the stable-staker.
+    function _setBuffer(ERC4626YieldStrategy newYS) internal {
+        newYS.setSetAsideBufferRecipient(STAKER);
         newYS.setSetAsideBuffer(STAKER, SETASIDE_BUFFER_PCT);
     }
 
@@ -249,14 +245,11 @@ contract MigrateSaga2Deploy is Script {
 interface IStaker {
     function owner() external view returns (address);
     function setMigrator(address) external;
-    function yieldStrategy(address token) external view returns (address);
 }
 
 interface IYS {
     function principalOf(address token, address account) external view returns (uint256);
     function setClient(address client, bool auth) external;
-    function setAsideBufferSize(address client) external view returns (uint256);
-    function setAsideBufferRecipient() external view returns (address);
 }
 
 interface IFlax {
