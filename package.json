@@ -245,7 +245,17 @@
     "migrate:ys-old-strategy-decommission": "npm run migrate:ys-old-strategy-decommission-preview && forge script script/DecommissionOldStrategies.s.sol:DecommissionOldStrategies --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "//saga-contingency-breakglass": "OUT OF BAND — NOT a numbered step. Standalone owner unpause of the live staker if a mid-suite halt strands the live USDe pool (YS-21).",
     "migrate:ys-swap-breakglass-preview": "PREVIEW_MODE=true forge script script/UnpauseStakerBreakGlass.s.sol:UnpauseStakerBreakGlass --rpc-url $RPC_MAINNET --slow -vvv",
-    "migrate:ys-swap-breakglass": "npm run migrate:ys-swap-breakglass-preview && forge script script/UnpauseStakerBreakGlass.s.sol:UnpauseStakerBreakGlass --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "migrate:ys-swap-breakglass": "npm run migrate:ys-swap-breakglass-preview && forge script script/UnpauseStakerBreakGlass.s.sol:UnpauseStakerBreakGlass --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "//migrate-saga-2": "MIGRATE SAGA 2 — InPlaceMigrator route (replaces the abandoned temp-staker ys-swap saga). Run 2.1 -> 2.2 -> 2.3 in order; 2.2 must land inside the in-flight totalWithdrawal window. Plan: docs/stable-staker-migrations/combined-inplace-and-minter-v2-migration-plan.md",
+    "//saga2.1-deploy": "STEP 2.1 — deploy InPlaceMigrator + new DOLA/USDC strategies + minter V2, fund migrator allotment (SET DOLA_ALLOTMENT/USDC_ALLOTMENT in the script first or it reverts), wire, revoke V1 / grant V2 mint, record. Broadcast patches YieldStrategyDola/USDC + PhusdStableMinter in mainnet-addresses.ts",
+    "migrate:saga2.1-deploy-preview": "PREVIEW_MODE=true forge script script/MigrateSaga2Deploy.s.sol:MigrateSaga2Deploy --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:saga2.1-deploy": "npm run migrate:saga2.1-deploy-preview && node scripts/backup-mainnet-addresses.js && forge script script/MigrateSaga2Deploy.s.sol:MigrateSaga2Deploy --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-saga2-deploy.js",
+    "//saga2.2-migrate": "STEP 2.2 — (time-critical, run inside the totalWithdrawal window) Phlimbo top-up 60 USDC, skim, pause, drain staker, execute minter totalWithdrawal, rewire to new strategies, migrateIn, seed V2, send skim to staker as buffer, unpause. No address change",
+    "migrate:saga2.2-migrate-preview": "PREVIEW_MODE=true forge script script/MigrateSaga2Migrate.s.sol:MigrateSaga2Migrate --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:saga2.2-migrate": "npm run migrate:saga2.2-migrate-preview && forge script script/MigrateSaga2Migrate.s.sol:MigrateSaga2Migrate --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "//saga2.3-rewire": "STEP 2.3 — repoint StableYieldAccumulator to the new DOLA/USDC strategies, retire the old ones, run final verification gates. No address change",
+    "migrate:saga2.3-rewire-preview": "PREVIEW_MODE=true forge script script/MigrateSaga2Rewire.s.sol:MigrateSaga2Rewire --rpc-url $RPC_MAINNET --slow -vvv",
+    "migrate:saga2.3-rewire": "npm run migrate:saga2.3-rewire-preview && forge script script/MigrateSaga2Rewire.s.sol:MigrateSaga2Rewire --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",

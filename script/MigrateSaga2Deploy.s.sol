@@ -1,0 +1,279 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.20;
+
+import "@forge-std/Script.sol";
+import "@forge-std/console.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+import {InPlaceMigrator} from "stable-staker/InPlaceMigrator.sol";
+import {IStableStaker} from "stable-staker/interfaces/IStableStaker.sol";
+import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
+import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
+
+/*//////////////////////////////////////////////////////////////////////////////
+                          MIGRATE SAGA 2 — STEP 2.1 (DEPLOY & FREEZE)
+//////////////////////////////////////////////////////////////////////////////
+
+Saga 2 replaces the abandoned temp-staker "ys-swap" saga with the simpler InPlaceMigrator
+route. See docs/stable-staker-migrations/combined-inplace-and-minter-v2-migration-plan.md.
+
+This is the deploy/freeze leg (Script 2.1). It deploys everything, wires it, freezes minter V1,
+and records the V1 positions — but it DRAINS NOTHING. It can be run any time before the migrate
+leg (2.2). Steps performed (all as the owner EOA):
+
+  1. Deploy InPlaceMigrator(staker, 2 weeks, owner).
+  2. Fund the migrator's in-place allotment by transferring hardcoded DOLA/USDC from the deployer
+     (see ALLOTMENT TRIPWIRE below — reverts loudly until the amounts are set > 0).
+  3. Deploy new fixed ERC4626YieldStrategy for DOLA (autoDOLA) and USDC (autoUSDC).
+  4. Deploy phUSD minter V2.
+  5. Wire the new strategies: setClient(staker), setClient(minterV2), setWithdrawer(accumulator).
+  6. Wire V2 for USDe (dormant-client carry-over): setClient(minterV2) on the USDe market YS,
+     register USDe on V2. Leave minter V1 authorized on the USDe market YS (dormant).
+  7. Register DOLA/USDC on V2 against the NEW strategies, replicating V1's exchange-rate/decimals,
+     with maxMintPerDay = 4000 phUSD each (USDe too).
+  8. phUSD: revoke minter V1, grant minter V2.
+  9. staker.setMigrator(inPlaceMigrator).
+ 10. Record V1 DOLA/USDC positions and persist deploy addresses to migration-inputs JSON.
+
+NOTE on set-aside buffer: TWO cushions are in play. (1) The skimmed surplus is transferred to the
+staker in 2.2 (raw idle balance == buffer). (2) The strategy-level set-aside withholding is carried
+forward at 10% for the staker client here (step 5a), recipient sourced live from the existing old
+strategy to match the current config.
+*/
+
+contract MigrateSaga2Deploy is Script {
+    using SafeERC20 for IERC20;
+
+    // ───────────────────────────── ALLOTMENT TRIPWIRE ─────────────────────────────
+    // In-place allotment: the owner pre-funds the migrator with DOLA/USDC so that if migrateOut
+    // realizes any slippage/haircut, the migrator can top the parked users up to par (forthcoming
+    // InPlaceMigrator feature). HARDCODED TO ZERO ON PURPOSE — set both > 0 before running, or the
+    // require at the top of run() reverts loudly to remind you. Amounts are in token-native decimals
+    // (DOLA = 18, USDC = 6).
+    uint256 public constant DOLA_ALLOTMENT = 0; // <-- SET ME (18 decimals) before running
+    uint256 public constant USDC_ALLOTMENT = 0; // <-- SET ME (6 decimals) before running
+
+    // ───────────────────────────── CONFIG ─────────────────────────────
+    uint256 public constant CHAIN_ID = 1;
+    uint256 public constant MIGRATION_TIMEOUT = 14 days; // operator-confirmed; bounds [1d, 30d]
+    uint256 public constant MAX_MINT_PER_DAY = 4000e18; // operator-confirmed cap, phUSD (18 dec), each token
+    uint256 public constant SETASIDE_BUFFER_PCT = 10; // operator-confirmed: carry forward the existing 10%
+
+    // Live mainnet addresses (verify against server/deployments/mainnet-addresses.ts).
+    address public constant OWNER_ADDRESS = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
+    address public constant STAKER        = 0xbce8ABC09BaEDCabE93419bF875f6186e182079A;
+    address public constant PHUSD         = 0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605;
+    address public constant MINTER_V1     = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
+    address public constant ACCUMULATOR   = 0x3C690EC3B2524104dE269bf0F9baa7f045eF8270;
+    address public constant USDE_MARKET_YS = 0xaC2e5936Eca286eC364d4D5Bcca33145fBe57f95;
+
+    address public constant DOLA      = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
+    address public constant AUTO_DOLA = 0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d;
+    address public constant USDC      = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address public constant AUTO_USDC = 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35;
+    address public constant USDE      = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
+
+    string public constant DEPLOYMENTS_JSON = "script/migration-inputs/saga2-deployments.json";
+
+    bool public isPreview;
+
+    // deployed
+    InPlaceMigrator public migrator;
+    ERC4626YieldStrategy public ysDolaV2;
+    ERC4626YieldStrategy public ysUsdcV2;
+    PhusdStableMinter public minterV2;
+
+    function setUp() public view {
+        require(block.chainid == CHAIN_ID, "saga2.1: wrong chain - expected mainnet (1)");
+    }
+
+    function run() external {
+        // ── ALLOTMENT TRIPWIRE: refuse to run until the allotment amounts are deliberately set. ──
+        require(
+            DOLA_ALLOTMENT > 0 && USDC_ALLOTMENT > 0,
+            "saga2.1: set DOLA_ALLOTMENT and USDC_ALLOTMENT (> 0) before running"
+        );
+
+        isPreview = vm.envOr("PREVIEW_MODE", false);
+        _preflight();
+
+        if (isPreview) {
+            console.log("*** PREVIEW MODE - impersonating owner, NO broadcast ***");
+            vm.startPrank(OWNER_ADDRESS);
+        } else {
+            console.log("*** BROADCAST MODE ***");
+            vm.startBroadcast();
+        }
+
+        // 1. Deploy migrator (owner = the operator EOA).
+        migrator = new InPlaceMigrator(IStableStaker(STAKER), MIGRATION_TIMEOUT, OWNER_ADDRESS);
+        console.log("InPlaceMigrator:", address(migrator));
+
+        // 2. Fund the in-place allotment from the deployer.
+        IERC20(DOLA).safeTransfer(address(migrator), DOLA_ALLOTMENT);
+        IERC20(USDC).safeTransfer(address(migrator), USDC_ALLOTMENT);
+        console.log("Allotment funded - DOLA:", DOLA_ALLOTMENT, "USDC:", USDC_ALLOTMENT);
+
+        // 3. Deploy new fixed strategies (owner = operator EOA).
+        ysDolaV2 = new ERC4626YieldStrategy(OWNER_ADDRESS, DOLA, AUTO_DOLA);
+        ysUsdcV2 = new ERC4626YieldStrategy(OWNER_ADDRESS, USDC, AUTO_USDC);
+        console.log("ysDolaV2:", address(ysDolaV2));
+        console.log("ysUsdcV2:", address(ysUsdcV2));
+
+        // 4. Deploy minter V2.
+        minterV2 = new PhusdStableMinter(PHUSD);
+        console.log("minterV2:", address(minterV2));
+
+        // 5. Wire the new strategies: staker (for migrateIn re-deposit), minterV2 (for noMintDeposit
+        //    and live mints), accumulator (authorized withdrawer for future skimSurplus).
+        ysDolaV2.setClient(STAKER, true);
+        ysDolaV2.setClient(address(minterV2), true);
+        ysDolaV2.setWithdrawer(ACCUMULATOR, true);
+        ysUsdcV2.setClient(STAKER, true);
+        ysUsdcV2.setClient(address(minterV2), true);
+        ysUsdcV2.setWithdrawer(ACCUMULATOR, true);
+
+        // 5a. Carry forward the staker's set-aside buffer (operator-confirmed 10%): on each skim this %
+        //     of the staker's surplus is withheld to the buffer recipient as a below-par reserve. The
+        //     recipient is sourced LIVE from the existing old strategy so it matches the current config
+        //     (fallback: the staker itself, consistent with the idle-balance buffer model). The old
+        //     strategies are still wired here (migration happens in 2.2), so staker.yieldStrategy is old.
+        _carryBuffer(ysDolaV2, IStaker(STAKER).yieldStrategy(DOLA));
+        _carryBuffer(ysUsdcV2, IStaker(STAKER).yieldStrategy(USDC));
+
+        // 6. USDe: add minterV2 as a third client on the existing market strategy (minter V1 stays
+        //    authorized as a dormant yield client). Register USDe on V2 against the SAME market YS.
+        IYS(USDE_MARKET_YS).setClient(address(minterV2), true);
+        _registerOnV2(USDE, USDE_MARKET_YS);
+
+        // 7. Register DOLA/USDC on V2 against the new strategies.
+        _registerOnV2(DOLA, address(ysDolaV2));
+        _registerOnV2(USDC, address(ysUsdcV2));
+
+        // 8. phUSD mint authority: revoke V1 (freeze its liability), grant V2.
+        IFlax(PHUSD).setMinter(MINTER_V1, false);
+        IFlax(PHUSD).setMinter(address(minterV2), true);
+        console.log("phUSD minter: V1 revoked, V2 granted");
+
+        // 9. Point the staker at the in-place migrator (stays set across 2.2's out+in legs).
+        IStaker(STAKER).setMigrator(address(migrator));
+
+        // 10. Record V1 positions (for the post-mortem ledger; 2.2 does NOT require recovered == this).
+        uint256 v1DolaPrincipal = IYS(_v1Strategy(DOLA)).principalOf(DOLA, MINTER_V1);
+        uint256 v1UsdcPrincipal = IYS(_v1Strategy(USDC)).principalOf(USDC, MINTER_V1);
+        console.log("V1 DOLA principal:", v1DolaPrincipal);
+        console.log("V1 USDC principal:", v1UsdcPrincipal);
+
+        if (isPreview) {
+            vm.stopPrank();
+        } else {
+            vm.stopBroadcast();
+            _writeDeployments(v1DolaPrincipal, v1UsdcPrincipal);
+        }
+
+        _printSummary();
+    }
+
+    // Register `token` on V2 against `strategy`, replicating V1's exchange rate + decimals, and apply
+    // the 4000/day cap. Approve the strategy so V2 can deposit.
+    function _registerOnV2(address token, address strategy) internal {
+        (, uint256 rate, uint8 dec,,,,) = IMinterV1(MINTER_V1).stablecoinConfigs(token);
+        require(rate > 0, "saga2.1: V1 exchangeRate is zero - cannot replicate config");
+        minterV2.registerStablecoin(token, strategy, rate, dec);
+        minterV2.approveYS(token, strategy);
+        minterV2.setMaxMintPerDay(token, MAX_MINT_PER_DAY);
+        console.log("V2 registered token (rate, dec):", token);
+        console.log("   rate:", rate, "dec:", dec);
+    }
+
+    // Replicate the existing set-aside buffer config from `oldYS` onto `newYS` for the staker client.
+    function _carryBuffer(ERC4626YieldStrategy newYS, address oldYS) internal {
+        uint256 existingPct = IYS(oldYS).setAsideBufferSize(STAKER);
+        address recipient = IYS(oldYS).setAsideBufferRecipient();
+        if (recipient == address(0)) recipient = STAKER;
+        console.log("old buffer % (cross-check):", existingPct, "recipient:", recipient);
+        newYS.setSetAsideBufferRecipient(recipient);
+        newYS.setSetAsideBuffer(STAKER, SETASIDE_BUFFER_PCT);
+    }
+
+    function _v1Strategy(address token) internal view returns (address ys) {
+        (ys,,,,,,) = IMinterV1(MINTER_V1).stablecoinConfigs(token);
+        require(ys != address(0), "saga2.1: V1 strategy unset for token");
+    }
+
+    function _preflight() internal view {
+        // Owner must hold enough DOLA/USDC for the allotment funding.
+        require(
+            IERC20(DOLA).balanceOf(OWNER_ADDRESS) >= DOLA_ALLOTMENT,
+            "saga2.1 preflight: owner DOLA balance < DOLA_ALLOTMENT"
+        );
+        require(
+            IERC20(USDC).balanceOf(OWNER_ADDRESS) >= USDC_ALLOTMENT,
+            "saga2.1 preflight: owner USDC balance < USDC_ALLOTMENT"
+        );
+        // Owner must control the contracts whose owner-only setters we call.
+        require(IStaker(STAKER).owner() == OWNER_ADDRESS, "saga2.1 preflight: not staker owner");
+    }
+
+    function _writeDeployments(uint256 v1DolaPrincipal, uint256 v1UsdcPrincipal) internal {
+        string memory json = string.concat(
+            "{\n",
+            '  "migrator": "', vm.toString(address(migrator)), '",\n',
+            '  "ysDolaV2": "', vm.toString(address(ysDolaV2)), '",\n',
+            '  "ysUsdcV2": "', vm.toString(address(ysUsdcV2)), '",\n',
+            '  "minterV2": "', vm.toString(address(minterV2)), '",\n',
+            '  "v1DolaPrincipal": "', vm.toString(v1DolaPrincipal), '",\n',
+            '  "v1UsdcPrincipal": "', vm.toString(v1UsdcPrincipal), '",\n',
+            '  "timestamp": ', vm.toString(block.timestamp), "\n",
+            "}\n"
+        );
+        vm.writeFile(DEPLOYMENTS_JSON, json);
+        console.log("Wrote", DEPLOYMENTS_JSON);
+    }
+
+    function _printSummary() internal view {
+        console.log("==========================================");
+        console.log("  SAGA 2.1 (deploy & freeze) complete");
+        console.log("==========================================");
+        if (isPreview) {
+            console.log("PREVIEW - no on-chain state changed, no JSON written.");
+        } else {
+            console.log("BROADCAST done. Patcher updates mainnet-addresses.ts. Proceed to saga 2.2.");
+        }
+    }
+}
+
+// ───────────────────────────── minimal interfaces ─────────────────────────────
+
+interface IStaker {
+    function owner() external view returns (address);
+    function setMigrator(address) external;
+    function yieldStrategy(address token) external view returns (address);
+}
+
+interface IYS {
+    function principalOf(address token, address account) external view returns (uint256);
+    function setClient(address client, bool auth) external;
+    function setAsideBufferSize(address client) external view returns (uint256);
+    function setAsideBufferRecipient() external view returns (address);
+}
+
+interface IFlax {
+    function setMinter(address account, bool isMinter) external;
+}
+
+interface IMinterV1 {
+    function stablecoinConfigs(address token)
+        external
+        view
+        returns (
+            address yieldStrategy,
+            uint256 exchangeRate,
+            uint8 decimals,
+            bool enabled,
+            uint256 maxMintPerDay,
+            uint256 mintedToday,
+            uint256 lastMintTimestamp
+        );
+}
