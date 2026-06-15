@@ -161,6 +161,14 @@ contract MigrateSaga2Deploy is Script {
         _registerOnV2(DOLA, address(ysDolaV2));
         _registerOnV2(USDC, address(ysUsdcV2));
 
+        // 7a. Wire V2's global Pauser BEFORE granting it mint authority (step 8). minterV2 is IPausable
+        //     and is the one contract that can mint phUSD against user deposits — a fresh deploy leaves
+        //     pauser == address(0), i.e. no emergency stop. Mirror the strategy wiring: setPauser +
+        //     register in the Pauser's contract set.
+        minterV2.setPauser(PAUSER);
+        IPauserAdmin(PAUSER).register(address(minterV2));
+        require(minterV2.pauser() != address(0), "saga2.1: minterV2 pauser unset");
+
         // 8. phUSD mint authority: revoke V1 (freeze its liability), grant V2.
         IFlax(PHUSD).setMinter(MINTER_V1, false);
         IFlax(PHUSD).setMinter(address(minterV2), true);
