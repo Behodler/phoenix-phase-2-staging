@@ -67,6 +67,7 @@ contract MigrateSaga2Deploy is Script {
     address public constant MINTER_V1     = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
     address public constant ACCUMULATOR   = 0x3C690EC3B2524104dE269bf0F9baa7f045eF8270;
     address public constant USDE_MARKET_YS = 0xaC2e5936Eca286eC364d4D5Bcca33145fBe57f95;
+    address public constant PAUSER         = 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3; // global Pauser
 
     address public constant DOLA      = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
     address public constant AUTO_DOLA = 0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d;
@@ -142,6 +143,15 @@ contract MigrateSaga2Deploy is Script {
         _setBuffer(ysDolaV2);
         _setBuffer(ysUsdcV2);
 
+        // 5b. Wire the global Pauser (protocol compliance): authorize it to pause the new strategies
+        //     and register them in the Pauser's contract set, mirroring the canonical ReplaceSYAMainnet
+        //     wiring. A fresh strategy deploys with an unset pauser (address(0)) and would otherwise be
+        //     uncontrollable by the protocol pause path.
+        ysDolaV2.setPauser(PAUSER);
+        ysUsdcV2.setPauser(PAUSER);
+        IPauserAdmin(PAUSER).register(address(ysDolaV2));
+        IPauserAdmin(PAUSER).register(address(ysUsdcV2));
+
         // 6. USDe: add minterV2 as a third client on the existing market strategy (minter V1 stays
         //    authorized as a dormant yield client). Register USDe on V2 against the SAME market YS.
         IYS(USDE_MARKET_YS).setClient(address(minterV2), true);
@@ -178,7 +188,7 @@ contract MigrateSaga2Deploy is Script {
     // Register `token` on V2 against `strategy`, replicating V1's exchange rate + decimals, and apply
     // the 4000/day cap. Approve the strategy so V2 can deposit.
     function _registerOnV2(address token, address strategy) internal {
-        (, uint256 rate, uint8 dec,,,,) = IMinterV1(MINTER_V1).stablecoinConfigs(token);
+        (, uint256 rate, uint8 dec,) = IMinterV1(MINTER_V1).stablecoinConfigs(token);
         require(rate > 0, "saga2.1: V1 exchangeRate is zero - cannot replicate config");
         minterV2.registerStablecoin(token, strategy, rate, dec);
         minterV2.approveYS(token, strategy);
@@ -194,7 +204,7 @@ contract MigrateSaga2Deploy is Script {
     }
 
     function _v1Strategy(address token) internal view returns (address ys) {
-        (ys,,,,,,) = IMinterV1(MINTER_V1).stablecoinConfigs(token);
+        (ys,,,) = IMinterV1(MINTER_V1).stablecoinConfigs(token);
         require(ys != address(0), "saga2.1: V1 strategy unset for token");
     }
 
@@ -210,6 +220,8 @@ contract MigrateSaga2Deploy is Script {
         );
         // Owner must control the contracts whose owner-only setters we call.
         require(IStaker(STAKER).owner() == OWNER_ADDRESS, "saga2.1 preflight: not staker owner");
+        // Pauser.register is onlyOwner on the Pauser — the deployer must own it.
+        require(IPauserAdmin(PAUSER).owner() == OWNER_ADDRESS, "saga2.1 preflight: not Pauser owner");
     }
 
     function _writeDeployments(uint256 v1DolaPrincipal, uint256 v1UsdcPrincipal) internal {
@@ -256,17 +268,17 @@ interface IFlax {
     function setMinter(address account, bool isMinter) external;
 }
 
+interface IPauserAdmin {
+    function owner() external view returns (address);
+    function register(address pausableContract) external;
+}
+
 interface IMinterV1 {
+    // NOTE: the LIVE minter V1 (0x435B...) predates the rolling-cap feature — its stablecoinConfigs
+    // getter returns only 4 fields. Do NOT use the current 7-field source ABI here; decoding 7 from a
+    // 4-field return reverts.
     function stablecoinConfigs(address token)
         external
         view
-        returns (
-            address yieldStrategy,
-            uint256 exchangeRate,
-            uint8 decimals,
-            bool enabled,
-            uint256 maxMintPerDay,
-            uint256 mintedToday,
-            uint256 lastMintTimestamp
-        );
+        returns (address yieldStrategy, uint256 exchangeRate, uint8 decimals, bool enabled);
 }
