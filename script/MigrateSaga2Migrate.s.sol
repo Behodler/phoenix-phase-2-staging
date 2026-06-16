@@ -30,6 +30,12 @@ minter absorbs any haircut and stakers stay whole. Sequence (all as owner):
      so setYieldStrategy never sweeps it into the YS).
   9. unpause + restore the real pauser.
 
+Refunding the migrator's unused allotment to the deployer is deliberately NOT part of this leg — it is
+split into the non-time-critical follow-up MigrateSaga2Rescue.s.sol (saga 2.4), which reads the LIVE
+migrator balance in its own single-tx broadcast. Keeping the exact-amount rescueERC20 out of this
+multi-tx broadcast avoids forge baking a stale simulated balance into the call (migrateIn's on-chain
+top-up gross-up consumes a few extra wei vs simulation, and the migrator's floor check is zero-tolerance).
+
 No new contracts are deployed here, so mainnet-addresses.ts is NOT touched by this step.
 */
 
@@ -131,14 +137,12 @@ contract MigrateSaga2Migrate is Script {
         if (dolaSkim > 0) IERC20(DOLA).safeTransfer(STAKER, dolaSkim);
         if (usdcSkim > 0) IERC20(USDC).safeTransfer(STAKER, usdcSkim);
 
-        // 8b. Refund any unused in-place allotment to the deployer. migrateIn is complete so
-        //     totalParked == 0 (post-asserted below) and the migrator's whole DOLA/USDC balance is
-        //     rescuable surplus; rescueERC20 is fenced below the parked floor regardless.
-        uint256 leftDola = IERC20(DOLA).balanceOf(migrator);
-        uint256 leftUsdc = IERC20(USDC).balanceOf(migrator);
-        if (leftDola > 0) IMigrator(migrator).rescueERC20(DOLA, OWNER_ADDRESS, leftDola);
-        if (leftUsdc > 0) IMigrator(migrator).rescueERC20(USDC, OWNER_ADDRESS, leftUsdc);
-        console.log("refunded unused allotment DOLA/USDC:", leftDola, leftUsdc);
+        // NOTE: refunding the migrator's unused in-place allotment to the deployer is NOT done here.
+        //   migrateIn's surplus-funded top-up gross-up consumes a few extra wei on-chain vs forge's
+        //   simulation, so a rescueERC20(balanceOf(migrator)) baked from the simulated balance reverts
+        //   under --broadcast (the migrator's floor check is zero-tolerance). It is split into the
+        //   non-time-critical follow-up MigrateSaga2Rescue.s.sol (npm run migrate:saga2.4-rescue), which
+        //   reads the live balance in its own single-tx broadcast. Run it after this leg settles.
 
         // 9. Unpause and restore the original pauser.
         IStaker(STAKER).unpause();
@@ -223,8 +227,8 @@ contract MigrateSaga2Migrate is Script {
         require(IStaker(STAKER).yieldStrategy(USDC) == ysUsdcV2, "post: USDC strategy != ysUsdcV2");
         require(IMigrator(migrator).parkedUserCount(DOLA) == 0, "post: DOLA users still parked");
         require(IMigrator(migrator).parkedUserCount(USDC) == 0, "post: USDC users still parked");
-        require(IERC20(DOLA).balanceOf(migrator) == 0, "post: DOLA allotment not refunded");
-        require(IERC20(USDC).balanceOf(migrator) == 0, "post: USDC allotment not refunded");
+        // NOTE: the migrator's leftover DOLA/USDC allotment is intentionally NOT swept here; it is
+        //       refunded by the follow-up MigrateSaga2Rescue.s.sol (saga 2.4). No zero-balance assert.
         require(!IStaker(STAKER).paused(), "post: staker still paused");
         require(IStaker(STAKER).pauser() == realPauser, "post: pauser not restored");
         require(IOldYS(oldDolaYS).principalOf(DOLA, MINTER_V1) == 0, "post: minter V1 DOLA not drained");
