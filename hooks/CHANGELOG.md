@@ -5,6 +5,15 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-16
+
+### Added
+- ERC4626YieldStrategy & ERC4626MarketYieldStrategy: `previewDeposit` / `previewRedeem` view functions
+- ERC4626YieldStrategy & ERC4626MarketYieldStrategy: set-aside-buffer recipient wiring — `setAsideBufferRecipient` (getter), `setSetAsideBufferRecipient` (setter), and `SetAsideBufferRecipientSet` event
+
+### Removed
+- Burner and Gather (NFT V1) hooks — V1 contracts removed from the build (story 059)
+
 ## [0.8.0] - 2026-06-03
 
 ### Added
