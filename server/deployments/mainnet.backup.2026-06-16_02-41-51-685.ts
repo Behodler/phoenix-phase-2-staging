@@ -11,7 +11,6 @@
 // Updated 2026-05-22: PhlimboV2 + MigratorV1V2 deployed (story 049 - V1 stakers migrated)
 // Updated 2026-05-22: DepositView redeployed against PhlimboV2 (story 049 follow-up - rewire-sya-to-phlimbo-v2)
 // Updated 2026-06-04: index-4 dispatcher cut over to Sky-PSM BalancerPoolerV2 + new MintDebtHook (story 056)
-// Updated 2026-06-16: saga 2 migration (2.1) — YieldStrategyDola/USDC + PhusdStableMinter (V2) patched
 import { ContractAddresses } from './addresses';
 
 
@@ -29,7 +28,7 @@ export const mainnetAddresses: ContractAddresses = {
 
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
-  PhusdStableMinter: "0x94855ACA13952D81507C92D3CdBb2e25D3bbE60C",
+  PhusdStableMinter: "0x435B0A1884bd0fb5667677C9eb0e59425b1477E5",
   // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol
   PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
   StableYieldAccumulator: "0x3C690EC3B2524104dE269bf0F9baa7f045eF8270",
@@ -38,9 +37,9 @@ export const mainnetAddresses: ContractAddresses = {
   // ResumeStableStakerMigration run, all receipts 0x1). DOLA/USDC are plain
   // ERC4626YieldStrategy; USDe is ERC4626MarketYieldStrategy @ 30 bps (sUSDe cooldown
   // blocks plain redeem). Old strategies (0xE7aE…, 0x8b4A…, 0xFc62…) drained + retired.
-  YieldStrategyDola: "0x1760E05356Ec1FBBA159C730781dCfB9920524e2",
+  YieldStrategyDola: "0x90ce274b20A2aF4265152B369d09ce6E6Dc177F9",
   YieldStrategyUSDe: "0xaC2e5936Eca286eC364d4D5Bcca33145fBe57f95",
-  YieldStrategyUSDC: "0xaFDf8DeA96a0F37Aae4869f813901bf73a3eAB83",
+  YieldStrategyUSDC: "0x90af002Ee537Ad5C2c9817Ebd4EF22B2e8952470",
   // USDe<->sUSDe CurveAMMAdapter (Router NG, via crvUSD) backing YieldStrategyUSDe.
   USDeAMMAdapter: "0x2D024e0d03Fb6Ead4F8E7Ba1EBECF6db0E755D6f",
 

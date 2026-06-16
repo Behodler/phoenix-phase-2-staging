@@ -131,6 +131,15 @@ contract MigrateSaga2Migrate is Script {
         if (dolaSkim > 0) IERC20(DOLA).safeTransfer(STAKER, dolaSkim);
         if (usdcSkim > 0) IERC20(USDC).safeTransfer(STAKER, usdcSkim);
 
+        // 8b. Refund any unused in-place allotment to the deployer. migrateIn is complete so
+        //     totalParked == 0 (post-asserted below) and the migrator's whole DOLA/USDC balance is
+        //     rescuable surplus; rescueERC20 is fenced below the parked floor regardless.
+        uint256 leftDola = IERC20(DOLA).balanceOf(migrator);
+        uint256 leftUsdc = IERC20(USDC).balanceOf(migrator);
+        if (leftDola > 0) IMigrator(migrator).rescueERC20(DOLA, OWNER_ADDRESS, leftDola);
+        if (leftUsdc > 0) IMigrator(migrator).rescueERC20(USDC, OWNER_ADDRESS, leftUsdc);
+        console.log("refunded unused allotment DOLA/USDC:", leftDola, leftUsdc);
+
         // 9. Unpause and restore the original pauser.
         IStaker(STAKER).unpause();
         IStaker(STAKER).setPauser(realPauser);
@@ -214,6 +223,8 @@ contract MigrateSaga2Migrate is Script {
         require(IStaker(STAKER).yieldStrategy(USDC) == ysUsdcV2, "post: USDC strategy != ysUsdcV2");
         require(IMigrator(migrator).parkedUserCount(DOLA) == 0, "post: DOLA users still parked");
         require(IMigrator(migrator).parkedUserCount(USDC) == 0, "post: USDC users still parked");
+        require(IERC20(DOLA).balanceOf(migrator) == 0, "post: DOLA allotment not refunded");
+        require(IERC20(USDC).balanceOf(migrator) == 0, "post: USDC allotment not refunded");
         require(!IStaker(STAKER).paused(), "post: staker still paused");
         require(IStaker(STAKER).pauser() == realPauser, "post: pauser not restored");
         require(IOldYS(oldDolaYS).principalOf(DOLA, MINTER_V1) == 0, "post: minter V1 DOLA not drained");
@@ -254,6 +265,7 @@ interface IMigrator {
     function migrateOut(address token, address[] calldata users) external;
     function migrateIn(address token, uint256 start, uint256 end) external;
     function parkedUserCount(address token) external view returns (uint256);
+    function rescueERC20(address token, address to, uint256 amount) external;
 }
 
 interface IMinterV2 {
