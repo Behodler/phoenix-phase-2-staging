@@ -40,6 +40,8 @@ import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol"
 import {BurnerV2} from "@yield-claim-nft/V2/dispatchers/BurnerV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/V2/dispatchers/GatherV2.sol";
+import {NudgeRatchet} from "@yield-claim-nft/V2/dispatchers/NudgeRatchet.sol";
+import {NudgeRatchetMintDebtHook} from "@yield-claim-nft/V2/hooks/NudgeRatchetMintDebtHook.sol";
 import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPoolerMintDebtHook.sol";
 import {IDispatchHook} from "@yield-claim-nft/V2/interfaces/IDispatchHook.sol";
 import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalancerPoolerMintDebtHook.sol";
@@ -125,6 +127,10 @@ contract DeployMocks is Script {
     BurnerV2 public burnerFlaxV2;
     BalancerPoolerV2 public balancerPoolerV2;
     GatherV2 public gatherWBTCV2;
+
+    // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook
+    NudgeRatchet public nudgeRatchet;
+    NudgeRatchetMintDebtHook public nudgeRatchetHook;
 
     // NFT Staking infrastructure
     BalancerPoolerMintDebtHook public balancerPoolerHook;
@@ -627,6 +633,50 @@ contract DeployMocks is Script {
         balancerPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
         console.log("BalancerPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
 
+        // ---- Story 068: NudgeRatchet dispatcher + mint-debt hook ----
+        // NudgeRatchet is a forwarding dispatcher (structurally like GatherV2) backed by
+        // the existing 6-decimal MockRewardToken (USDC); its constructor enforces a
+        // 6-decimal token and a non-zero batchMinter sink. Deployed AFTER batchNFTMinter
+        // so `batchMinter_` is non-zero. Mirrors the BalancerPoolerV2 wiring pattern.
+        gasBefore = gasleft();
+        nudgeRatchet = new NudgeRatchet(
+            address(rewardToken),    // token_ — existing 6-decimal MockRewardToken (USDC)
+            address(batchNFTMinter), // batchMinter_ — existing nudge-reward sink
+            deployer                 // initialOwner
+        );
+        _trackDeployment("NudgeRatchet", address(nudgeRatchet), gasBefore - gasleft());
+        console.log("NudgeRatchet deployed at:", address(nudgeRatchet));
+
+        // 1. Point the dispatcher's minter at NFTMinterV2.
+        nudgeRatchet.setMinter(address(nftMinterV2));
+        console.log("NudgeRatchet.setMinter -> NFTMinterV2");
+
+        // 2. Deploy the matching mint-debt hook. NudgeRatchet._dispatch reverts unless the
+        //    installed hook is a NudgeRatchetMintDebtHook (hookTypeId() guard), so this hook
+        //    MUST replace the constructor-installed DefaultDispatchHook or the dispatcher is
+        //    bricked on first dispatch.
+        gasBefore = gasleft();
+        nudgeRatchetHook = new NudgeRatchetMintDebtHook(
+            deployer,                 // initialOwner
+            address(nudgeRatchet),    // dispatcher_
+            address(phUSD)            // phUSD_
+        );
+        _trackDeployment("NudgeRatchetMintDebtHook", address(nudgeRatchetHook), gasBefore - gasleft());
+        console.log("NudgeRatchetMintDebtHook deployed at:", address(nudgeRatchetHook));
+
+        // 3. Install the hook on NudgeRatchet (swaps out the DefaultDispatchHook).
+        nudgeRatchet.setHook(IDispatchHook(address(nudgeRatchetHook)));
+        console.log("NudgeRatchet.setHook -> NudgeRatchetMintDebtHook");
+
+        // 4. Authorize the hook to mint phUSD (so it can realise mint debt on dispatch).
+        phUSD.setMinter(address(nudgeRatchetHook), true);
+        console.log("Authorized NudgeRatchetMintDebtHook as phUSD minter");
+
+        // 5. Register the dispatcher on NFTMinterV2 (index auto-assigns to 6, after
+        //    GatherWBTCV2 at index 5). Mirror the BalancerPoolerV2 price + 0.1% growth.
+        nftMinterV2.registerDispatcher(address(nudgeRatchet), v2InitialPrice, 10); // 0.1% growth
+        console.log("Registered NudgeRatchet dispatcher with NFTMinterV2 (index 6, 0.1% growth)");
+
         // ====== PHASE 3.7: StableStaker Deployment + Wiring (story 051) ======
         console.log("\n=== Phase 3.7: Deploying + Wiring StableStaker ===");
 
@@ -993,6 +1043,8 @@ contract DeployMocks is Script {
         _markConfigured("MockWaUSDC", 0);
         _markConfigured("MockSkyPSM", 0);
         _markConfigured("GatherWBTCV2", 0);
+        _markConfigured("NudgeRatchet", 0);
+        _markConfigured("NudgeRatchetMintDebtHook", 0);
         _markConfigured("BalancerPoolerMintDebtHook", 0);
         _markConfigured("NFTStaker", 0);
         _markConfigured("BatchNFTMinter", 0);

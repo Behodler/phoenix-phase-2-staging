@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-06-09T23:46:13.935Z
+// Generated from local.json on 2026-06-19T03:37:10.630Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -40,11 +40,13 @@ export const anvilAddresses: ContractAddresses = {
   BalancerPoolerMintDebtHook: "0x7bc06c482DEAd17c0e297aFbC32f6e63d3846650",
   NFTStaker: "0xFD471836031dc5108809D173A067e8486B9047A3",
   BatchNFTMinter: "0x922D6956C99E12DFeB3224DEA977D0939758A1Fe",
-  StableStaker: "0x2E2Ed0Cfd3AD2f1d34481277b3204d807Ca2F8c2",
-  DepositView: "0xb9bEECD1A582768711dE1EE7B0A1d582D9d72a6C",
-  ViewRouter: "0x8A93d247134d91e0de6f96547cB0204e5BE8e5D8",
-  DepositPageView: "0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849",
-  MintPageView: "0xd6e1afe5cA8D00A2EFC01B89997abE2De47fdfAf",
+  NudgeRatchet: "0x2E2Ed0Cfd3AD2f1d34481277b3204d807Ca2F8c2",
+  NudgeRatchetMintDebtHook: "0xDC11f7E700A4c898AE5CAddB1082cFfa76512aDD",
+  StableStaker: "0x0355B7B8cb128fA5692729Ab3AAa199C1753f726",
+  DepositView: "0x6F6f570F45833E249e27022648a26F4076F48f78",
+  ViewRouter: "0xCA8c8688914e0F7096c920146cd0Ad85cD7Ae8b9",
+  DepositPageView: "0xB0f05d25e41FbC2b52013099ED9616f1206Ae21B",
+  MintPageView: "0x976fcd02f7C4773dd89C309fBF55D5923B4c98a1",
 };
 
 export type AnvilContractName = keyof ContractAddresses;

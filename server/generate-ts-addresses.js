@@ -151,6 +151,8 @@ function generateTsAddresses(chainId) {
     const data = JSON.parse(fs.readFileSync(inputPath, 'utf-8'));
 
     const contracts = Object.entries(data.contracts || {});
+    const nftsV1 = data.nftsV1 || {};
+    const nftsV2 = data.nftsV2 || {};
 
     // ────────────────────────────────────────────────────────────────────
     // chainId 1 (mainnet): NON-DESTRUCTIVE merge path.
