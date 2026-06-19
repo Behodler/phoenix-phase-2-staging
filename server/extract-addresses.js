@@ -32,8 +32,13 @@ const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "Ba
 /**
  * Contracts to drop from extraction entirely (V1 NFTs are handled via NFT_BASE_NAMES;
  * NFTMigrator is explicitly dropped here as a belt-and-suspenders guard).
+ *
+ * BuggedPoolerV2Index6 is a deploy-only placeholder: a disabled BalancerPoolerV2
+ * registered at dispatcher index 6 purely to mirror mainnet's index layout (so the
+ * local NudgeRatchet lands at index 7). It is never enabled and never minted, so it
+ * must not be surfaced as a consumable address in the ContractAddresses interface.
  */
-const DROPPED_CONTRACT_NAMES = ["NFTMigrator"];
+const DROPPED_CONTRACT_NAMES = ["NFTMigrator", "BuggedPoolerV2Index6"];
 
 /**
  * Extract contract addresses from progress file and generate deployment JSON

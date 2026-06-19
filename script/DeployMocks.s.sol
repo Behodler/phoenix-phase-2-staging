@@ -1102,6 +1102,7 @@ contract DeployMocks is Script {
         _markConfigured("NudgeRatchetMintDebtHook", 0);
         _markConfigured("BalancerPoolerMintDebtHook", 0);
         _markConfigured("NFTStaker", 0);
+        _markConfigured("RatchetNFTStaker", 0);
         _markConfigured("BatchNFTMinter", 0);
         _markConfigured("StableStaker", 0);
         _markConfigured("DepositView", 0);
