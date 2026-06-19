@@ -40,6 +40,9 @@ contract RegisterMintPageView is Script {
         address flaxAddr = vm.parseJsonAddress(progressJson, ".contracts.MockFlax.address");
         address susdsAddr = vm.parseJsonAddress(progressJson, ".contracts.MockUSDS.address");
         address wbtcAddr = vm.parseJsonAddress(progressJson, ".contracts.MockWBTC.address");
+        // NudgeRatchet's prime token (6-decimal USDC) — MintPageView's index-7 "Ratchet" entry.
+        // Local USDC is the consolidated MockRewardToken, tracked in progress JSON as MockUSDC.
+        address usdcAddr = vm.parseJsonAddress(progressJson, ".contracts.MockUSDC.address");
 
         console.log("ViewRouter:", viewRouterAddr);
         console.log("NFTMinter:", nftMinterAddr);
@@ -49,6 +52,7 @@ contract RegisterMintPageView is Script {
         console.log("Flax:", flaxAddr);
         console.log("sUSDS:", susdsAddr);
         console.log("WBTC:", wbtcAddr);
+        console.log("USDC (ratchet):", usdcAddr);
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -60,7 +64,8 @@ contract RegisterMintPageView is Script {
             scxAddr,
             flaxAddr,
             susdsAddr,
-            wbtcAddr
+            wbtcAddr,
+            usdcAddr
         );
 
         console.log("\nMintPageView deployed at:", address(mintPageView));
