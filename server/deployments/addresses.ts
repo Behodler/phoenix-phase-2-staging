@@ -41,6 +41,7 @@ export interface ContractAddresses {
   BatchNFTMinter: string;
   NudgeRatchet: string;
   NudgeRatchetMintDebtHook: string;
+  RatchetNFTStaker: string;
   StableStaker: string;
   DepositView: string;
   ViewRouter: string;

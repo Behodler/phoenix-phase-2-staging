@@ -136,6 +136,10 @@ contract DeployMocks is Script {
     // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook
     NudgeRatchet public nudgeRatchet;
     NudgeRatchetMintDebtHook public nudgeRatchetHook;
+    // Dedicated NFTStaker for the NudgeRatchet NFT (dispatcher index 7). A staker
+    // can only stake a single ERC1155 id at a time, so the ratchet NFT needs its
+    // own staker instance alongside the BalancerPoolerV2 staker (`nftStaker`).
+    NFTStaker public ratchetNFTStaker;
 
     // NFT Staking infrastructure
     BalancerPoolerMintDebtHook public balancerPoolerHook;
@@ -695,6 +699,43 @@ contract DeployMocks is Script {
         //    bugged pooler permanently holds index 6. Mirror the BalancerPoolerV2 price + 0.1% growth.
         nftMinterV2.registerDispatcher(address(nudgeRatchet), v2InitialPrice, 10); // 0.1% growth
         console.log("Registered NudgeRatchet dispatcher with NFTMinterV2 (index 7, 0.1% growth)");
+
+        // 6. Deploy + wire a dedicated NFTStaker for the NudgeRatchet NFT. The
+        //    NudgeRatchetMintDebtHook accrues phUSD mint debt on every ratchet
+        //    dispatch and exposes the same consumer surface as the Balancer
+        //    pooler hook (`mintDebt()` + `pull()`), so the staker drives it the
+        //    same way — only the recipient/index differ. The minted tokenId
+        //    equals the dispatcher index (NFTMinterV2._executeMint:
+        //    resolvedTokenId = index), so stakedId == dispatcherIndex == 7.
+        //    Derive the index rather than hard-coding so a registration-order
+        //    change can't silently mis-wire the staker.
+        uint256 ratchetIndex = nftMinterV2.dispatcherToIndex(address(nudgeRatchet));
+        require(ratchetIndex != 0, "NudgeRatchet not registered with NFTMinterV2");
+        gasBefore = gasleft();
+        ratchetNFTStaker = new NFTStaker(
+            IERC1155(address(nftMinterV2)),
+            ratchetIndex,
+            IERC20(address(phUSD)),
+            deployer,
+            INFTSupply(address(nftMinterV2)),
+            ratchetIndex
+        );
+        _trackDeployment("RatchetNFTStaker", address(ratchetNFTStaker), gasBefore - gasleft());
+        console.log("RatchetNFTStaker deployed at:", address(ratchetNFTStaker));
+
+        // Wire staker -> hook (cast to the IBalancerPoolerMintDebtHook surface).
+        ratchetNFTStaker.setDispatcherHook(IBalancerPoolerMintDebtHook(address(nudgeRatchetHook)));
+        console.log("RatchetNFTStaker.setDispatcherHook -> NudgeRatchetMintDebtHook");
+
+        // Wire hook recipient -> staker so pull() mints accrued phUSD to the pool.
+        // (The hook was already authorised as a phUSD minter above.)
+        nudgeRatchetHook.setRecipient(address(ratchetNFTStaker));
+        console.log("NudgeRatchetMintDebtHook.setRecipient -> RatchetNFTStaker");
+
+        // Match the BalancerPoolerV2 staker's emission policy (30%, bounded by
+        // MAX_TARGET_APY = 50%).
+        ratchetNFTStaker.setTargetAPY(0.3e18);
+        console.log("RatchetNFTStaker.setTargetAPY -> 0.3e18 (30%)");
 
         // ====== PHASE 3.7: StableStaker Deployment + Wiring (story 051) ======
         console.log("\n=== Phase 3.7: Deploying + Wiring StableStaker ===");

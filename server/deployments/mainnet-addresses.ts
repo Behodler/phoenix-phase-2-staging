@@ -101,6 +101,8 @@ export const mainnetAddresses: ContractAddresses = {
   // local deploy added these fields. Patch by hand when they ship to mainnet.
   NudgeRatchet: "0x0000000000000000000000000000000000000000",
   NudgeRatchetMintDebtHook: "0x0000000000000000000000000000000000000000",
+  // Dedicated NFTStaker for the NudgeRatchet NFT — not yet deployed on mainnet (story 068).
+  RatchetNFTStaker: "0x0000000000000000000000000000000000000000",
 };
 
 export type MainnetContractName = keyof ContractAddresses;
