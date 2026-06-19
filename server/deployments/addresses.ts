@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-06-19T08:12:07.805Z
+// Generated interface from local.json on 2026-06-19T09:04:42.675Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -42,6 +42,7 @@ export interface ContractAddresses {
   NudgeRatchet: string;
   NudgeRatchetMintDebtHook: string;
   RatchetNFTStaker: string;
+  RatchetBatchNFTMinter: string;
   StableStaker: string;
   DepositView: string;
   ViewRouter: string;

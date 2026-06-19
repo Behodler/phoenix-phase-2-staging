@@ -103,6 +103,9 @@ export const mainnetAddresses: ContractAddresses = {
   NudgeRatchetMintDebtHook: "0x0000000000000000000000000000000000000000",
   // Dedicated NFTStaker for the NudgeRatchet NFT — not yet deployed on mainnet (story 068).
   RatchetNFTStaker: "0x0000000000000000000000000000000000000000",
+  // Dedicated BatchNFTMinter for the NudgeRatchet NFT (UI batch-mint entrypoint; pays USDC,
+  // rewards USDS) — not yet deployed on mainnet (story 068). Patch by hand when it ships.
+  RatchetBatchNFTMinter: "0x0000000000000000000000000000000000000000",
 };
 
 export type MainnetContractName = keyof ContractAddresses;

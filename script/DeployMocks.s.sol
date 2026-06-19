@@ -140,6 +140,12 @@ contract DeployMocks is Script {
     // can only stake a single ERC1155 id at a time, so the ratchet NFT needs its
     // own staker instance alongside the BalancerPoolerV2 staker (`nftStaker`).
     NFTStaker public ratchetNFTStaker;
+    // Dedicated BatchNFTMinter for the NudgeRatchet NFT (dispatcher index 7), so the UI
+    // can batch-mint ratchet NFTs in a single tx. Separate instance from `batchNFTMinter`
+    // (which is pinned to the BalancerPoolerV2 index-4 NFT): a BatchNFTMinter pins a single
+    // dispatcher index. Payment token derives from the dispatcher's prime token (USDC);
+    // its nudge REWARD token is USDS so it never collides with the USDC input.
+    BatchNFTMinter public ratchetBatchNFTMinter;
 
     // NFT Staking infrastructure
     BalancerPoolerMintDebtHook public balancerPoolerHook;
@@ -463,6 +469,7 @@ contract DeployMocks is Script {
         // 4. Register V2 dispatchers with NFTMinterV2
         uint256 v2InitialPrice = 100 * 10 ** 18;
         uint256 v2WBTCInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
+        uint256 v2RatchetInitialPrice = 100 * 10 ** 6; // NudgeRatchet's prime token is 6-decimal USDC
 
         nftMinterV2.registerDispatcher(address(burnerEYEV2), v2InitialPrice, 200); // 2% growth
         console.log("Registered BurnerEYEV2 dispatcher with NFTMinterV2 (index 1, 2% growth)");
@@ -697,7 +704,7 @@ contract DeployMocks is Script {
         //    disabled bugged-pooler placeholder at index 6 — see the index-6 mirror above).
         //    Index 7 matches the index NudgeRatchet receives on mainnet, where the disabled
         //    bugged pooler permanently holds index 6. Mirror the BalancerPoolerV2 price + 0.1% growth.
-        nftMinterV2.registerDispatcher(address(nudgeRatchet), v2InitialPrice, 10); // 0.1% growth
+        nftMinterV2.registerDispatcher(address(nudgeRatchet), v2RatchetInitialPrice, 10); // 0.1% growth (6-decimal USDC price)
         console.log("Registered NudgeRatchet dispatcher with NFTMinterV2 (index 7, 0.1% growth)");
 
         // 6. Deploy + wire a dedicated NFTStaker for the NudgeRatchet NFT. The
@@ -736,6 +743,45 @@ contract DeployMocks is Script {
         // MAX_TARGET_APY = 50%).
         ratchetNFTStaker.setTargetAPY(0.3e18);
         console.log("RatchetNFTStaker.setTargetAPY -> 0.3e18 (30%)");
+
+        // 7. Deploy + wire a dedicated BatchNFTMinter for the NudgeRatchet NFT so the UI
+        //    can batch-mint ratchet NFTs in a single tx. This is a separate instance from
+        //    the BalancerPoolerV2 batch minter (`batchNFTMinter`, index 4): a BatchNFTMinter
+        //    pins exactly one dispatcher index, so the ratchet NFT (index 7) needs its own.
+        gasBefore = gasleft();
+        ratchetBatchNFTMinter = new BatchNFTMinter(deployer);
+        _trackDeployment("RatchetBatchNFTMinter", address(ratchetBatchNFTMinter), gasBefore - gasleft());
+        console.log("RatchetBatchNFTMinter deployed at:", address(ratchetBatchNFTMinter));
+
+        // Pin the trusted minter + the ratchet dispatcher index. batchMint reverts
+        // BatchMint__MinterNotConfigured / BatchMint__DispatcherNotConfigured before pulling
+        // any funds unless both are set. The payment token is DERIVED from the pinned
+        // dispatcher's primeToken() — here the NudgeRatchet's 6-decimal USDC — so the caller
+        // pays in USDC and cannot supply a wrong/zero payment asset. Reuse the derived
+        // `ratchetIndex` (== 7) rather than hard-coding so a registration-order change can't
+        // silently mis-wire it.
+        ratchetBatchNFTMinter.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
+        console.log("RatchetBatchNFTMinter.setTokenMinter -> NFTMinterV2");
+        ratchetBatchNFTMinter.setDispatcherIndex(ratchetIndex);
+        console.log("RatchetBatchNFTMinter.setDispatcherIndex ->", ratchetIndex);
+
+        // Nudge REWARD token = USDS (18-decimal), deliberately DISTINCT from the USDC payment
+        // token. BatchNFTMinter requires nudgePaymentToken != the dispatcher's prime token,
+        // else batchMint reverts BatchMint__NudgeTokenMatchesPaymentToken up-front (before any
+        // funds move). USDC in, USDS out — no overlap. Set the token before the size to mirror
+        // the index-4 batch minter's setter ordering above.
+        ratchetBatchNFTMinter.setNudgePaymentToken(address(usds)); // USDS reward (!= USDC input)
+        console.log("RatchetBatchNFTMinter.setNudgePaymentToken -> USDS");
+        ratchetBatchNFTMinter.setNudgeSize(MOCK_NUDGE_SIZE);
+        console.log("RatchetBatchNFTMinter.setNudgeSize ->", MOCK_NUDGE_SIZE);
+
+        // Seed the USDS nudge pot so the reward is visibly payable in local dev. The index-4
+        // batch minter's USDC nudge is refilled by the SYA/pooler USDC funnel; the ratchet
+        // batch minter's USDS reward has no such on-chain funnel (the ratchet funnel forwards
+        // USDC), so pre-fund it directly here. MockUSDS exposes an unrestricted mint (dev only).
+        uint256 ratchetNudgeSeed = 10_000 * 10 ** 18; // 10,000 USDS
+        usds.mint(address(ratchetBatchNFTMinter), ratchetNudgeSeed);
+        console.log("Seeded RatchetBatchNFTMinter with 10,000 USDS nudge pot");
 
         // ====== PHASE 3.7: StableStaker Deployment + Wiring (story 051) ======
         console.log("\n=== Phase 3.7: Deploying + Wiring StableStaker ===");
@@ -1104,6 +1150,7 @@ contract DeployMocks is Script {
         _markConfigured("NFTStaker", 0);
         _markConfigured("RatchetNFTStaker", 0);
         _markConfigured("BatchNFTMinter", 0);
+        _markConfigured("RatchetBatchNFTMinter", 0);
         _markConfigured("StableStaker", 0);
         _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
