@@ -46,6 +46,7 @@ import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPool
 import {IDispatchHook} from "@yield-claim-nft/V2/interfaces/IDispatchHook.sol";
 import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalancerPoolerMintDebtHook.sol";
 import {NFTStaker} from "nft-staking/NFTStaker.sol";
+import {NFTStakerPriceScaled} from "nft-staking/NFTStakerPriceScaled.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
 import {INFTSupply} from "nft-staking/INFTSupply.sol";
 import {StableStaker} from "stable-staker/StableStaker.sol";
@@ -136,10 +137,10 @@ contract DeployMocks is Script {
     // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook
     NudgeRatchet public nudgeRatchet;
     NudgeRatchetMintDebtHook public nudgeRatchetHook;
-    // Dedicated NFTStaker for the NudgeRatchet NFT (dispatcher index 7). A staker
-    // can only stake a single ERC1155 id at a time, so the ratchet NFT needs its
-    // own staker instance alongside the BalancerPoolerV2 staker (`nftStaker`).
-    NFTStaker public ratchetNFTStaker;
+    // Dedicated NFTStakerPriceScaled for the NudgeRatchet NFT (dispatcher index 7). Uses the
+    // price-scaled variant because the ratchet's prime token is 6-decimal USDC while the reward
+    // token is 18-decimal phUSD; priceScale = 1e12 normalizes the mint price so targetAPY works.
+    NFTStakerPriceScaled public ratchetNFTStaker;
     // Dedicated BatchNFTMinter for the NudgeRatchet NFT (dispatcher index 7), so the UI
     // can batch-mint ratchet NFTs in a single tx. Separate instance from `batchNFTMinter`
     // (which is pinned to the BalancerPoolerV2 index-4 NFT): a BatchNFTMinter pins a single
@@ -718,14 +719,18 @@ contract DeployMocks is Script {
         //    change can't silently mis-wire the staker.
         uint256 ratchetIndex = nftMinterV2.dispatcherToIndex(address(nudgeRatchet));
         require(ratchetIndex != 0, "NudgeRatchet not registered with NFTMinterV2");
+        // priceScale = 1e12: NudgeRatchet's prime token is 6-decimal USDC; phUSD is 18-decimal.
+        // Without scaling, latestPrice floor-divides the emission rate to zero.
+        uint256 ratchetPriceScale = 1e12;
         gasBefore = gasleft();
-        ratchetNFTStaker = new NFTStaker(
+        ratchetNFTStaker = new NFTStakerPriceScaled(
             IERC1155(address(nftMinterV2)),
             ratchetIndex,
             IERC20(address(phUSD)),
             deployer,
             INFTSupply(address(nftMinterV2)),
-            ratchetIndex
+            ratchetIndex,
+            ratchetPriceScale
         );
         _trackDeployment("RatchetNFTStaker", address(ratchetNFTStaker), gasBefore - gasleft());
         console.log("RatchetNFTStaker deployed at:", address(ratchetNFTStaker));
@@ -739,10 +744,9 @@ contract DeployMocks is Script {
         nudgeRatchetHook.setRecipient(address(ratchetNFTStaker));
         console.log("NudgeRatchetMintDebtHook.setRecipient -> RatchetNFTStaker");
 
-        // Match the BalancerPoolerV2 staker's emission policy (30%, bounded by
-        // MAX_TARGET_APY = 50%).
-        ratchetNFTStaker.setTargetAPY(0.3e18);
-        console.log("RatchetNFTStaker.setTargetAPY -> 0.3e18 (30%)");
+        // Target APY 45% (bounded by MAX_TARGET_APY = 50%).
+        ratchetNFTStaker.setTargetAPY(0.45e18);
+        console.log("RatchetNFTStaker.setTargetAPY -> 0.45e18 (45%)");
 
         // 7. Deploy + wire a dedicated BatchNFTMinter for the NudgeRatchet NFT so the UI
         //    can batch-mint ratchet NFTs in a single tx. This is a separate instance from
