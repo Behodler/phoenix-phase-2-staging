@@ -5,15 +5,4 @@ out/
 .npmrc
 .envrc
 
-# Story 049: per-run staker snapshot artifacts. Regenerate via
-# `npm run snapshot:phlimbo-v1` immediately before broadcasting
-# `migrate-phlimbo-v1-to-v2`. They are environment- and timing-sensitive
-# and should not be checked in.
-scripts/snapshots/
-
-# Throwaway scratchpad script. Committed once as an empty skeleton, then
-# ignored so local scratch work is never tracked. NOTE: .gitignore alone does
-# not stop commits to an already-tracked file; this is backed by
-# `git update-index --skip-worktree script/interactions/Temp.s.sol` locally.
-# Run that command after cloning to keep your scratch edits untracked.
-script/interactions/Temp.s.sol
+broadcast/Temp.s.sol/
