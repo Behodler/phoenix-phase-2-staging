@@ -264,7 +264,10 @@
     "Temp:preview": "PREVIEW_MODE=true forge script script/interactions/Temp.s.sol:Temp --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --slow -vvv",
     "Temp:broadcast": "forge script script/interactions/Temp.s.sol:Temp --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "deploy:ratchet-mainnet-preview": "PREVIEW_MODE=true forge script script/DeployMainnetNudgeRatchet.s.sol:DeployMainnetNudgeRatchet --rpc-url $RPC_MAINNET --slow -vvv",
-    "deploy:ratchet-mainnet": "node scripts/backup-mainnet-addresses.js && forge script script/DeployMainnetNudgeRatchet.s.sol:DeployMainnetNudgeRatchet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-ratchet.js"
+    "deploy:ratchet-mainnet": "node scripts/backup-mainnet-addresses.js && forge script script/DeployMainnetNudgeRatchet.s.sol:DeployMainnetNudgeRatchet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-ratchet.js",
+    "//fix-ratchet-sink": "Story 069 corrective follow-up. Two owner-only state changes, no deploys: (1) NudgeRatchet.setBatchMinter -> original BatchNFTMinter 0x86866e.. so ratchet USDC funds the USDC whale-nudge bounty instead of self-refunding via the ratchet entrypoint 0x81896..; (2) NFTMinterV2.setPrice(7, 10 USDC) to reset the reservoir after the test mint ratcheted it to 10.1. Idempotent. RatchetBatchNFTMinter is retained as the UI batch entrypoint. Owner 0xCad1..D0B6 owns both targets. No address change (patcher not needed).",
+    "fix:ratchet-sink-preview": "PREVIEW_MODE=true forge script script/FixRatchetBatchMinterSink.s.sol:FixRatchetBatchMinterSink --rpc-url $RPC_MAINNET --slow -vvv",
+    "fix:ratchet-sink": "forge script script/FixRatchetBatchMinterSink.s.sol:FixRatchetBatchMinterSink --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
   },
   "keywords": [
     "phoenix",
