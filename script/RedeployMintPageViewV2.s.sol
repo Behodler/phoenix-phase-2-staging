@@ -44,7 +44,7 @@ contract RedeployMintPageViewV2 is Script {
 
     // Common NFT infrastructure (shared V1/V2)
     address public constant BURN_RECORDER = 0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F;
-    address public constant VIEW_ROUTER   = 0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a;
+    address public constant VIEW_ROUTER = 0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a;
 
     // Current MintPageView on ViewRouter — being replaced.
     // History:
@@ -56,11 +56,24 @@ contract RedeployMintPageViewV2 is Script {
     address public constant OLD_MINT_PAGE_VIEW = 0x64FE63ca7BA456a9Bb190140e35DF2e437AbD119;
 
     // Tokens consumed by the V2 mint flow (must match each V2 dispatcher's primeToken())
-    address public constant EYE  = 0x155ff1A85F440EE0A382eA949f24CE4E0b751c65;
-    address public constant SCX  = 0x1B8568FbB47708E9E9D31Ff303254f748805bF21;
+    address public constant EYE = 0x155ff1A85F440EE0A382eA949f24CE4E0b751c65;
+    address public constant SCX = 0x1B8568FbB47708E9E9D31Ff303254f748805bF21;
     address public constant FLAX = 0x0cf758D4303295C43CD95e1232f0101ADb3DA9E8;
     address public constant USDS = 0xdC035D45d973E3EC169d2276DDab16f1e407384F; // V2 uses USDS (not sUSDS)
     address public constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
+    // Canonical mainnet USDC — the NudgeRatchet's prime token (dispatcher index 7).
+    // Sourced from server/deployments/mainnet-addresses.ts (USDC field).
+    address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+
+    // ⚠️ RATCHET / INDEX-7 NOTICE: MintPageView now hardcodes a 6th entry ("Ratchet")
+    //    reading NFTMinter dispatcher INDEX 7 (mainnet index 6 is the permanently-disabled
+    //    bugged pooler). Deploying this view is therefore implicitly ratchet-aware:
+    //      * If NudgeRatchet is NOT yet registered at mainnet index 7, the Ratchet entry
+    //        reports zeros (configs(7) is empty) until it is — harmless but inert.
+    //      * The mainnet ratchet rollout MUST (re)deploy this MintPageView so the mint page
+    //        shows the ratchet. Do not treat the view as done before ratchet is wired.
+    //    Verify on-chain before broadcast: configs(6).disabled == true && configs(7) is the
+    //    NudgeRatchet (or still empty, pre-rollout). See the saved memory on this.
 
     // Ledger signer (index 46)
     address public constant OWNER_ADDRESS = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
@@ -83,7 +96,9 @@ contract RedeployMintPageViewV2 is Script {
         console.log("FLAX:              ", FLAX);
         console.log("USDS (V2 prime):   ", USDS);
         console.log("WBTC:              ", WBTC);
+        console.log("USDC (ratchet idx7):", USDC);
         console.log("");
+        require(USDC != address(0), "USDC (ratchet prime token) unset");
 
         // Pre-flight sanity checks
         address routerOwner = ViewRouter(VIEW_ROUTER).owner();
@@ -113,7 +128,8 @@ contract RedeployMintPageViewV2 is Script {
             SCX,
             FLAX,
             USDS,
-            WBTC
+            WBTC,
+            USDC // NudgeRatchet prime token (dispatcher index 7)
         );
         console.log("New MintPageView deployed at:", address(mpv));
 

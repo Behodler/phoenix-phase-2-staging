@@ -40,10 +40,13 @@ import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol"
 import {BurnerV2} from "@yield-claim-nft/V2/dispatchers/BurnerV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/V2/dispatchers/GatherV2.sol";
+import {NudgeRatchet} from "@yield-claim-nft/V2/dispatchers/NudgeRatchet.sol";
+import {NudgeRatchetMintDebtHook} from "@yield-claim-nft/V2/hooks/NudgeRatchetMintDebtHook.sol";
 import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPoolerMintDebtHook.sol";
 import {IDispatchHook} from "@yield-claim-nft/V2/interfaces/IDispatchHook.sol";
 import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalancerPoolerMintDebtHook.sol";
 import {NFTStaker} from "nft-staking/NFTStaker.sol";
+import {NFTStakerPriceScaled} from "nft-staking/NFTStakerPriceScaled.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
 import {INFTSupply} from "nft-staking/INFTSupply.sol";
 import {StableStaker} from "stable-staker/StableStaker.sol";
@@ -92,7 +95,7 @@ contract DeployMocks is Script {
     MockSUSDe public susde; // ERC4626 savings vault wrapping USDe
     MockDola public dola;
     MockAutoDOLA public mockAutoDola;
-    MockAutoDOLA public mockAutoUSDC;  // Reusing MockAutoDOLA pattern for USDC
+    MockAutoDOLA public mockAutoUSDC; // Reusing MockAutoDOLA pattern for USDC
     ERC4626YieldStrategy public yieldStrategyDola;
     ERC4626YieldStrategy public yieldStrategyUSDC;
     // USDe uses the AMM-market strategy (not the plain 1:1 ERC4626YieldStrategy) to mirror
@@ -125,6 +128,25 @@ contract DeployMocks is Script {
     BurnerV2 public burnerFlaxV2;
     BalancerPoolerV2 public balancerPoolerV2;
     GatherV2 public gatherWBTCV2;
+    // Disabled placeholder occupying dispatcher index 6 to mirror mainnet, where the
+    // "bugged" BalancerPoolerV2 (story-047) was appended at index 6 and then permanently
+    // disabled by the story-048 cutover. Registering this here pushes NudgeRatchet to
+    // index 7, matching the index it will receive on mainnet. Never enabled / never minted.
+    BalancerPoolerV2 public buggedPoolerV2Index6;
+
+    // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook
+    NudgeRatchet public nudgeRatchet;
+    NudgeRatchetMintDebtHook public nudgeRatchetHook;
+    // Dedicated NFTStakerPriceScaled for the NudgeRatchet NFT (dispatcher index 7). Uses the
+    // price-scaled variant because the ratchet's prime token is 6-decimal USDC while the reward
+    // token is 18-decimal phUSD; priceScale = 1e12 normalizes the mint price so targetAPY works.
+    NFTStakerPriceScaled public ratchetNFTStaker;
+    // Dedicated BatchNFTMinter for the NudgeRatchet NFT (dispatcher index 7), so the UI
+    // can batch-mint ratchet NFTs in a single tx. Separate instance from `batchNFTMinter`
+    // (which is pinned to the BalancerPoolerV2 index-4 NFT): a BatchNFTMinter pins a single
+    // dispatcher index. Payment token derives from the dispatcher's prime token (USDC);
+    // its nudge REWARD token is USDS so it never collides with the USDC input.
+    BatchNFTMinter public ratchetBatchNFTMinter;
 
     // NFT Staking infrastructure
     BalancerPoolerMintDebtHook public balancerPoolerHook;
@@ -193,7 +215,7 @@ contract DeployMocks is Script {
         console.log("MockSUSDS deployed at:", address(susds));
 
         // Deposit initial USDS into MockSUSDS to establish baseline shares
-        uint256 initialSusdsDeposit = 10_000 * 10**18; // 10,000 USDS
+        uint256 initialSusdsDeposit = 10_000 * 10 ** 18; // 10,000 USDS
         usds.approve(address(susds), initialSusdsDeposit);
         susds.deposit(initialSusdsDeposit, deployer);
         console.log("Deposited 10,000 USDS into MockSUSDS (baseline shares established)");
@@ -211,7 +233,7 @@ contract DeployMocks is Script {
         console.log("MockSUSDe deployed at:", address(susde));
 
         // Deposit initial USDe into MockSUSDe to establish baseline shares
-        uint256 initialSusdeDeposit = 10_000 * 10**18; // 10,000 USDe
+        uint256 initialSusdeDeposit = 10_000 * 10 ** 18; // 10,000 USDe
         usde.approve(address(susde), initialSusdeDeposit);
         susde.deposit(initialSusdeDeposit, deployer);
         console.log("Deposited 10,000 USDe into MockSUSDe (baseline shares established)");
@@ -264,9 +286,9 @@ contract DeployMocks is Script {
         // Deploy ERC4626YieldStrategy wrapping the DOLA vault
         gasBefore = gasleft();
         yieldStrategyDola = new ERC4626YieldStrategy(
-            deployer,                // owner
-            address(dola),           // underlyingToken (DOLA)
-            address(mockAutoDola)    // erc4626Vault
+            deployer, // owner
+            address(dola), // underlyingToken (DOLA)
+            address(mockAutoDola) // erc4626Vault
         );
         _trackDeployment("YieldStrategyDola", address(yieldStrategyDola), gasBefore - gasleft());
         console.log("YieldStrategyDola (ERC4626YieldStrategy) deployed at:", address(yieldStrategyDola));
@@ -283,9 +305,9 @@ contract DeployMocks is Script {
         // Deploy ERC4626YieldStrategy wrapping the USDC vault
         gasBefore = gasleft();
         yieldStrategyUSDC = new ERC4626YieldStrategy(
-            deployer,                // owner
-            address(rewardToken),    // underlyingToken (USDC)
-            address(mockAutoUSDC)    // erc4626Vault
+            deployer, // owner
+            address(rewardToken), // underlyingToken (USDC)
+            address(mockAutoUSDC) // erc4626Vault
         );
         _trackDeployment("YieldStrategyUSDC", address(yieldStrategyUSDC), gasBefore - gasleft());
         console.log("YieldStrategyUSDC (ERC4626YieldStrategy) deployed at:", address(yieldStrategyUSDC));
@@ -304,8 +326,10 @@ contract DeployMocks is Script {
         //     would otherwise be left underwater). 10 bps mirrors the typical observed
         //     exit slippage on the live route.
         uint256 usdeSlippageToleranceBps = 30; // 0.3% principal haircut (target go-live value)
-        uint256 usdeAmmSlippageBps = 10;        // 0.1% simulated AMM slippage per swap leg
-        require(usdeAmmSlippageBps <= usdeSlippageToleranceBps, "AMM slippage exceeds tolerance (would brick USDe deposits)");
+        uint256 usdeAmmSlippageBps = 10; // 0.1% simulated AMM slippage per swap leg
+        require(
+            usdeAmmSlippageBps <= usdeSlippageToleranceBps, "AMM slippage exceeds tolerance (would brick USDe deposits)"
+        );
 
         // Deploy the mock Curve-style AMM adapter (USDe<->sUSDe). Routes through MockSUSDe so
         // share pricing tracks the vault, while skimming a slippage haircut on every leg.
@@ -321,10 +345,10 @@ contract DeployMocks is Script {
         // the UI sees that deposits are NOT perfectly preserved.
         gasBefore = gasleft();
         yieldStrategyUSDe = new ERC4626MarketYieldStrategy(
-            deployer,                  // owner
-            address(usde),             // underlyingToken (USDe)
-            address(susde),            // erc4626Vault (MockSUSDe)
-            address(usdeAmmAdapter)    // ammAdapter
+            deployer, // owner
+            address(usde), // underlyingToken (USDe)
+            address(susde), // erc4626Vault (MockSUSDe)
+            address(usdeAmmAdapter) // ammAdapter
         );
         _trackDeployment("YieldStrategyUSDe", address(yieldStrategyUSDe), gasBefore - gasleft());
         console.log("YieldStrategyUSDe (ERC4626MarketYieldStrategy) deployed at:", address(yieldStrategyUSDe));
@@ -349,9 +373,9 @@ contract DeployMocks is Script {
         uint256 oneWeekInSeconds = 604800;
         gasBefore = gasleft();
         phlimbo = new PhlimboEA(
-            address(phUSD),           // _phUSD
-            address(rewardToken),     // _rewardToken (USDC)
-            oneWeekInSeconds          // _depletionDuration (1 week for linear depletion)
+            address(phUSD), // _phUSD
+            address(rewardToken), // _rewardToken (USDC)
+            oneWeekInSeconds // _depletionDuration (1 week for linear depletion)
         );
         _trackDeployment("PhlimboEA", address(phlimbo), gasBefore - gasleft());
         console.log("PhlimboEA deployed at:", address(phlimbo));
@@ -423,12 +447,12 @@ contract DeployMocks is Script {
         // BalancerPoolerV2: prime token is USDS (derived from sUSDS via IERC4626.asset())
         gasBefore = gasleft();
         balancerPoolerV2 = new BalancerPoolerV2(
-            address(susds),              // sUSDS_ (ERC4626 vault)
-            address(mockBalancerPool),   // pool_ (BPT token)
-            address(mockBalancerVault),  // vault_
+            address(susds), // sUSDS_ (ERC4626 vault)
+            address(mockBalancerPool), // pool_ (BPT token)
+            address(mockBalancerVault), // vault_
             address(mockBalancerRouter), // router_
-            true,                        // sUSDSIsFirst_
-            deployer                     // initialOwner
+            true, // sUSDSIsFirst_
+            deployer // initialOwner
         );
         _trackDeployment("BalancerPoolerV2", address(balancerPoolerV2), gasBefore - gasleft());
         console.log("BalancerPoolerV2 deployed at:", address(balancerPoolerV2));
@@ -436,9 +460,9 @@ contract DeployMocks is Script {
         // GatherV2: accumulates WBTC, sends to deployer
         gasBefore = gasleft();
         gatherWBTCV2 = new GatherV2(
-            address(mockWBTC),      // token_ (WBTC)
-            deployer,               // recipient_ (deployer)
-            deployer                // initialOwner
+            address(mockWBTC), // token_ (WBTC)
+            deployer, // recipient_ (deployer)
+            deployer // initialOwner
         );
         _trackDeployment("GatherWBTCV2", address(gatherWBTCV2), gasBefore - gasleft());
         console.log("GatherWBTCV2 deployed at:", address(gatherWBTCV2));
@@ -446,6 +470,7 @@ contract DeployMocks is Script {
         // 4. Register V2 dispatchers with NFTMinterV2
         uint256 v2InitialPrice = 100 * 10 ** 18;
         uint256 v2WBTCInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
+        uint256 v2RatchetInitialPrice = 100 * 10 ** 6; // NudgeRatchet's prime token is 6-decimal USDC
 
         nftMinterV2.registerDispatcher(address(burnerEYEV2), v2InitialPrice, 200); // 2% growth
         console.log("Registered BurnerEYEV2 dispatcher with NFTMinterV2 (index 1, 2% growth)");
@@ -461,6 +486,31 @@ contract DeployMocks is Script {
 
         nftMinterV2.registerDispatcher(address(gatherWBTCV2), v2WBTCInitialPrice, 1000); // 10% growth
         console.log("Registered GatherWBTCV2 dispatcher with NFTMinterV2 (index 5, 10% growth)");
+
+        // ---- Index-6 mirror: disabled "bugged pooler" placeholder ----
+        // On mainnet, dispatcher index 6 is permanently occupied by the disabled bugged
+        // BalancerPoolerV2 (registered by story-047, disabled by the story-048 cutover).
+        // registerDispatcher is append-only by index, so index 6 can never be reclaimed —
+        // meaning NudgeRatchet will land at index 7 on mainnet. We mirror that here by
+        // registering a second BalancerPoolerV2 at index 6 and immediately disabling it,
+        // so the local NudgeRatchet also receives index 7 and the dispatcher layout (and
+        // therefore MintPageView's hardcoded index 7) is identical across all networks.
+        // This dispatcher is disabled and never minted; it exists only to consume index 6.
+        gasBefore = gasleft();
+        buggedPoolerV2Index6 = new BalancerPoolerV2(
+            address(susds), // sUSDS_ (ERC4626 vault) — same args as the real pooler
+            address(mockBalancerPool), // pool_ (BPT token)
+            address(mockBalancerVault), // vault_
+            address(mockBalancerRouter), // router_
+            true, // sUSDSIsFirst_
+            deployer // initialOwner
+        );
+        _trackDeployment("BuggedPoolerV2Index6", address(buggedPoolerV2Index6), gasBefore - gasleft());
+        console.log("BuggedPoolerV2Index6 (disabled placeholder) deployed at:", address(buggedPoolerV2Index6));
+
+        nftMinterV2.registerDispatcher(address(buggedPoolerV2Index6), v2InitialPrice, 10); // index 6
+        nftMinterV2.setDispatcherDisabled(6, true); // mirror mainnet: index 6 is disabled
+        console.log("Registered + disabled BuggedPoolerV2Index6 (index 6) to mirror mainnet");
 
         // 5. Set minter on each V2 dispatcher
         burnerEYEV2.setMinter(address(nftMinterV2));
@@ -484,13 +534,7 @@ contract DeployMocks is Script {
         // Deploy waUSDC mock (ERC4626 wrapper over the existing USDC reward token).
         // 6 decimals to match real USDC; default rate 10000 bps (1:1 redeem).
         gasBefore = gasleft();
-        mockWaUsdc = new MockERC4626Wrapper(
-            "Mock Wrapped Aave USDC",
-            "mwaUSDC",
-            address(rewardToken),
-            6,
-            10000
-        );
+        mockWaUsdc = new MockERC4626Wrapper("Mock Wrapped Aave USDC", "mwaUSDC", address(rewardToken), 6, 10000);
         _trackDeployment("MockWaUSDC", address(mockWaUsdc), gasBefore - gasleft());
         console.log("MockWaUSDC deployed at:", address(mockWaUsdc));
 
@@ -513,7 +557,7 @@ contract DeployMocks is Script {
         gasBefore = gasleft();
         mockSkyPSM = new MockSkyPSM(
             address(rewardToken), // gem  = USDC (6dp)
-            address(usds)         // usds = USDS (18dp)
+            address(usds) // usds = USDS (18dp)
         );
         _trackDeployment("MockSkyPSM", address(mockSkyPSM), gasBefore - gasleft());
         console.log("MockSkyPSM deployed at:", address(mockSkyPSM));
@@ -546,11 +590,7 @@ contract DeployMocks is Script {
 
         // 1. Deploy BalancerPoolerMintDebtHook (replaces the default no-op DispatchHook)
         gasBefore = gasleft();
-        balancerPoolerHook = new BalancerPoolerMintDebtHook(
-            deployer,
-            address(balancerPoolerV2),
-            address(phUSD)
-        );
+        balancerPoolerHook = new BalancerPoolerMintDebtHook(deployer, address(balancerPoolerV2), address(phUSD));
         _trackDeployment("BalancerPoolerMintDebtHook", address(balancerPoolerHook), gasBefore - gasleft());
         console.log("BalancerPoolerMintDebtHook deployed at:", address(balancerPoolerHook));
 
@@ -561,12 +601,7 @@ contract DeployMocks is Script {
         // 3. Deploy NFTStaker (BalancerPoolerV2 NFT id = 4, phUSD as reward, dispatcher index 4)
         gasBefore = gasleft();
         nftStaker = new NFTStaker(
-            IERC1155(address(nftMinterV2)),
-            4,
-            IERC20(address(phUSD)),
-            deployer,
-            INFTSupply(address(nftMinterV2)),
-            4
+            IERC1155(address(nftMinterV2)), 4, IERC20(address(phUSD)), deployer, INFTSupply(address(nftMinterV2)), 4
         );
         _trackDeployment("NFTStaker", address(nftStaker), gasBefore - gasleft());
         console.log("NFTStaker deployed at:", address(nftStaker));
@@ -626,6 +661,131 @@ contract DeployMocks is Script {
 
         balancerPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
         console.log("BalancerPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
+
+        // ---- Story 068: NudgeRatchet dispatcher + mint-debt hook ----
+        // NudgeRatchet is a forwarding dispatcher (structurally like GatherV2) backed by
+        // the existing 6-decimal MockRewardToken (USDC); its constructor enforces a
+        // 6-decimal token and a non-zero batchMinter sink. Deployed AFTER batchNFTMinter
+        // so `batchMinter_` is non-zero. Mirrors the BalancerPoolerV2 wiring pattern.
+        gasBefore = gasleft();
+        nudgeRatchet = new NudgeRatchet(
+            address(rewardToken), // token_ — existing 6-decimal MockRewardToken (USDC)
+            address(batchNFTMinter), // batchMinter_ — existing nudge-reward sink
+            deployer // initialOwner
+        );
+        _trackDeployment("NudgeRatchet", address(nudgeRatchet), gasBefore - gasleft());
+        console.log("NudgeRatchet deployed at:", address(nudgeRatchet));
+
+        // 1. Point the dispatcher's minter at NFTMinterV2.
+        nudgeRatchet.setMinter(address(nftMinterV2));
+        console.log("NudgeRatchet.setMinter -> NFTMinterV2");
+
+        // 2. Deploy the matching mint-debt hook. NudgeRatchet._dispatch reverts unless the
+        //    installed hook is a NudgeRatchetMintDebtHook (hookTypeId() guard), so this hook
+        //    MUST replace the constructor-installed DefaultDispatchHook or the dispatcher is
+        //    bricked on first dispatch.
+        gasBefore = gasleft();
+        nudgeRatchetHook = new NudgeRatchetMintDebtHook(
+            deployer, // initialOwner
+            address(nudgeRatchet), // dispatcher_
+            address(phUSD) // phUSD_
+        );
+        _trackDeployment("NudgeRatchetMintDebtHook", address(nudgeRatchetHook), gasBefore - gasleft());
+        console.log("NudgeRatchetMintDebtHook deployed at:", address(nudgeRatchetHook));
+
+        // 3. Install the hook on NudgeRatchet (swaps out the DefaultDispatchHook).
+        nudgeRatchet.setHook(IDispatchHook(address(nudgeRatchetHook)));
+        console.log("NudgeRatchet.setHook -> NudgeRatchetMintDebtHook");
+
+        // 4. Authorize the hook to mint phUSD (so it can realise mint debt on dispatch).
+        phUSD.setMinter(address(nudgeRatchetHook), true);
+        console.log("Authorized NudgeRatchetMintDebtHook as phUSD minter");
+
+        // 5. Register the dispatcher on NFTMinterV2 (index auto-assigns to 7, after the
+        //    disabled bugged-pooler placeholder at index 6 — see the index-6 mirror above).
+        //    Index 7 matches the index NudgeRatchet receives on mainnet, where the disabled
+        //    bugged pooler permanently holds index 6. Mirror the BalancerPoolerV2 price + 0.1% growth.
+        nftMinterV2.registerDispatcher(address(nudgeRatchet), v2RatchetInitialPrice, 10); // 0.1% growth (6-decimal USDC price)
+        console.log("Registered NudgeRatchet dispatcher with NFTMinterV2 (index 7, 0.1% growth)");
+
+        // 6. Deploy + wire a dedicated NFTStaker for the NudgeRatchet NFT. The
+        //    NudgeRatchetMintDebtHook accrues phUSD mint debt on every ratchet
+        //    dispatch and exposes the same consumer surface as the Balancer
+        //    pooler hook (`mintDebt()` + `pull()`), so the staker drives it the
+        //    same way — only the recipient/index differ. The minted tokenId
+        //    equals the dispatcher index (NFTMinterV2._executeMint:
+        //    resolvedTokenId = index), so stakedId == dispatcherIndex == 7.
+        //    Derive the index rather than hard-coding so a registration-order
+        //    change can't silently mis-wire the staker.
+        uint256 ratchetIndex = nftMinterV2.dispatcherToIndex(address(nudgeRatchet));
+        require(ratchetIndex != 0, "NudgeRatchet not registered with NFTMinterV2");
+        // priceScale = 1e12: NudgeRatchet's prime token is 6-decimal USDC; phUSD is 18-decimal.
+        // Without scaling, latestPrice floor-divides the emission rate to zero.
+        uint256 ratchetPriceScale = 1e12;
+        gasBefore = gasleft();
+        ratchetNFTStaker = new NFTStakerPriceScaled(
+            IERC1155(address(nftMinterV2)),
+            ratchetIndex,
+            IERC20(address(phUSD)),
+            deployer,
+            INFTSupply(address(nftMinterV2)),
+            ratchetIndex,
+            ratchetPriceScale
+        );
+        _trackDeployment("RatchetNFTStaker", address(ratchetNFTStaker), gasBefore - gasleft());
+        console.log("RatchetNFTStaker deployed at:", address(ratchetNFTStaker));
+
+        // Wire staker -> hook (cast to the IBalancerPoolerMintDebtHook surface).
+        ratchetNFTStaker.setDispatcherHook(IBalancerPoolerMintDebtHook(address(nudgeRatchetHook)));
+        console.log("RatchetNFTStaker.setDispatcherHook -> NudgeRatchetMintDebtHook");
+
+        // Wire hook recipient -> staker so pull() mints accrued phUSD to the pool.
+        // (The hook was already authorised as a phUSD minter above.)
+        nudgeRatchetHook.setRecipient(address(ratchetNFTStaker));
+        console.log("NudgeRatchetMintDebtHook.setRecipient -> RatchetNFTStaker");
+
+        // Target APY 45% (bounded by MAX_TARGET_APY = 50%).
+        ratchetNFTStaker.setTargetAPY(0.45e18);
+        console.log("RatchetNFTStaker.setTargetAPY -> 0.45e18 (45%)");
+
+        // 7. Deploy + wire a dedicated BatchNFTMinter for the NudgeRatchet NFT so the UI
+        //    can batch-mint ratchet NFTs in a single tx. This is a separate instance from
+        //    the BalancerPoolerV2 batch minter (`batchNFTMinter`, index 4): a BatchNFTMinter
+        //    pins exactly one dispatcher index, so the ratchet NFT (index 7) needs its own.
+        gasBefore = gasleft();
+        ratchetBatchNFTMinter = new BatchNFTMinter(deployer);
+        _trackDeployment("RatchetBatchNFTMinter", address(ratchetBatchNFTMinter), gasBefore - gasleft());
+        console.log("RatchetBatchNFTMinter deployed at:", address(ratchetBatchNFTMinter));
+
+        // Pin the trusted minter + the ratchet dispatcher index. batchMint reverts
+        // BatchMint__MinterNotConfigured / BatchMint__DispatcherNotConfigured before pulling
+        // any funds unless both are set. The payment token is DERIVED from the pinned
+        // dispatcher's primeToken() — here the NudgeRatchet's 6-decimal USDC — so the caller
+        // pays in USDC and cannot supply a wrong/zero payment asset. Reuse the derived
+        // `ratchetIndex` (== 7) rather than hard-coding so a registration-order change can't
+        // silently mis-wire it.
+        ratchetBatchNFTMinter.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
+        console.log("RatchetBatchNFTMinter.setTokenMinter -> NFTMinterV2");
+        ratchetBatchNFTMinter.setDispatcherIndex(ratchetIndex);
+        console.log("RatchetBatchNFTMinter.setDispatcherIndex ->", ratchetIndex);
+
+        // Nudge REWARD token = USDS (18-decimal), deliberately DISTINCT from the USDC payment
+        // token. BatchNFTMinter requires nudgePaymentToken != the dispatcher's prime token,
+        // else batchMint reverts BatchMint__NudgeTokenMatchesPaymentToken up-front (before any
+        // funds move). USDC in, USDS out — no overlap. Set the token before the size to mirror
+        // the index-4 batch minter's setter ordering above.
+        ratchetBatchNFTMinter.setNudgePaymentToken(address(usds)); // USDS reward (!= USDC input)
+        console.log("RatchetBatchNFTMinter.setNudgePaymentToken -> USDS");
+        ratchetBatchNFTMinter.setNudgeSize(MOCK_NUDGE_SIZE);
+        console.log("RatchetBatchNFTMinter.setNudgeSize ->", MOCK_NUDGE_SIZE);
+
+        // Seed the USDS nudge pot so the reward is visibly payable in local dev. The index-4
+        // batch minter's USDC nudge is refilled by the SYA/pooler USDC funnel; the ratchet
+        // batch minter's USDS reward has no such on-chain funnel (the ratchet funnel forwards
+        // USDC), so pre-fund it directly here. MockUSDS exposes an unrestricted mint (dev only).
+        uint256 ratchetNudgeSeed = 10_000 * 10 ** 18; // 10,000 USDS
+        usds.mint(address(ratchetBatchNFTMinter), ratchetNudgeSeed);
+        console.log("Seeded RatchetBatchNFTMinter with 10,000 USDS nudge pot");
 
         // ====== PHASE 3.7: StableStaker Deployment + Wiring (story 051) ======
         console.log("\n=== Phase 3.7: Deploying + Wiring StableStaker ===");
@@ -698,19 +858,19 @@ contract DeployMocks is Script {
 
         // Register DOLA as stablecoin (18 decimals)
         minter.registerStablecoin(
-            address(dola),               // stablecoin
-            address(yieldStrategyDola),  // yieldStrategy
-            1e18,                        // exchangeRate (1:1)
-            18                           // decimals
+            address(dola), // stablecoin
+            address(yieldStrategyDola), // yieldStrategy
+            1e18, // exchangeRate (1:1)
+            18 // decimals
         );
         console.log("Registered DOLA as stablecoin");
 
         // Register USDC as stablecoin (6 decimals)
         minter.registerStablecoin(
-            address(rewardToken),        // stablecoin (USDC)
-            address(yieldStrategyUSDC),  // yieldStrategy
-            1e18,                        // exchangeRate (1:1)
-            6                            // decimals
+            address(rewardToken), // stablecoin (USDC)
+            address(yieldStrategyUSDC), // yieldStrategy
+            1e18, // exchangeRate (1:1)
+            6 // decimals
         );
         console.log("Registered USDC as stablecoin");
 
@@ -850,7 +1010,7 @@ contract DeployMocks is Script {
         // ====== PHASE 9: Seed YieldStrategyDola with PhUSD Minting ======
         console.log("\n=== Phase 9: Seed YieldStrategyDola with PhUSD Minting ===");
 
-        uint256 dolaAmount = 5000 * 10**18; // 5000 DOLA
+        uint256 dolaAmount = 5000 * 10 ** 18; // 5000 DOLA
 
         // Deployer already has DOLA from MockDola constructor mint
         // Approve minter to spend deployer's DOLA
@@ -867,7 +1027,7 @@ contract DeployMocks is Script {
         // ====== PHASE 9.5: Add DOLA Yield to MockAutoDOLA Vault ======
         console.log("\n=== Phase 9.5: Add DOLA Yield to MockAutoDOLA Vault ===");
 
-        uint256 yieldAmount = 1000 * 10**18; // 1000 DOLA
+        uint256 yieldAmount = 1000 * 10 ** 18; // 1000 DOLA
 
         // To create yield, we must transfer DOLA directly to the vault WITHOUT minting shares.
         // This increases totalAssets without increasing totalSupply, raising share price.
@@ -883,7 +1043,7 @@ contract DeployMocks is Script {
         // ====== PHASE 9.55: Seed YieldStrategyUSDC with PhUSD Minting ======
         console.log("\n=== Phase 9.55: Seed YieldStrategyUSDC with PhUSD Minting ===");
 
-        uint256 usdcAmount = 5000 * 10**6; // 5000 USDC (6 decimals)
+        uint256 usdcAmount = 5000 * 10 ** 6; // 5000 USDC (6 decimals)
 
         // Deployer already has USDC from MockRewardToken constructor mint
         // Approve minter to spend deployer's USDC
@@ -903,7 +1063,7 @@ contract DeployMocks is Script {
         // ====== PHASE 9.6: Add USDC Yield to MockAutoUSDC Vault ======
         console.log("\n=== Phase 9.6: Add USDC Yield to MockAutoUSDC Vault ===");
 
-        uint256 usdcYieldAmount = 1000 * 10**6; // 1000 USDC (6 decimals)
+        uint256 usdcYieldAmount = 1000 * 10 ** 6; // 1000 USDC (6 decimals)
 
         // Mint 1000 USDC directly to the vault address (not to deployer)
         rewardToken.mint(address(mockAutoUSDC), usdcYieldAmount);
@@ -915,10 +1075,7 @@ contract DeployMocks is Script {
         // ====== PHASE 10: Deploy DepositView for UI Polling ======
         console.log("\n=== Phase 10: Deploy DepositView for UI Polling ===");
 
-        depositView = new DepositView(
-            IPhlimbo(address(phlimbo)),
-            IERC20(address(phUSD))
-        );
+        depositView = new DepositView(IPhlimbo(address(phlimbo)), IERC20(address(phUSD)));
         _trackDeployment("DepositView", address(depositView), 0);
         console.log("DepositView deployed at:", address(depositView));
 
@@ -931,10 +1088,7 @@ contract DeployMocks is Script {
         console.log("ViewRouter deployed at:", address(viewRouter));
 
         gasBefore = gasleft();
-        depositPageView = new DepositPageView(
-            IPhlimbo(address(phlimbo)),
-            IERC20(address(phUSD))
-        );
+        depositPageView = new DepositPageView(IPhlimbo(address(phlimbo)), IERC20(address(phUSD)));
         _trackDeployment("DepositPageView", address(depositPageView), gasBefore - gasleft());
         console.log("DepositPageView deployed at:", address(depositPageView));
 
@@ -950,7 +1104,8 @@ contract DeployMocks is Script {
             address(mockSCX),
             address(mockFlax),
             address(usds),
-            address(mockWBTC)
+            address(mockWBTC),
+            address(rewardToken) // usdc — NudgeRatchet's 6-decimal USDC (dispatcher index 7)
         );
         _trackDeployment("MintPageView", address(mintPageView), gasBefore - gasleft());
         console.log("MintPageView deployed at:", address(mintPageView));
@@ -993,9 +1148,13 @@ contract DeployMocks is Script {
         _markConfigured("MockWaUSDC", 0);
         _markConfigured("MockSkyPSM", 0);
         _markConfigured("GatherWBTCV2", 0);
+        _markConfigured("NudgeRatchet", 0);
+        _markConfigured("NudgeRatchetMintDebtHook", 0);
         _markConfigured("BalancerPoolerMintDebtHook", 0);
         _markConfigured("NFTStaker", 0);
+        _markConfigured("RatchetNFTStaker", 0);
         _markConfigured("BatchNFTMinter", 0);
+        _markConfigured("RatchetBatchNFTMinter", 0);
         _markConfigured("StableStaker", 0);
         _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
@@ -1085,12 +1244,7 @@ contract DeployMocks is Script {
      */
     function _trackDeployment(string memory name, address addr, uint256 gas) internal {
         deployments[name] = ContractDeployment({
-            name: name,
-            addr: addr,
-            deployed: true,
-            configured: false,
-            deployGas: gas,
-            configGas: 0
+            name: name, addr: addr, deployed: true, configured: false, deployGas: gas, configGas: 0
         });
         contractNames.push(name);
     }

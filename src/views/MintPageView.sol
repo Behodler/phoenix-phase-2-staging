@@ -9,16 +9,22 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 /// @title MintPageView
 /// @notice IPageView implementation exposing NFT minting data for the mint page.
-/// @dev Aggregates data for 5 NFTs across 3 dispatcher types, plus burn totals.
+/// @dev Aggregates data for 6 NFTs across 4 dispatcher types, plus burn totals.
 ///
 ///      NFT Configuration (hardcoded):
-///        Index 1: EYE   - Burner
-///        Index 2: SCX   - Burner
-///        Index 3: Flax  - Burner
-///        Index 4: USDS  - BalancerPoolerV2 (restored to index 4 by story-048 cutover)
-///        Index 5: WBTC  - Gather
+///        Index 1: EYE     - Burner
+///        Index 2: SCX     - Burner
+///        Index 3: Flax    - Burner
+///        Index 4: USDS    - BalancerPoolerV2 (restored to index 4 by story-048 cutover)
+///        Index 5: WBTC    - Gather
+///        Index 6: (skipped) - disabled "bugged pooler" slot on mainnet (story-048); a
+///                             disabled placeholder dispatcher mirrors it on Anvil so that
+///                             dispatcher indices line up across networks. Not user-facing.
+///        Index 7: USDC    - NudgeRatchet (story-068; underlying token is 6-decimal USDC)
 ///
-///      Returns 33 fields total (6 per token + 3 burn totals).
+///      Returns 39 fields total (6 per token + 3 burn totals). The ratchet entry reads
+///      dispatcher index 7 to stay consistent with mainnet, where the disabled bugged
+///      pooler permanently occupies index 6.
 contract MintPageView is IPageView {
     INFTMinter public immutable nftMinter;
     BurnRecorder public immutable burnRecorder;
@@ -28,9 +34,11 @@ contract MintPageView is IPageView {
     IERC20 public immutable flax;
     IERC20 public immutable usds;
     IERC20 public immutable wbtc;
+    /// @notice The NudgeRatchet's underlying token (6-decimal USDC). Maps to dispatcher index 7.
+    IERC20 public immutable usdc;
 
     /// @notice Number of NFT configurations.
-    uint256 private constant NUM_TOKENS = 5;
+    uint256 private constant NUM_TOKENS = 6;
     /// @notice Fields per token: allowance, price, growthBasisPoints, balance, nftBalance, dispatcherIndex.
     uint256 private constant FIELDS_PER_TOKEN = 6;
     /// @notice Number of burn total fields (EYE, SCX, Flax only).
@@ -45,7 +53,8 @@ contract MintPageView is IPageView {
         address _scx,
         address _flax,
         address _usds,
-        address _wbtc
+        address _wbtc,
+        address _usdc
     ) {
         nftMinter = _nftMinter;
         burnRecorder = _burnRecorder;
@@ -54,6 +63,7 @@ contract MintPageView is IPageView {
         flax = IERC20(_flax);
         usds = IERC20(_usds);
         wbtc = IERC20(_wbtc);
+        usdc = IERC20(_usdc);
     }
 
     function getNames() external pure returns (string[] memory names) {
@@ -99,10 +109,18 @@ contract MintPageView is IPageView {
         names[28] = "WBTC-nftBalance";
         names[29] = "WBTC-dispatcherIndex";
 
-        // Burn totals (index 30-32)
-        names[30] = "EYE-totalBurnt";
-        names[31] = "SCX-totalBurnt";
-        names[32] = "Flax-totalBurnt";
+        // Ratchet fields (index 30-35) — NudgeRatchet dispatcher, USDC-denominated, index 7
+        names[30] = "Ratchet-allowance";
+        names[31] = "Ratchet-price";
+        names[32] = "Ratchet-growthBasisPoints";
+        names[33] = "Ratchet-balance";
+        names[34] = "Ratchet-nftBalance";
+        names[35] = "Ratchet-dispatcherIndex";
+
+        // Burn totals (index 36-38)
+        names[36] = "EYE-totalBurnt";
+        names[37] = "SCX-totalBurnt";
+        names[38] = "Flax-totalBurnt";
     }
 
     function getData(address user) external view returns (uint256[] memory data) {
@@ -124,20 +142,23 @@ contract MintPageView is IPageView {
         // WBTC (dispatcher index 5)
         _fillTokenData(data, 24, wbtc, 5, user);
 
+        // Ratchet (dispatcher index 7 — NudgeRatchet. Index 6 is skipped because on
+        //                          mainnet it is the permanently-disabled bugged pooler;
+        //                          a disabled placeholder occupies index 6 on Anvil so the
+        //                          ratchet lands at the same index 7 on every network).
+        _fillTokenData(data, 30, usdc, 7, user);
+
         // Burn totals
-        data[30] = burnRecorder.getTotalBurnt(address(eye));
-        data[31] = burnRecorder.getTotalBurnt(address(scx));
-        data[32] = burnRecorder.getTotalBurnt(address(flax));
+        data[36] = burnRecorder.getTotalBurnt(address(eye));
+        data[37] = burnRecorder.getTotalBurnt(address(scx));
+        data[38] = burnRecorder.getTotalBurnt(address(flax));
     }
 
     /// @dev Fills 6 fields for a given token starting at `offset` in the data array.
-    function _fillTokenData(
-        uint256[] memory data,
-        uint256 offset,
-        IERC20 token,
-        uint256 dispatcherIndex,
-        address user
-    ) internal view {
+    function _fillTokenData(uint256[] memory data, uint256 offset, IERC20 token, uint256 dispatcherIndex, address user)
+        internal
+        view
+    {
         // Allowance of NFTMinter to spend user's token
         data[offset] = token.allowance(user, address(nftMinter));
 

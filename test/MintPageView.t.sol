@@ -58,12 +58,15 @@ contract MintPageViewTest is Test {
     MockERC20 public flax;
     MockERC20 public usds;
     MockERC20 public wbtc;
+    MockERC20 public usdc;
 
     MockDispatcher public dispatcherEYE;
     MockDispatcher public dispatcherSCX;
     MockDispatcher public dispatcherFlax;
     MockDispatcher public dispatcherUSDS;
     MockDispatcher public dispatcherWBTC;
+    MockDispatcher public dispatcherBugged6; // disabled index-6 placeholder (mirrors mainnet)
+    MockDispatcher public dispatcherRatchet; // index 7, USDC-denominated (NudgeRatchet)
 
     address public user = makeAddr("user");
     address public owner;
@@ -77,6 +80,7 @@ contract MintPageViewTest is Test {
         flax = new MockERC20("Flax", "FLAX");
         usds = new MockERC20("USDS", "USDS");
         wbtc = new MockERC20("WBTC", "WBTC");
+        usdc = new MockERC20("USDC", "USDC");
 
         // Deploy NFTMinter
         nftMinter = new NFTMinter(owner);
@@ -90,13 +94,20 @@ contract MintPageViewTest is Test {
         dispatcherFlax = new MockDispatcher(address(flax));
         dispatcherUSDS = new MockDispatcher(address(usds));
         dispatcherWBTC = new MockDispatcher(address(wbtc));
+        dispatcherBugged6 = new MockDispatcher(address(usds)); // placeholder; token irrelevant
+        dispatcherRatchet = new MockDispatcher(address(usdc));
 
-        // Register dispatchers in order: index 1=EYE, 2=SCX, 3=Flax, 4=USDS (BalancerPoolerV2), 5=WBTC
+        // Register dispatchers in order: index 1=EYE, 2=SCX, 3=Flax, 4=USDS (BalancerPoolerV2), 5=WBTC.
         nftMinter.registerDispatcher(address(dispatcherEYE), 1 ether, 100); // 1%
         nftMinter.registerDispatcher(address(dispatcherSCX), 2 ether, 200); // 2%
         nftMinter.registerDispatcher(address(dispatcherFlax), 0.5 ether, 50); // 0.5%
         nftMinter.registerDispatcher(address(dispatcherUSDS), 10 ether, 300); // 3%
         nftMinter.registerDispatcher(address(dispatcherWBTC), 0.001 ether, 500); // 5%
+        // Index 6 is the disabled "bugged pooler" placeholder that mirrors mainnet, so the
+        // NudgeRatchet (USDC) lands at index 7 on every network. MintPageView reads index 7.
+        nftMinter.registerDispatcher(address(dispatcherBugged6), 99 ether, 10); // index 6
+        nftMinter.setDispatcherDisabled(6, true);
+        nftMinter.registerDispatcher(address(dispatcherRatchet), 7 ether, 700); // index 7, 7%
 
         // Deploy MintPageView
         view_ = new MintPageView(
@@ -106,13 +117,14 @@ contract MintPageViewTest is Test {
             address(scx),
             address(flax),
             address(usds),
-            address(wbtc)
+            address(wbtc),
+            address(usdc)
         );
     }
 
     function testGetNamesReturnsCorrectCount() public view {
         string[] memory names = view_.getNames();
-        assertEq(names.length, 33, "Should return 33 field names");
+        assertEq(names.length, 39, "Should return 39 field names");
     }
 
     function testGetNamesReturnsCorrectFieldNames() public view {
@@ -158,15 +170,23 @@ contract MintPageViewTest is Test {
         assertEq(names[28], "WBTC-nftBalance");
         assertEq(names[29], "WBTC-dispatcherIndex");
 
+        // Ratchet fields (NudgeRatchet, USDC, dispatcher index 7)
+        assertEq(names[30], "Ratchet-allowance");
+        assertEq(names[31], "Ratchet-price");
+        assertEq(names[32], "Ratchet-growthBasisPoints");
+        assertEq(names[33], "Ratchet-balance");
+        assertEq(names[34], "Ratchet-nftBalance");
+        assertEq(names[35], "Ratchet-dispatcherIndex");
+
         // Burn totals
-        assertEq(names[30], "EYE-totalBurnt");
-        assertEq(names[31], "SCX-totalBurnt");
-        assertEq(names[32], "Flax-totalBurnt");
+        assertEq(names[36], "EYE-totalBurnt");
+        assertEq(names[37], "SCX-totalBurnt");
+        assertEq(names[38], "Flax-totalBurnt");
     }
 
     function testGetDataReturnsCorrectCount() public view {
         uint256[] memory data = view_.getData(user);
-        assertEq(data.length, 33, "Should return 33 data values");
+        assertEq(data.length, 39, "Should return 39 data values");
     }
 
     function testGetDataWithZeroBalancesAndAllowances() public view {
@@ -178,6 +198,7 @@ contract MintPageViewTest is Test {
         assertEq(data[12], 0, "Flax allowance should be 0");
         assertEq(data[18], 0, "USDS allowance should be 0");
         assertEq(data[24], 0, "WBTC allowance should be 0");
+        assertEq(data[30], 0, "Ratchet allowance should be 0");
 
         // Prices should match registered values
         assertEq(data[1], 1 ether, "EYE price");
@@ -185,6 +206,7 @@ contract MintPageViewTest is Test {
         assertEq(data[13], 0.5 ether, "Flax price");
         assertEq(data[19], 10 ether, "USDS price");
         assertEq(data[25], 0.001 ether, "WBTC price");
+        assertEq(data[31], 7 ether, "Ratchet price (index 7)");
 
         // Growth basis points should match registered values
         assertEq(data[2], 100, "EYE growthBasisPoints");
@@ -192,6 +214,7 @@ contract MintPageViewTest is Test {
         assertEq(data[14], 50, "Flax growthBasisPoints");
         assertEq(data[20], 300, "USDS growthBasisPoints");
         assertEq(data[26], 500, "WBTC growthBasisPoints");
+        assertEq(data[32], 700, "Ratchet growthBasisPoints (index 7)");
 
         // All balances should be 0
         assertEq(data[3], 0, "EYE balance should be 0");
@@ -199,6 +222,7 @@ contract MintPageViewTest is Test {
         assertEq(data[15], 0, "Flax balance should be 0");
         assertEq(data[21], 0, "USDS balance should be 0");
         assertEq(data[27], 0, "WBTC balance should be 0");
+        assertEq(data[33], 0, "Ratchet balance should be 0");
 
         // All NFT balances should be 0
         assertEq(data[4], 0, "EYE nftBalance should be 0");
@@ -206,6 +230,7 @@ contract MintPageViewTest is Test {
         assertEq(data[16], 0, "Flax nftBalance should be 0");
         assertEq(data[22], 0, "USDS nftBalance should be 0");
         assertEq(data[28], 0, "WBTC nftBalance should be 0");
+        assertEq(data[34], 0, "Ratchet nftBalance should be 0");
 
         // Dispatcher indices
         assertEq(data[5], 1, "EYE dispatcherIndex should be 1");
@@ -213,11 +238,12 @@ contract MintPageViewTest is Test {
         assertEq(data[17], 3, "Flax dispatcherIndex should be 3");
         assertEq(data[23], 4, "USDS dispatcherIndex should be 4 (BalancerPoolerV2)");
         assertEq(data[29], 5, "WBTC dispatcherIndex should be 5");
+        assertEq(data[35], 7, "Ratchet dispatcherIndex should be 7 (index 6 is the disabled mainnet mirror)");
 
         // All burn totals should be 0
-        assertEq(data[30], 0, "EYE totalBurnt should be 0");
-        assertEq(data[31], 0, "SCX totalBurnt should be 0");
-        assertEq(data[32], 0, "Flax totalBurnt should be 0");
+        assertEq(data[36], 0, "EYE totalBurnt should be 0");
+        assertEq(data[37], 0, "SCX totalBurnt should be 0");
+        assertEq(data[38], 0, "Flax totalBurnt should be 0");
     }
 
     function testGetDataReturnsCorrectValuesForMockScenario() public {
@@ -227,6 +253,7 @@ contract MintPageViewTest is Test {
         flax.mint(user, 200 ether);
         usds.mint(user, 1000 ether);
         wbtc.mint(user, 5 ether);
+        usdc.mint(user, 250 ether);
 
         // Set allowances
         vm.startPrank(user);
@@ -235,6 +262,7 @@ contract MintPageViewTest is Test {
         flax.approve(address(nftMinter), 30 ether);
         usds.approve(address(nftMinter), 40 ether);
         wbtc.approve(address(nftMinter), 0.5 ether);
+        usdc.approve(address(nftMinter), 60 ether);
         vm.stopPrank();
 
         uint256[] memory data = view_.getData(user);
@@ -245,6 +273,7 @@ contract MintPageViewTest is Test {
         assertEq(data[12], 30 ether, "Flax allowance");
         assertEq(data[18], 40 ether, "USDS allowance");
         assertEq(data[24], 0.5 ether, "WBTC allowance");
+        assertEq(data[30], 60 ether, "Ratchet allowance");
 
         // Balances
         assertEq(data[3], 100 ether, "EYE balance");
@@ -252,6 +281,7 @@ contract MintPageViewTest is Test {
         assertEq(data[15], 200 ether, "Flax balance");
         assertEq(data[21], 1000 ether, "USDS balance");
         assertEq(data[27], 5 ether, "WBTC balance");
+        assertEq(data[33], 250 ether, "Ratchet balance");
 
         // Dispatcher indices
         assertEq(data[5], 1, "EYE dispatcherIndex");
@@ -259,6 +289,7 @@ contract MintPageViewTest is Test {
         assertEq(data[17], 3, "Flax dispatcherIndex");
         assertEq(data[23], 4, "USDS dispatcherIndex");
         assertEq(data[29], 5, "WBTC dispatcherIndex");
+        assertEq(data[35], 7, "Ratchet dispatcherIndex");
     }
 
     function testGetNames_USDSFieldsNamedCorrectly() public view {

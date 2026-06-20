@@ -9,10 +9,8 @@
     "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow",
     "//extract-addresses": "Story 013 — parameterize extract-addresses for multi-chain",
     "extract:addresses": "node server/extract-addresses.js 31337",
-    "extract:mainnet": "node server/extract-addresses.js 1",
-    "//generate-ts": "Story 028 — generate TypeScript address interface",
+    "//generate-ts": "Story 028 — generate TypeScript address interface (anvil only; mainnet-addresses.ts is hand-maintained, story 068)",
     "generate:ts-anvil": "node server/generate-ts-addresses.js 31337",
-    "generate:ts-mainnet": "node server/generate-ts-addresses.js 1",
     "//serve-and-dev": "Story 003 — API server + local dev orchestration",
     "serve": "node server/index.js",
     "dev": "npm run clean:local && npm run start:anvil & sleep 3 && npm run deploy:local && ./simulate-yield.sh && npm run extract:addresses && npm run generate:ts-anvil && npm run serve",
@@ -264,7 +262,9 @@
     "migrate:saga2.4-rescue": "forge script script/MigrateSaga2Rescue.s.sol:MigrateSaga2Rescue --rpc-url $RPC_MAINNET --broadcast --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
     "//Temp": "NO_STORY — throwaway scratchpad script (script/interactions/Temp.s.sol). The file is committed empty and then skip-worktree'd locally, so scratch work is never tracked. Preview runs on a mainnet fork as the deployer; broadcast signs with the deployer Ledger key",
     "Temp:preview": "PREVIEW_MODE=true forge script script/interactions/Temp.s.sol:Temp --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --slow -vvv",
-    "Temp:broadcast": "forge script script/interactions/Temp.s.sol:Temp --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv"
+    "Temp:broadcast": "forge script script/interactions/Temp.s.sol:Temp --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv",
+    "deploy:ratchet-mainnet-preview": "PREVIEW_MODE=true forge script script/DeployMainnetNudgeRatchet.s.sol:DeployMainnetNudgeRatchet --rpc-url $RPC_MAINNET --slow -vvv",
+    "deploy:ratchet-mainnet": "node scripts/backup-mainnet-addresses.js && forge script script/DeployMainnetNudgeRatchet.s.sol:DeployMainnetNudgeRatchet --rpc-url $RPC_MAINNET --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" -vvv && node scripts/patch-mainnet-addresses-ratchet.js"
   },
   "keywords": [
     "phoenix",
