@@ -697,6 +697,12 @@ npm run deploy:sepolia
 4. **Audit**: Review progress file before continuing failed deployment
 5. **Network isolation**: Never copy progress files between networks
 
+## The Temp Scratchpad Script
+
+`script/interactions/Temp.s.sol` (contract `Temp`, run via `npm run Temp:preview` / `npm run Temp:broadcast`) is a **persistent placeholder for one-off, temporary blockchain actions**. It is reused over and over — its body is overwritten each time a new ad-hoc action is needed.
+
+**When the user says "make the temp script do X" (or "write the temp script to ...", "have the temp script ..."), they mean: REPLACE the existing contents of `script/interactions/Temp.s.sol` with the new logic.** Do NOT create a new file (e.g. `TempDoX.s.sol`). Preserve the contract name `Temp` and the file path so the `Temp:preview` / `Temp:broadcast` npm scripts keep working. Keep the same hardened conventions the prior body used (live-quoted slippage floors never 0, preview/broadcast split, mainnet chainid guard, atomic amount-dependent chains).
+
 ## File Organization
 
 - **script/**: Foundry deployment scripts (Solidity) - one per network
