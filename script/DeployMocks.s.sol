@@ -51,6 +51,7 @@ import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/interfaces/IBalancer
 import {Uniboost} from "@yield-claim-nft/dispatchers/Uniboost.sol";
 import {UniboostMintDebtHook} from "@yield-claim-nft/hooks/UniboostMintDebtHook.sol";
 import {IUniboostMintDebtHook} from "@yield-claim-nft/interfaces/IUniboostMintDebtHook.sol";
+import {MultiPooler} from "@yield-claim-nft/MultiPooler.sol";
 import {NFTStaker} from "nft-staking/NFTStaker.sol";
 import {NFTStakerPriceScaled} from "nft-staking/NFTStakerPriceScaled.sol";
 import {NFTStakerDepletion} from "nft-staking/NFTStakerDepletion.sol";
@@ -149,6 +150,9 @@ contract DeployMocks is Script {
     NFTStakerDepletion public uniboostStakerEYE;
     NFTStakerDepletion public uniboostStakerSCX;
     NFTStakerDepletion public uniboostStakerFLX;
+    // Story 070: batch forwarder authorized to pool() across all three Uniboost dispatchers. It is
+    // the ONLY authorized pooler on each Uniboost (the deployer is deliberately NOT whitelisted).
+    MultiPooler public multiPooler;
 
     // Story 070: canonical Uniswap V2 infrastructure (deployed on anvil 31337) backing the
     // Uniboost target + routing pools. weth9 is the EYE-pool pairing token (no MockWETH exists).
@@ -569,15 +573,28 @@ contract DeployMocks is Script {
         // The DONATION split (setRecipient/setDonationSplit) is DEFERRED to Phase 3.7 below
         // because its recipient (batchNFTMinter) is not deployed until then. The staker +
         // Pauser registration are likewise deferred to keep this block focused.
-        _wireUniboost(uniboostEYE, deployer, "UniboostEYE");
+
+        // Deploy the MultiPooler batch forwarder FIRST so _wireUniboost can authorize it as the sole
+        // pooler on each dispatcher. The deployer is the keeper/operator that drives the batch from
+        // the UI on anvil, so it is the MultiPooler's single batch-caller (`pooler`). Note this is
+        // distinct from a Uniboost authorized-pooler: the deployer can call MultiPooler.pool(), but
+        // is NOT whitelisted on any Uniboost — only the MultiPooler address is.
+        gasBefore = gasleft();
+        multiPooler = new MultiPooler(deployer);
+        _trackDeployment("MultiPooler", address(multiPooler), gasBefore - gasleft());
+        console.log("MultiPooler deployed at:", address(multiPooler));
+        multiPooler.setPooler(deployer);
+        console.log("MultiPooler.setPooler -> deployer (anvil keeper/operator)");
+
+        _wireUniboost(uniboostEYE, "UniboostEYE");
         uniboostHookEYE = _deployUniboostHook(uniboostEYE, deployer);
         _trackDeployment("UniboostHookEYE", address(uniboostHookEYE), 0);
 
-        _wireUniboost(uniboostSCX, deployer, "UniboostSCX");
+        _wireUniboost(uniboostSCX, "UniboostSCX");
         uniboostHookSCX = _deployUniboostHook(uniboostSCX, deployer);
         _trackDeployment("UniboostHookSCX", address(uniboostHookSCX), 0);
 
-        _wireUniboost(uniboostFLX, deployer, "UniboostFLX");
+        _wireUniboost(uniboostFLX, "UniboostFLX");
         uniboostHookFLX = _deployUniboostHook(uniboostFLX, deployer);
         _trackDeployment("UniboostHookFLX", address(uniboostHookFLX), 0);
 
@@ -1232,6 +1249,7 @@ contract DeployMocks is Script {
         _markConfigured("UniboostHookEYE", 0);
         _markConfigured("UniboostHookSCX", 0);
         _markConfigured("UniboostHookFLX", 0);
+        _markConfigured("MultiPooler", 0);
         _markConfigured("UniboostStakerEYE", 0);
         _markConfigured("UniboostStakerSCX", 0);
         _markConfigured("UniboostStakerFLX", 0);
@@ -1397,11 +1415,13 @@ contract DeployMocks is Script {
     }
 
     /// @dev setMinter + authorized-pooler for a uniboost dispatcher (early index-1/2/3 block).
-    function _wireUniboost(Uniboost dispatcher, address deployer, string memory label) internal {
+    ///      The ONLY authorized pooler is the MultiPooler batch forwarder; the deployer is
+    ///      deliberately NOT whitelisted, so all pooling must go through MultiPooler.pool().
+    ///      Requires `multiPooler` to be deployed before this is called.
+    function _wireUniboost(Uniboost dispatcher, string memory label) internal {
         dispatcher.setMinter(address(nftMinterV2));
-        // Whitelist the deployer as the authorized pooler so pool(amountIn,...) is callable.
-        dispatcher.setAuthorizedPooler(deployer, true);
-        console.log(string.concat(label, ".setMinter + setAuthorizedPooler(deployer)"));
+        dispatcher.setAuthorizedPooler(address(multiPooler), true);
+        console.log(string.concat(label, ".setMinter + setAuthorizedPooler(multiPooler)"));
     }
 
     /// @dev Deploys + installs a UniboostMintDebtHook for a dispatcher and authorizes it to mint

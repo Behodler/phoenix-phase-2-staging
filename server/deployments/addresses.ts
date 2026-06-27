@@ -43,6 +43,7 @@ export interface ContractAddresses {
   UniboostFLX: string;
   BalancerPooler: string;
   GatherWBTC: string;
+  MultiPooler: string;
   UniboostHookEYE: string;
   UniboostHookSCX: string;
   UniboostHookFLX: string;
