@@ -1382,6 +1382,10 @@ contract DeployMocks is Script {
     }
 
     /// @dev createPair + addLiquidity for one pool, returning the pair address.
+    /// @dev Deadline is block.timestamp + 1 hours, NOT a bare block.timestamp: under `--slow`
+    ///      broadcast the tx mines a few seconds after the script captures the timestamp, so a bare
+    ///      block.timestamp deadline is already in the past at mine time and Router02's
+    ///      `ensure(deadline)` reverts ("UniswapV2Router: EXPIRED").
     function _createAndSeed(address deployer, address tokenA, address tokenB, uint256 amtA, uint256 amtB)
         internal
         returns (address pair)
@@ -1389,7 +1393,7 @@ contract DeployMocks is Script {
         pair = uniFactory.createPair(tokenA, tokenB);
         IERC20(tokenA).approve(address(uniRouter), amtA);
         IERC20(tokenB).approve(address(uniRouter), amtB);
-        uniRouter.addLiquidity(tokenA, tokenB, amtA, amtB, 0, 0, deployer, block.timestamp);
+        uniRouter.addLiquidity(tokenA, tokenB, amtA, amtB, 0, 0, deployer, block.timestamp + 1 hours);
     }
 
     /// @dev setMinter + authorized-pooler for a uniboost dispatcher (early index-1/2/3 block).
