@@ -22,28 +22,29 @@ export default defineConfig({
         'interfaces/IYieldStrategy.sol/IYieldStrategy.json',
 
         // NFT Minter infrastructure
-        'NFTMinter.sol/NFTMinter.json',
         'BurnRecorder.sol/BurnRecorder.json',
 
-        // V1 Dispatchers
-        'BalancerPooler.sol/BalancerPooler.json',
-        'Burner.sol/Burner.json',
-        'Gather.sol/Gather.json',
-
         // V2 NFT Minter infrastructure
+        // (V1 NFTMinter / BalancerPooler / Burner / Gather / BurnerV2 / NFTMigrator
+        //  were removed upstream in yield-claim-nft story-039's src flatten)
         'NFTMinterV2.sol/NFTMinterV2.json',
-        'BurnerV2.sol/BurnerV2.json',
         'BalancerPoolerV2.sol/BalancerPoolerV2.json',
         'GatherV2.sol/GatherV2.json',
-        'NFTMigrator.sol/NFTMigrator.json',
+
+        // Dispatchers (yield-claim-nft story-040/043)
+        'NudgeRatchetDelayRelease.sol/NudgeRatchetDelayRelease.json',
+        'Uniboost.sol/Uniboost.json',
 
         // V2 Dispatch hooks
         'IDispatchHook.sol/IDispatchHook.json',
         'DefaultDispatchHook.sol/DefaultDispatchHook.json',
         'BalancerPoolerMintDebtHook.sol/BalancerPoolerMintDebtHook.json',
+        'UniboostMintDebtHook.sol/UniboostMintDebtHook.json',
 
         // NFT Staking
         'NFTStaker.sol/NFTStaker.json',
+        'NFTStakerDepletion.sol/NFTStakerDepletion.json',
+        'NFTStakerPriceScaled.sol/NFTStakerPriceScaled.json',
         'BatchNFTMinter.sol/BatchNFTMinter.json',
 
         // Stable Staker (yield farm for stablecoin staking)

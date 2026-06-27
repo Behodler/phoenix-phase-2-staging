@@ -5,6 +5,17 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-27
+
+### Added
+- NFTStakerDepletion hooks — audited (M-01 fix) depletion-window staking model (nft-staking story-018/020)
+- NFTStakerPriceScaled hooks — price-scaled staker variant (nft-staking)
+- NudgeRatchetDelayRelease hooks — yield-claim-nft dispatcher wired at index 7 (story-043)
+- Uniboost & UniboostMintDebtHook hooks — buy-and-pool UniV2 dispatcher + mint-debt hook (yield-claim-nft story-040/041)
+
+### Removed
+- NFTMinter, BalancerPooler, BurnerV2, NFTMigrator (NFT V1) hooks — removed upstream in yield-claim-nft story-039's src flatten
+
 ## [0.9.0] - 2026-06-16
 
 ### Added
