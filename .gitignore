@@ -6,3 +6,5 @@ out/
 .envrc
 
 broadcast/Temp.s.sol/
+# Uncommitted local docs (not tracked)
+docs/uncommitted/
