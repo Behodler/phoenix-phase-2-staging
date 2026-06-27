@@ -9,6 +9,21 @@ fs_permissions = [
     { access = "read-write", path = "./server/deployments" },
     { access = "read-write", path = "./script/migration-inputs" },
     { access = "read", path = "./scripts/snapshots" },
+    # Story 070: canonical Uniswap V2 + WETH9 creation-bytecode artifacts read via
+    # vm.getCode/vm.deployCode during the local (anvil 31337) mock deploy.
+    { access = "read", path = "./script/uniswap-artifacts" },
+]
+
+# Story 070: these legacy scripts are hard-wired to the V1 yield-claim-nft contracts
+# (BalancerPooler, NFTMigrator, V1 NFTMinter) that story-039 removed from the submodule.
+# They are historical mainnet/redeploy/interaction artifacts unrelated to the local mock
+# deploy this story touches; skip them from compilation rather than risk-rewriting V1
+# deployment history. (Their breakage predates this story — the submodule was bumped past
+# V1 removal without updating these consumers.)
+skip = [
+    "script/FixBalancerPoolerMainnet.s.sol",
+    "script/DeployMainnetNFTV2.s.sol",
+    "script/interactions/TestNFTMintAndClaimFlow.s.sol",
 ]
 
 auto_detect_remappings = false

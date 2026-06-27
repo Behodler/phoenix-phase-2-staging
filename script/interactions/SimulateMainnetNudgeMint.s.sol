@@ -5,7 +5,7 @@ import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
-import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol";
+import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
 
 interface IDispatcherSetMinter {
     function setMinter(address) external;

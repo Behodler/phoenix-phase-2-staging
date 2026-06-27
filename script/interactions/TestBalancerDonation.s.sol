@@ -10,7 +10,7 @@ import "../../src/mocks/MockUSDS.sol";
 import "../../src/mocks/MockSUSDS.sol";
 import "../../src/mocks/MockRewardToken.sol";
 import "../../src/mocks/MockSkyPSM.sol";
-import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
+import {BalancerPoolerV2} from "@yield-claim-nft/dispatchers/BalancerPoolerV2.sol";
 
 /**
  * @title TestBalancerDonation

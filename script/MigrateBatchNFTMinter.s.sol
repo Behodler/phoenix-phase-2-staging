@@ -24,8 +24,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IFlax} from "@flax-token/IFlax.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
-import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol";
-import {ISkyPSM} from "@yield-claim-nft/V2/interfaces/ISkyPSM.sol";
+import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
+import {ISkyPSM} from "@yield-claim-nft/interfaces/ISkyPSM.sol";
 
 /**
  * @title MigrateBatchNFTMinter

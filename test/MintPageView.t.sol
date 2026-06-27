@@ -4,9 +4,11 @@ pragma solidity ^0.8.20;
 import "@forge-std/Test.sol";
 import "../src/views/MintPageView.sol";
 import "../src/views/IPageView.sol";
-import "@yield-claim-nft/interfaces/INFTMinter.sol";
+// yield-claim-nft story-039 removed the V1 NFTMinter/INFTMinter (V1 decommissioned). NFTMinterV2
+// exposes the identical registerDispatcher / setDispatcherDisabled / configs surface this test uses.
+import {INFTMinterV2 as INFTMinter} from "@yield-claim-nft/interfaces/INFTMinterV2.sol";
 import "@yield-claim-nft/BurnRecorder.sol";
-import "@yield-claim-nft/NFTMinter.sol";
+import {NFTMinterV2 as NFTMinter} from "@yield-claim-nft/NFTMinterV2.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /// @dev Minimal ERC20 mock for testing.

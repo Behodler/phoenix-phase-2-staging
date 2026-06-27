@@ -39,7 +39,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IFlax} from "@flax-token/IFlax.sol";
-import {ISkyPSM} from "@yield-claim-nft/V2/interfaces/ISkyPSM.sol";
+import {ISkyPSM} from "@yield-claim-nft/interfaces/ISkyPSM.sol";
 
 /// @notice Minimal Balancer V3 Router surface. EXACT_OUT swap (buy a precise amount of sUSDS,
 ///         paying up to `maxAmountIn` phUSD) plus its off-chain quote twin (eth_call'd pre-broadcast

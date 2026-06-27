@@ -9,7 +9,7 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IFlax} from "@flax-token/IFlax.sol";
-import {ISkyPSM} from "@yield-claim-nft/V2/interfaces/ISkyPSM.sol";
+import {ISkyPSM} from "@yield-claim-nft/interfaces/ISkyPSM.sol";
 
 /// @notice Minimal Balancer V3 Router surface: the EXACT_IN swap plus its
 ///         off-chain quote twin. `querySwapSingleTokenExactIn` is non-view but

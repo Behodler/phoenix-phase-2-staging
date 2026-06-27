@@ -32,23 +32,37 @@ import "../src/views/DepositView.sol";
 import "../src/views/ViewRouter.sol";
 import "../src/views/DepositPageView.sol";
 import {MintPageView} from "../src/views/MintPageView.sol";
-import {INFTMinter as INFTMinterView} from "@yield-claim-nft/interfaces/INFTMinter.sol";
+// V1 INFTMinter removed (yield-claim-nft story-039). MintPageView's constructor takes the V2
+// interface; alias it the same way the rest of the file expects (INFTMinterView).
+import {INFTMinterV2 as INFTMinterView} from "@yield-claim-nft/interfaces/INFTMinterV2.sol";
 import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
 import "../src/mocks/MockBalancerRouter.sol";
-import {NFTMinterV2} from "@yield-claim-nft/V2/NFTMinterV2.sol";
-import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol";
-import {BurnerV2} from "@yield-claim-nft/V2/dispatchers/BurnerV2.sol";
-import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
-import {GatherV2} from "@yield-claim-nft/V2/dispatchers/GatherV2.sol";
-import {NudgeRatchet} from "@yield-claim-nft/V2/dispatchers/NudgeRatchet.sol";
-import {NudgeRatchetMintDebtHook} from "@yield-claim-nft/V2/hooks/NudgeRatchetMintDebtHook.sol";
-import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPoolerMintDebtHook.sol";
-import {IDispatchHook} from "@yield-claim-nft/V2/interfaces/IDispatchHook.sol";
-import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalancerPoolerMintDebtHook.sol";
+import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
+import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
+import {BalancerPoolerV2} from "@yield-claim-nft/dispatchers/BalancerPoolerV2.sol";
+import {GatherV2} from "@yield-claim-nft/dispatchers/GatherV2.sol";
+// Story 070: index-7 swapped NudgeRatchet -> NudgeRatchetDelayRelease (held-USDC + releaser flow).
+import {NudgeRatchetDelayRelease} from "@yield-claim-nft/dispatchers/NudgeRatchetDelayRelease.sol";
+import {NudgeRatchetMintDebtHook} from "@yield-claim-nft/hooks/NudgeRatchetMintDebtHook.sol";
+import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/hooks/BalancerPoolerMintDebtHook.sol";
+import {IDispatchHook} from "@yield-claim-nft/interfaces/IDispatchHook.sol";
+import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/interfaces/IBalancerPoolerMintDebtHook.sol";
+// Story 070: Uniboost dispatchers (replace the 3 burners at indices 1/2/3) + their hook + staker.
+import {Uniboost} from "@yield-claim-nft/dispatchers/Uniboost.sol";
+import {UniboostMintDebtHook} from "@yield-claim-nft/hooks/UniboostMintDebtHook.sol";
+import {IUniboostMintDebtHook} from "@yield-claim-nft/interfaces/IUniboostMintDebtHook.sol";
 import {NFTStaker} from "nft-staking/NFTStaker.sol";
 import {NFTStakerPriceScaled} from "nft-staking/NFTStakerPriceScaled.sol";
+import {NFTStakerDepletion} from "nft-staking/NFTStakerDepletion.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
 import {INFTSupply} from "nft-staking/INFTSupply.sol";
+// Story 070: canonical Uniswap V2 (WETH9 + Factory + Router02) deployer + interfaces.
+import {
+    UniswapV2Deployer,
+    IUniswapV2FactoryLike,
+    IUniswapV2RouterLike,
+    IWETH9Like
+} from "./helpers/UniswapV2Deployer.sol";
 import {StableStaker} from "stable-staker/StableStaker.sol";
 // StableStaker's constructor takes the flax-token-v2 IFlax; alias to avoid an
 // identifier clash with phlimbo-ea's IFlax which is already in scope transitively.
@@ -123,9 +137,33 @@ contract DeployMocks is Script {
     // V2 NFTMinter infrastructure
     MockBalancerRouter public mockBalancerRouter;
     NFTMinterV2 public nftMinterV2;
-    BurnerV2 public burnerEYEV2;
-    BurnerV2 public burnerSCXV2;
-    BurnerV2 public burnerFlaxV2;
+    // Story 070: the three BurnerV2 dispatchers (indices 1/2/3) were replaced with Uniboost
+    // dispatchers, each backed by a real UniV2 pool + a UniboostMintDebtHook + an
+    // NFTStakerDepletion staker. Indices 1/2/3 are preserved (same registration order).
+    Uniboost public uniboostEYE;
+    Uniboost public uniboostSCX;
+    Uniboost public uniboostFLX;
+    UniboostMintDebtHook public uniboostHookEYE;
+    UniboostMintDebtHook public uniboostHookSCX;
+    UniboostMintDebtHook public uniboostHookFLX;
+    NFTStakerDepletion public uniboostStakerEYE;
+    NFTStakerDepletion public uniboostStakerSCX;
+    NFTStakerDepletion public uniboostStakerFLX;
+
+    // Story 070: canonical Uniswap V2 infrastructure (deployed on anvil 31337) backing the
+    // Uniboost target + routing pools. weth9 is the EYE-pool pairing token (no MockWETH exists).
+    address public weth9;
+    IUniswapV2FactoryLike public uniFactory;
+    IUniswapV2RouterLike public uniRouter;
+    // Target pools (the pool each Uniboost boosts).
+    address public poolEYE; // EYE / WETH9
+    address public poolSCX; // SCX / USDS
+    address public poolFLX; // FLX / DOLA
+    // Routing pools (USDC -> pairToken) so Uniboost.pool()'s prime->pair swap can execute.
+    address public routePoolWETH; // USDC / WETH9
+    address public routePoolUSDS; // USDC / USDS
+    address public routePoolDOLA; // USDC / DOLA
+
     BalancerPoolerV2 public balancerPoolerV2;
     GatherV2 public gatherWBTCV2;
     // Disabled placeholder occupying dispatcher index 6 to mirror mainnet, where the
@@ -134,8 +172,10 @@ contract DeployMocks is Script {
     // index 7, matching the index it will receive on mainnet. Never enabled / never minted.
     BalancerPoolerV2 public buggedPoolerV2Index6;
 
-    // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook
-    NudgeRatchet public nudgeRatchet;
+    // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook.
+    // Story 070 — swapped the dispatcher to NudgeRatchetDelayRelease (HOLDS USDC on dispatch,
+    // releaser-gated release to batchMinter). Same index 7, same hook, same price/growth.
+    NudgeRatchetDelayRelease public nudgeRatchet;
     NudgeRatchetMintDebtHook public nudgeRatchetHook;
     // Dedicated NFTStakerPriceScaled for the NudgeRatchet NFT (dispatcher index 7). Uses the
     // price-scaled variant because the ratchet's prime token is 6-decimal USDC while the reward
@@ -425,24 +465,30 @@ contract DeployMocks is Script {
         _trackDeployment("NFTMinterV2", address(nftMinterV2), gasBefore - gasleft());
         console.log("NFTMinterV2 deployed at:", address(nftMinterV2));
 
+        // ---- Story 070: real Uniswap V2 + target/routing pools (anvil 31337) ----
+        // Replace the three burners (indices 1/2/3) with Uniboost dispatchers, each backed by a
+        // REAL UniV2 pool. We deploy the canonical Uniswap V2 stack and seed pools here, BEFORE
+        // constructing the dispatchers, because Uniboost's constructor reads pool.token0()/token1().
+        _deployUniswapAndPools(deployer);
+
         // 3. Deploy V2 Dispatchers
-        // BurnerV2 #1: burns EYE
+        // ---- Story 070: Uniboost #1/#2/#3 replace BurnerEYE/SCX/Flax at indices 1/2/3 ----
+        // primeToken = rewardToken (USDC, 6dp); router = canonical Router02; targetPool/targetToken
+        // per the seeded pools above. Hook + staker + donation split are wired in later phases.
         gasBefore = gasleft();
-        burnerEYEV2 = new BurnerV2(address(eyeToken), address(burnRecorder), deployer);
-        _trackDeployment("BurnerEYEV2", address(burnerEYEV2), gasBefore - gasleft());
-        console.log("BurnerEYEV2 deployed at:", address(burnerEYEV2));
+        uniboostEYE = new Uniboost(address(rewardToken), address(uniRouter), poolEYE, address(eyeToken), deployer);
+        _trackDeployment("UniboostEYE", address(uniboostEYE), gasBefore - gasleft());
+        console.log("UniboostEYE deployed at:", address(uniboostEYE));
 
-        // BurnerV2 #2: burns SCX
         gasBefore = gasleft();
-        burnerSCXV2 = new BurnerV2(address(mockSCX), address(burnRecorder), deployer);
-        _trackDeployment("BurnerSCXV2", address(burnerSCXV2), gasBefore - gasleft());
-        console.log("BurnerSCXV2 deployed at:", address(burnerSCXV2));
+        uniboostSCX = new Uniboost(address(rewardToken), address(uniRouter), poolSCX, address(mockSCX), deployer);
+        _trackDeployment("UniboostSCX", address(uniboostSCX), gasBefore - gasleft());
+        console.log("UniboostSCX deployed at:", address(uniboostSCX));
 
-        // BurnerV2 #3: burns Flax
         gasBefore = gasleft();
-        burnerFlaxV2 = new BurnerV2(address(mockFlax), address(burnRecorder), deployer);
-        _trackDeployment("BurnerFlaxV2", address(burnerFlaxV2), gasBefore - gasleft());
-        console.log("BurnerFlaxV2 deployed at:", address(burnerFlaxV2));
+        uniboostFLX = new Uniboost(address(rewardToken), address(uniRouter), poolFLX, address(mockFlax), deployer);
+        _trackDeployment("UniboostFLX", address(uniboostFLX), gasBefore - gasleft());
+        console.log("UniboostFLX deployed at:", address(uniboostFLX));
 
         // BalancerPoolerV2: prime token is USDS (derived from sUSDS via IERC4626.asset())
         gasBefore = gasleft();
@@ -471,15 +517,20 @@ contract DeployMocks is Script {
         uint256 v2InitialPrice = 100 * 10 ** 18;
         uint256 v2WBTCInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
         uint256 v2RatchetInitialPrice = 100 * 10 ** 6; // NudgeRatchet's prime token is 6-decimal USDC
+        // Story 070: uniboost NFT mint price = 10 USDC (6dp), growth 0.1% (10 bps). This is the
+        // NFT MINT price (unrelated to the seeded Uniswap pool price). Replaces the burners'
+        // 100e18 / 2% registration AT THE SAME SLOT so indices 1/2/3 are preserved.
+        uint256 uniboostInitialPrice = 10 * 10 ** 6; // 10 USDC
+        uint256 uniboostGrowthBps = 10; // 0.1%
 
-        nftMinterV2.registerDispatcher(address(burnerEYEV2), v2InitialPrice, 200); // 2% growth
-        console.log("Registered BurnerEYEV2 dispatcher with NFTMinterV2 (index 1, 2% growth)");
+        nftMinterV2.registerDispatcher(address(uniboostEYE), uniboostInitialPrice, uniboostGrowthBps);
+        console.log("Registered UniboostEYE dispatcher with NFTMinterV2 (index 1, 10 USDC, 0.1% growth)");
 
-        nftMinterV2.registerDispatcher(address(burnerSCXV2), v2InitialPrice, 200); // 2% growth
-        console.log("Registered BurnerSCXV2 dispatcher with NFTMinterV2 (index 2, 2% growth)");
+        nftMinterV2.registerDispatcher(address(uniboostSCX), uniboostInitialPrice, uniboostGrowthBps);
+        console.log("Registered UniboostSCX dispatcher with NFTMinterV2 (index 2, 10 USDC, 0.1% growth)");
 
-        nftMinterV2.registerDispatcher(address(burnerFlaxV2), v2InitialPrice, 200); // 2% growth
-        console.log("Registered BurnerFlaxV2 dispatcher with NFTMinterV2 (index 3, 2% growth)");
+        nftMinterV2.registerDispatcher(address(uniboostFLX), uniboostInitialPrice, uniboostGrowthBps);
+        console.log("Registered UniboostFLX dispatcher with NFTMinterV2 (index 3, 10 USDC, 0.1% growth)");
 
         nftMinterV2.registerDispatcher(address(balancerPoolerV2), v2InitialPrice, 10); // 0.1% growth
         console.log("Registered BalancerPoolerV2 dispatcher with NFTMinterV2 (index 4, 0.1% growth)");
@@ -512,15 +563,23 @@ contract DeployMocks is Script {
         nftMinterV2.setDispatcherDisabled(6, true); // mirror mainnet: index 6 is disabled
         console.log("Registered + disabled BuggedPoolerV2Index6 (index 6) to mirror mainnet");
 
-        // 5. Set minter on each V2 dispatcher
-        burnerEYEV2.setMinter(address(nftMinterV2));
-        console.log("BurnerEYEV2.setMinter -> NFTMinterV2");
+        // 5. Set minter on each V2 dispatcher.
+        // ---- Story 070: Uniboost minter + hook + pooler-auth wiring (indices 1/2/3) ----
+        // Construction/registration must stay in this early block to preserve indices 1/2/3.
+        // The DONATION split (setRecipient/setDonationSplit) is DEFERRED to Phase 3.7 below
+        // because its recipient (batchNFTMinter) is not deployed until then. The staker +
+        // Pauser registration are likewise deferred to keep this block focused.
+        _wireUniboost(uniboostEYE, deployer, "UniboostEYE");
+        uniboostHookEYE = _deployUniboostHook(uniboostEYE, deployer);
+        _trackDeployment("UniboostHookEYE", address(uniboostHookEYE), 0);
 
-        burnerSCXV2.setMinter(address(nftMinterV2));
-        console.log("BurnerSCXV2.setMinter -> NFTMinterV2");
+        _wireUniboost(uniboostSCX, deployer, "UniboostSCX");
+        uniboostHookSCX = _deployUniboostHook(uniboostSCX, deployer);
+        _trackDeployment("UniboostHookSCX", address(uniboostHookSCX), 0);
 
-        burnerFlaxV2.setMinter(address(nftMinterV2));
-        console.log("BurnerFlaxV2.setMinter -> NFTMinterV2");
+        _wireUniboost(uniboostFLX, deployer, "UniboostFLX");
+        uniboostHookFLX = _deployUniboostHook(uniboostFLX, deployer);
+        _trackDeployment("UniboostHookFLX", address(uniboostHookFLX), 0);
 
         balancerPoolerV2.setMinter(address(nftMinterV2));
         console.log("BalancerPoolerV2.setMinter -> NFTMinterV2");
@@ -579,11 +638,9 @@ contract DeployMocks is Script {
         gatherWBTCV2.setMinter(address(nftMinterV2));
         console.log("GatherWBTCV2.setMinter -> NFTMinterV2");
 
-        // 6. Authorize V2 burner dispatchers on BurnRecorder
-        burnRecorder.setBurner(address(burnerEYEV2), true);
-        burnRecorder.setBurner(address(burnerSCXV2), true);
-        burnRecorder.setBurner(address(burnerFlaxV2), true);
-        console.log("Authorized BurnerEYEV2, BurnerSCXV2, BurnerFlaxV2 as burners on BurnRecorder");
+        // Story 070: the burner-specific BurnRecorder.setBurner(burner*, true) lines were removed
+        // — Uniboost does not burn. BurnRecorder itself is retained (MintPageView still reads its
+        // getTotalBurnt totals, which now stay at zero on the EYE/SCX/Flax slots).
 
         // ====== PHASE 3.7: NFT Staking Stack ======
         console.log("\n=== Phase 3.7: NFT Staking Stack ===");
@@ -662,23 +719,47 @@ contract DeployMocks is Script {
         balancerPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
         console.log("BalancerPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
 
-        // ---- Story 068: NudgeRatchet dispatcher + mint-debt hook ----
-        // NudgeRatchet is a forwarding dispatcher (structurally like GatherV2) backed by
-        // the existing 6-decimal MockRewardToken (USDC); its constructor enforces a
-        // 6-decimal token and a non-zero batchMinter sink. Deployed AFTER batchNFTMinter
-        // so `batchMinter_` is non-zero. Mirrors the BalancerPoolerV2 wiring pattern.
+        // ---- Story 070: deferred Uniboost wiring (donation split + staker + Pauser) ----
+        // batchNFTMinter now exists, so this is the phase where the uniboost dispatchers learn
+        // their donation recipient. Recipient is `batchNFTMinter` (the BalancerPoolerV2 index-4
+        // LSP batch minter) — NOT ratchetBatchNFTMinter — so 50% of each mint's USDC nudges
+        // protocol-pooler (LSP) minting; the remaining 50% is retained for pool().
+        _finalizeUniboost(uniboostEYE, uniboostHookEYE, address(batchNFTMinter), deployer);
+        uniboostStakerEYE = _deployUniboostStaker(uniboostEYE, uniboostHookEYE, deployer);
+        _trackDeployment("UniboostStakerEYE", address(uniboostStakerEYE), 0);
+
+        _finalizeUniboost(uniboostSCX, uniboostHookSCX, address(batchNFTMinter), deployer);
+        uniboostStakerSCX = _deployUniboostStaker(uniboostSCX, uniboostHookSCX, deployer);
+        _trackDeployment("UniboostStakerSCX", address(uniboostStakerSCX), 0);
+
+        _finalizeUniboost(uniboostFLX, uniboostHookFLX, address(batchNFTMinter), deployer);
+        uniboostStakerFLX = _deployUniboostStaker(uniboostFLX, uniboostHookFLX, deployer);
+        _trackDeployment("UniboostStakerFLX", address(uniboostStakerFLX), 0);
+
+        // ---- Story 068/070: NudgeRatchetDelayRelease dispatcher + mint-debt hook ----
+        // Story 070 swapped the index-7 dispatcher from NudgeRatchet (forwards on dispatch) to
+        // NudgeRatchetDelayRelease (HOLDS USDC on dispatch; a whitelisted releaser later calls
+        // release(amount) to move held USDC to batchMinter). Same constructor signature
+        // (token_, batchMinter_, initialOwner), same 6-decimal USDC guard, same non-zero
+        // batchMinter sink, same index-7 registration slot/price/growth. The release sink stays
+        // `batchNFTMinter` (NOT ratchetBatchNFTMinter), mirroring the prior NudgeRatchet wiring.
         gasBefore = gasleft();
-        nudgeRatchet = new NudgeRatchet(
+        nudgeRatchet = new NudgeRatchetDelayRelease(
             address(rewardToken), // token_ — existing 6-decimal MockRewardToken (USDC)
-            address(batchNFTMinter), // batchMinter_ — existing nudge-reward sink
+            address(batchNFTMinter), // batchMinter_ — existing nudge-reward sink (release target)
             deployer // initialOwner
         );
         _trackDeployment("NudgeRatchet", address(nudgeRatchet), gasBefore - gasleft());
-        console.log("NudgeRatchet deployed at:", address(nudgeRatchet));
+        console.log("NudgeRatchetDelayRelease deployed at:", address(nudgeRatchet));
 
         // 1. Point the dispatcher's minter at NFTMinterV2.
         nudgeRatchet.setMinter(address(nftMinterV2));
-        console.log("NudgeRatchet.setMinter -> NFTMinterV2");
+        console.log("NudgeRatchetDelayRelease.setMinter -> NFTMinterV2");
+
+        // 1b. Whitelist the deployer as a releaser so release(amount) (held USDC -> batchMinter)
+        //     is callable in local dev. release() is onlyReleaser; the deployer is the local admin.
+        nudgeRatchet.setReleaser(deployer, true);
+        console.log("NudgeRatchetDelayRelease.setReleaser(deployer, true)");
 
         // 2. Deploy the matching mint-debt hook. NudgeRatchet._dispatch reverts unless the
         //    installed hook is a NudgeRatchetMintDebtHook (hookTypeId() guard), so this hook
@@ -1141,9 +1222,19 @@ contract DeployMocks is Script {
         _markConfigured("BurnRecorder", 0);
         _markConfigured("MockBalancerRouter", 0);
         _markConfigured("NFTMinterV2", 0);
-        _markConfigured("BurnerEYEV2", 0);
-        _markConfigured("BurnerSCXV2", 0);
-        _markConfigured("BurnerFlaxV2", 0);
+        // Story 070: Uniboost stack (replaced the three burners at indices 1/2/3) + UniV2 infra.
+        _markConfigured("UniswapV2Factory", 0);
+        _markConfigured("UniswapV2Router02", 0);
+        _markConfigured("WETH9", 0);
+        _markConfigured("UniboostEYE", 0);
+        _markConfigured("UniboostSCX", 0);
+        _markConfigured("UniboostFLX", 0);
+        _markConfigured("UniboostHookEYE", 0);
+        _markConfigured("UniboostHookSCX", 0);
+        _markConfigured("UniboostHookFLX", 0);
+        _markConfigured("UniboostStakerEYE", 0);
+        _markConfigured("UniboostStakerSCX", 0);
+        _markConfigured("UniboostStakerFLX", 0);
         _markConfigured("BalancerPoolerV2", 0);
         _markConfigured("MockWaUSDC", 0);
         _markConfigured("MockSkyPSM", 0);
@@ -1229,14 +1320,131 @@ contract DeployMocks is Script {
         console.log("");
         console.log("NFTMinter Infrastructure:");
         console.log("  - NFTMinter (ERC1155) deployed for claim gating");
-        console.log("  - BurnRecorder tracks token burns across dispatchers");
-        console.log("  - BurnerEYE dispatcher (index 1: burns EYE tokens)");
-        console.log("  - BurnerSCX dispatcher (index 2: burns SCX tokens)");
-        console.log("  - BurnerFlax dispatcher (index 3: burns Flax tokens)");
+        console.log("  - BurnRecorder retained (burn totals now zero on EYE/SCX/Flax)");
+        console.log("  - UniboostEYE dispatcher (index 1: boosts EYE/WETH9 UniV2 pool)");
+        console.log("  - UniboostSCX dispatcher (index 2: boosts SCX/USDS UniV2 pool)");
+        console.log("  - UniboostFLX dispatcher (index 3: boosts FLX/DOLA UniV2 pool)");
         console.log("  - BalancerPooler dispatcher (index 4: sUSDS single-sided add to phUSD/sUSDS pool)");
         console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
         console.log("  - NFTMinter registered with Global Pauser");
+    }
+
+    // =====================================================================
+    // Story 070: Uniboost + Uniswap V2 helpers
+    // =====================================================================
+
+    /// @dev Deploys the canonical Uniswap V2 stack (WETH9 + Factory + Router02) and creates +
+    ///      seeds the three TARGET pools (EYE/WETH9, SCX/USDS, FLX/DOLA) and three ROUTING pools
+    ///      (USDC/WETH9, USDC/USDS, USDC/DOLA). Pairs are created BEFORE the Uniboost dispatchers
+    ///      are constructed (their constructor reads pool.token0()/token1()). Routing pools let
+    ///      Uniboost.pool() execute its prime(USDC)->pair swap. Seed ratios set the AMM price and
+    ///      are INDEPENDENT of the 10-USDC NFT mint price. Chosen seed amounts (documented):
+    ///        Target:  EYE/WETH9 100k EYE : 100 WETH9 | SCX/USDS 100k:100k | FLX/DOLA 100k:100k
+    ///        Routing: USDC/WETH9 200k USDC : 100 WETH9 | USDC/USDS 200k:200k | USDC/DOLA 200k:200k
+    ///      (USDC is 6dp; EYE/SCX/FLX/USDS/DOLA/WETH9 are 18dp.)
+    function _deployUniswapAndPools(address deployer) internal {
+        uint256 gasBefore = gasleft();
+        (weth9, uniFactory, uniRouter) = UniswapV2Deployer.deploy(deployer);
+        _trackDeployment("WETH9", weth9, gasBefore - gasleft());
+        _trackDeployment("UniswapV2Factory", address(uniFactory), 0);
+        _trackDeployment("UniswapV2Router02", address(uniRouter), 0);
+        console.log("Uniswap V2 deployed: WETH9", weth9);
+        console.log("  Factory", address(uniFactory), "Router02", address(uniRouter));
+
+        // Wrap some native ETH into WETH9 for the two WETH9 pools (100 + 100 = 200 WETH9).
+        IWETH9Like(weth9).deposit{value: 300 ether}();
+
+        // Mint mock balances for seeding (generous; dev only).
+        eyeToken.mint(deployer, 200_000 ether);
+        mockSCX.mint(deployer, 200_000 ether);
+        mockFlax.mint(deployer, 200_000 ether);
+        usds.mint(deployer, 400_000 ether);
+        dola.mint(deployer, 400_000 ether);
+        rewardToken.mint(deployer, 600_000 * 10 ** 6); // USDC, 6dp
+
+        // ---- Target pools ----
+        poolEYE = _createAndSeed(deployer, address(eyeToken), weth9, 100_000 ether, 100 ether);
+        poolSCX = _createAndSeed(deployer, address(mockSCX), address(usds), 100_000 ether, 100_000 ether);
+        poolFLX = _createAndSeed(deployer, address(mockFlax), address(dola), 100_000 ether, 100_000 ether);
+        _trackDeployment("UniPoolEYE", poolEYE, 0);
+        _trackDeployment("UniPoolSCX", poolSCX, 0);
+        _trackDeployment("UniPoolFLX", poolFLX, 0);
+
+        // ---- Routing pools (prime USDC -> pair token) ----
+        routePoolWETH = _createAndSeed(deployer, address(rewardToken), weth9, 200_000 * 10 ** 6, 100 ether);
+        routePoolUSDS = _createAndSeed(deployer, address(rewardToken), address(usds), 200_000 * 10 ** 6, 200_000 ether);
+        routePoolDOLA = _createAndSeed(deployer, address(rewardToken), address(dola), 200_000 * 10 ** 6, 200_000 ether);
+        _trackDeployment("UniRoutePoolWETH", routePoolWETH, 0);
+        _trackDeployment("UniRoutePoolUSDS", routePoolUSDS, 0);
+        _trackDeployment("UniRoutePoolDOLA", routePoolDOLA, 0);
+        console.log("Seeded 3 target + 3 routing UniV2 pools");
+    }
+
+    /// @dev createPair + addLiquidity for one pool, returning the pair address.
+    function _createAndSeed(address deployer, address tokenA, address tokenB, uint256 amtA, uint256 amtB)
+        internal
+        returns (address pair)
+    {
+        pair = uniFactory.createPair(tokenA, tokenB);
+        IERC20(tokenA).approve(address(uniRouter), amtA);
+        IERC20(tokenB).approve(address(uniRouter), amtB);
+        uniRouter.addLiquidity(tokenA, tokenB, amtA, amtB, 0, 0, deployer, block.timestamp);
+    }
+
+    /// @dev setMinter + authorized-pooler for a uniboost dispatcher (early index-1/2/3 block).
+    function _wireUniboost(Uniboost dispatcher, address deployer, string memory label) internal {
+        dispatcher.setMinter(address(nftMinterV2));
+        // Whitelist the deployer as the authorized pooler so pool(amountIn,...) is callable.
+        dispatcher.setAuthorizedPooler(deployer, true);
+        console.log(string.concat(label, ".setMinter + setAuthorizedPooler(deployer)"));
+    }
+
+    /// @dev Deploys + installs a UniboostMintDebtHook for a dispatcher and authorizes it to mint
+    ///      phUSD. primeToken = rewardToken (USDC, 6dp) => hook scale = 1e12. recipient(staker) is
+    ///      set later in _deployUniboostStaker. Unlike NudgeRatchet, Uniboost has no hookTypeId
+    ///      guard, so the hook installs cleanly.
+    function _deployUniboostHook(Uniboost dispatcher, address deployer) internal returns (UniboostMintDebtHook hook) {
+        hook = new UniboostMintDebtHook(deployer, address(dispatcher), address(phUSD), address(rewardToken));
+        dispatcher.setHook(IDispatchHook(address(hook)));
+        phUSD.setMinter(address(hook), true);
+    }
+
+    /// @dev Deferred (Phase 3.7) per-dispatcher donation wiring: 50% of mint USDC -> batchNFTMinter
+    ///      (the BalancerPoolerV2 index-4 LSP batch minter), remaining 50% retained for pool().
+    function _finalizeUniboost(Uniboost dispatcher, UniboostMintDebtHook, address batchMinter, address) internal {
+        dispatcher.setRecipient(batchMinter);
+        dispatcher.setDonationSplit(50);
+    }
+
+    /// @dev Deploys the uniboost staker (NFTStakerDepletion), wires it to the dispatcher hook, sets
+    ///      the hook recipient to the staker, configures the depletion window, and registers with
+    ///      the local Pauser. NFTStakerDepletion has NO setTargetAPY (depletion-budget model);
+    ///      the window is owner-set and the per-second rate is budget/windowSeconds. stakedId ==
+    ///      dispatcherIndex (NFTMinterV2 mints tokenId == index); resolve the index dynamically.
+    function _deployUniboostStaker(Uniboost dispatcher, UniboostMintDebtHook hook, address deployer)
+        internal
+        returns (NFTStakerDepletion staker)
+    {
+        uint256 idx = nftMinterV2.dispatcherToIndex(address(dispatcher));
+        require(idx != 0, "Uniboost dispatcher not registered");
+        staker = new NFTStakerDepletion(
+            IERC1155(address(nftMinterV2)),
+            idx,
+            IERC20(address(phUSD)),
+            deployer,
+            INFTSupply(address(nftMinterV2)),
+            idx
+        );
+        staker.setDispatcherHook(IUniboostMintDebtHook(address(hook)));
+        // pull() is onlyOwnerOrRecipient; the staker must be the hook's recipient to sweep mint debt.
+        hook.setRecipient(address(staker));
+        // Depletion window = 12 months (one APY-year analogue). Bounded 1..120. Budget is refilled
+        // by the hook's pull() on dispatch; rate = budget/windowSeconds. Deliberate, non-default.
+        staker.setDepletionWindow(12);
+        // Register with the local Pauser like the index-4 NFTStaker (setPauser BEFORE register).
+        staker.setPauser(address(pauser));
+        pauser.register(address(staker));
     }
 
     /**

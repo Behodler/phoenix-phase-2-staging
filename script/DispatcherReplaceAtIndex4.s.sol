@@ -4,11 +4,11 @@ pragma solidity ^0.8.20;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import {Pauser} from "@pauser/Pauser.sol";
-import {NFTMinterV2} from "@yield-claim-nft/V2/NFTMinterV2.sol";
-import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
-import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/hooks/BalancerPoolerMintDebtHook.sol";
-import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/V2/interfaces/IBalancerPoolerMintDebtHook.sol";
-import {IDispatchHook} from "@yield-claim-nft/V2/interfaces/IDispatchHook.sol";
+import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
+import {BalancerPoolerV2} from "@yield-claim-nft/dispatchers/BalancerPoolerV2.sol";
+import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/hooks/BalancerPoolerMintDebtHook.sol";
+import {IBalancerPoolerMintDebtHook} from "@yield-claim-nft/interfaces/IBalancerPoolerMintDebtHook.sol";
+import {IDispatchHook} from "@yield-claim-nft/interfaces/IDispatchHook.sol";
 import {NFTStaker} from "nft-staking/NFTStaker.sol";
 
 /// @title DispatcherReplaceAtIndex4

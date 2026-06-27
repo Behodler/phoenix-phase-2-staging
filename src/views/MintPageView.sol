@@ -2,7 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "./IPageView.sol";
-import "@yield-claim-nft/interfaces/INFTMinter.sol";
+// yield-claim-nft story-039 removed the V1 INFTMinter interface (V1 decommissioned). The view
+// only reads `configs(index)`, which INFTMinterV2 exposes with the identical tuple shape.
+import {INFTMinterV2 as INFTMinter} from "@yield-claim-nft/interfaces/INFTMinterV2.sol";
 import "@yield-claim-nft/BurnRecorder.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";

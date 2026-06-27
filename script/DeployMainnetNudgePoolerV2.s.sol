@@ -7,9 +7,9 @@ import {Pauser} from "@pauser/Pauser.sol";
 import {StableYieldAccumulator} from "@stable-yield-accumulator/StableYieldAccumulator.sol";
 import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
-import {NFTMinterV2} from "@yield-claim-nft/V2/NFTMinterV2.sol";
-import {ITokenDispatcherV2} from "@yield-claim-nft/V2/interfaces/ITokenDispatcherV2.sol";
-import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
+import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
+import {ITokenDispatcherV2} from "@yield-claim-nft/interfaces/ITokenDispatcherV2.sol";
+import {BalancerPoolerV2} from "@yield-claim-nft/dispatchers/BalancerPoolerV2.sol";
 
 /**
  * @title DeployMainnetNudgePoolerV2

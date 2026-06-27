@@ -9,9 +9,9 @@ import "../../src/mocks/MockDola.sol";
 import "../../src/mocks/MockEYE.sol";
 import "../../src/mocks/MockRewardToken.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
-import {NFTMinterV2} from "@yield-claim-nft/V2/NFTMinterV2.sol";
+import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
-import {ITokenMinterV2} from "@yield-claim-nft/V2/interfaces/ITokenMinterV2.sol";
+import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
 
 /**
  * @title TestNudgePayout

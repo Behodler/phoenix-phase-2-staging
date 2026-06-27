@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {BalancerPoolerV2} from "@yield-claim-nft/V2/dispatchers/BalancerPoolerV2.sol";
+import {BalancerPoolerV2} from "@yield-claim-nft/dispatchers/BalancerPoolerV2.sol";
 
 /**
  * @title MigrateBalancerPoolerV2Pool

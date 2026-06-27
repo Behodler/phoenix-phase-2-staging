@@ -5,7 +5,8 @@ import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "../../src/views/ViewRouter.sol";
 import "../../src/views/MintPageView.sol";
-import "@yield-claim-nft/interfaces/INFTMinter.sol";
+// V1 INFTMinter removed (yield-claim-nft story-039); MintPageView now takes INFTMinterV2.
+import {INFTMinterV2 as INFTMinter} from "@yield-claim-nft/interfaces/INFTMinterV2.sol";
 import "@yield-claim-nft/BurnRecorder.sol";
 
 /**
