@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {INFTMinterV2} from "./INFTMinterV2.sol";
+
+/// @title INFTMinter (compat shim — story-039 V1 removal bridge)
+/// @notice yield-claim-nft story-039 removed the V1 `INFTMinter` interface (flattened src/V2/* ->
+///         src/* and decommissioned V1). The sibling `stable-yield-accumulator` submodule pinned by
+///         this deploy repo still imports `yield-claim-nft/interfaces/INFTMinter.sol` and uses only
+///         `burn(address,uint256,uint256)` and `nextIndex()` — both present on the V2 interface with
+///         identical signatures. This shim re-exports INFTMinterV2 under the historic `INFTMinter`
+///         name so the unmigrated consumer compiles. Pure compile-time compatibility; no behavioural
+///         change. (Restored by phStaging2 story 070.)
+///
+/// @dev This canonical copy lives in the PARENT repo (tracked) because its install location is
+///      inside the yield-claim-nft SUBMODULE, whose file contents the parent cannot track. Run
+///      `scripts/restore-yieldclaimnft-compat-shim.sh` to (re)place it at
+///      `lib/yield-claim-nft/src/interfaces/INFTMinter.sol` after a fresh checkout / submodule reset.
+interface INFTMinter is INFTMinterV2 {}
