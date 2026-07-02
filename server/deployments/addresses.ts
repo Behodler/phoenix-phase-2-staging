@@ -29,15 +29,6 @@ export interface ContractAddresses {
   BurnRecorder: string;
   BalancerRouter: string;
   NFTMinter: string;
-  WETH9: string;
-  UniswapV2Factory: string;
-  UniswapV2Router02: string;
-  UniPoolEYE: string;
-  UniPoolSCX: string;
-  UniPoolFLX: string;
-  UniRoutePoolWETH: string;
-  UniRoutePoolUSDS: string;
-  UniRoutePoolDOLA: string;
   UniboostEYE: string;
   UniboostSCX: string;
   UniboostFLX: string;

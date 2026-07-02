@@ -76,9 +76,17 @@ export const mainnetAddresses: ContractAddresses = {
   // Story 070 (2026-06-27): the three BurnerEYE/SCX/Flax dispatchers (indices 1/2/3) were
   // replaced by Uniboost dispatchers in the local mock deploy, so the BurnerEYE/SCX/Flax keys
   // were dropped from the ContractAddresses interface. Their place is taken by the Uniboost
-  // stack (dispatchers + hooks + stakers) and the backing Uniswap V2 infra/pools below. These
-  // are NOT yet deployed on mainnet — zero-address placeholders keep this hand-maintained file's
-  // key-set equal to the regenerated interface (tsc drift guard). Patch by hand when they ship.
+  // stack (dispatchers + hooks + stakers) below. These are NOT yet deployed on mainnet —
+  // zero-address placeholders keep this hand-maintained file's key-set equal to the regenerated
+  // interface (tsc drift guard). Patch by hand when they ship.
+  // (The raw UniV2 stack that backs Uniboost — WETH9/factory/router/pools — is intentionally
+  //  NOT surfaced here: it is anvil-only, the UI never touches UniV2 directly, and mainnet would
+  //  reuse the live UniV2 deployment. It is filtered out of extraction in extract-addresses.js.)
+  /*
+  BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
+  BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
+  BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
+  */
   UniboostEYE: "0x0000000000000000000000000000000000000000",
   UniboostSCX: "0x0000000000000000000000000000000000000000",
   UniboostFLX: "0x0000000000000000000000000000000000000000",
@@ -88,23 +96,12 @@ export const mainnetAddresses: ContractAddresses = {
   UniboostStakerEYE: "0x0000000000000000000000000000000000000000",
   UniboostStakerSCX: "0x0000000000000000000000000000000000000000",
   UniboostStakerFLX: "0x0000000000000000000000000000000000000000",
-  // Canonical Uniswap V2 stack + Uniboost target/routing pools (anvil-only; mainnet would reuse
-  // the live UniV2 deployment). Placeholders for interface parity.
-  WETH9: "0x0000000000000000000000000000000000000000",
-  UniswapV2Factory: "0x0000000000000000000000000000000000000000",
-  UniswapV2Router02: "0x0000000000000000000000000000000000000000",
-  UniPoolEYE: "0x0000000000000000000000000000000000000000",
-  UniPoolSCX: "0x0000000000000000000000000000000000000000",
-  UniPoolFLX: "0x0000000000000000000000000000000000000000",
-  UniRoutePoolWETH: "0x0000000000000000000000000000000000000000",
-  UniRoutePoolUSDS: "0x0000000000000000000000000000000000000000",
-  UniRoutePoolDOLA: "0x0000000000000000000000000000000000000000",
   // Story 056 (2026-06-04): index-4 dispatcher cut over to the Sky-PSM BalancerPoolerV2.
   // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
   // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).
   BalancerPooler: "0x7f74388bc970de5e2822036a1ad06fccd156786b",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
-
+  MultiPooler: "0x0000000000000000000000000000000000000000",
   // View contracts
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
   DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",

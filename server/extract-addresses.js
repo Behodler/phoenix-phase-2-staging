@@ -41,6 +41,28 @@ const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "Ba
 const DROPPED_CONTRACT_NAMES = ["NFTMigrator", "BuggedPoolerV2Index6"];
 
 /**
+ * Raw Uniswap V2 stack that backs the Uniboost dispatchers (WETH9, the canonical
+ * factory/router, the Uniboost target pools, and the routing pools). These are deployed
+ * locally only so Uniboost has an AMM to swap against; the UI never interacts with UniV2
+ * directly (all routing is wired on-chain inside the Uniboost dispatchers/hooks). They are
+ * therefore not part of the UI-facing ContractAddresses surface and are dropped from
+ * extraction so they stop appearing in the generated interface (and in the hand-maintained
+ * mainnet file, whose key-set must mirror that interface). On mainnet Uniboost would reuse
+ * the live UniV2 deployment, so there is nothing UI-consumable to surface there either.
+ */
+const UNISWAP_V2_BACKING_NAMES = [
+    "WETH9",
+    "UniswapV2Factory",
+    "UniswapV2Router02",
+    "UniPoolEYE",
+    "UniPoolSCX",
+    "UniPoolFLX",
+    "UniRoutePoolWETH",
+    "UniRoutePoolUSDS",
+    "UniRoutePoolDOLA",
+];
+
+/**
  * Extract contract addresses from progress file and generate deployment JSON
  * @param {number} chainId - The chain ID to extract addresses for (default: 31337)
  */
@@ -87,6 +109,12 @@ function extractAddresses(chainId = 31337) {
         // Drop explicitly excluded contracts (NFTMigrator and bare V1 NFT names)
         if (DROPPED_CONTRACT_NAMES.includes(displayName)) {
             console.log(`  Dropping excluded contract: ${displayName}`);
+            continue;
+        }
+
+        // Drop the raw UniV2 stack that backs Uniboost — not UI-consumable (see constant above)
+        if (UNISWAP_V2_BACKING_NAMES.includes(displayName)) {
+            console.log(`  Dropping UniV2 backing contract: ${displayName}`);
             continue;
         }
 

@@ -30,6 +30,7 @@ export default defineConfig({
         'NFTMinterV2.sol/NFTMinterV2.json',
         'BalancerPoolerV2.sol/BalancerPoolerV2.json',
         'GatherV2.sol/GatherV2.json',
+        'MultiPooler.sol/MultiPooler.json',
 
         // Dispatchers (yield-claim-nft story-040/043)
         'NudgeRatchetDelayRelease.sol/NudgeRatchetDelayRelease.json',
