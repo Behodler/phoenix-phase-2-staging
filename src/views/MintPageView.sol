@@ -5,6 +5,7 @@ import "./IPageView.sol";
 // yield-claim-nft story-039 removed the V1 INFTMinter interface (V1 decommissioned). The view
 // only reads `configs(index)`, which INFTMinterV2 exposes with the identical tuple shape.
 import {INFTMinterV2 as INFTMinter} from "@yield-claim-nft/interfaces/INFTMinterV2.sol";
+import {ITokenDispatcherV2} from "@yield-claim-nft/interfaces/ITokenDispatcherV2.sol";
 import "@yield-claim-nft/BurnRecorder.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
@@ -13,16 +14,29 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 /// @notice IPageView implementation exposing NFT minting data for the mint page.
 /// @dev Aggregates data for 6 NFTs across 4 dispatcher types, plus burn totals.
 ///
-///      NFT Configuration (hardcoded):
-///        Index 1: EYE     - Burner
-///        Index 2: SCX     - Burner
-///        Index 3: Flax    - Burner
+///      NFT Configuration (dispatcher index -> boosted/label token):
+///        Index 1: EYE     - Uniboost (story-070; replaced the EYE Burner)
+///        Index 2: SCX     - Uniboost (story-070; replaced the SCX Burner)
+///        Index 3: Flax    - Uniboost (story-070; replaced the Flax Burner)
 ///        Index 4: USDS    - BalancerPoolerV2 (restored to index 4 by story-048 cutover)
 ///        Index 5: WBTC    - Gather
 ///        Index 6: (skipped) - disabled "bugged pooler" slot on mainnet (story-048); a
 ///                             disabled placeholder dispatcher mirrors it on Anvil so that
 ///                             dispatcher indices line up across networks. Not user-facing.
 ///        Index 7: USDC    - NudgeRatchet (story-068; underlying token is 6-decimal USDC)
+///
+///      MINT-TOKEN SOURCING: the per-token `allowance` and `balance` fields report the
+///      user's position in each dispatcher's ACTUAL mint token, read live from
+///      `dispatcher.primeToken()` — never a hardcoded label token. This is what keeps the
+///      view correct across dispatcher reconfigurations. Post-story-070 the Uniboost
+///      dispatchers at indices 1/2/3 charge USDC (their primeToken), not EYE/SCX/Flax, so
+///      the "EYE/SCX/Flax" allowance/balance fields now report the user's USDC — which is
+///      what actually gates the mint. Field NAMES are retained verbatim for ABI/consumer
+///      stability; only the sourced values changed. Indices 4/5/7 are unaffected because
+///      their primeToken already equals the label token (USDS/WBTC/USDC).
+///
+///      Burn totals (EYE/SCX/Flax) are read from BurnRecorder and retained for ABI
+///      compatibility; because Uniboost does not burn, these now read 0 on Anvil.
 ///
 ///      Returns 39 fields total (6 per token + 3 burn totals). The ratchet entry reads
 ///      dispatcher index 7 to stay consistent with mainnet, where the disabled bugged
@@ -31,9 +45,16 @@ contract MintPageView is IPageView {
     INFTMinter public immutable nftMinter;
     BurnRecorder public immutable burnRecorder;
 
+    /// @notice EYE/SCX/Flax token addresses. Still used to key the BurnRecorder burn-total
+    ///         lookups (fields 36-38). No longer used for allowance/balance, which are now
+    ///         sourced from each dispatcher's live `primeToken()` (see `_fillTokenData`).
     IERC20 public immutable eye;
     IERC20 public immutable scx;
     IERC20 public immutable flax;
+    /// @notice Retained for constructor-ABI stability with the existing mainnet deploy
+    ///         scripts. These no longer drive any field — allowance/balance for every slot
+    ///         come from `dispatcher.primeToken()` — but removing them would change the
+    ///         constructor signature callers rely on.
     IERC20 public immutable usds;
     IERC20 public immutable wbtc;
     /// @notice The NudgeRatchet's underlying token (6-decimal USDC). Maps to dispatcher index 7.
@@ -128,27 +149,27 @@ contract MintPageView is IPageView {
     function getData(address user) external view returns (uint256[] memory data) {
         data = new uint256[](TOTAL_FIELDS);
 
-        // EYE (dispatcher index 1)
-        _fillTokenData(data, 0, eye, 1, user);
+        // EYE (dispatcher index 1 — Uniboost; mint token USDC via primeToken())
+        _fillTokenData(data, 0, 1, user);
 
-        // SCX (dispatcher index 2)
-        _fillTokenData(data, 6, scx, 2, user);
+        // SCX (dispatcher index 2 — Uniboost; mint token USDC via primeToken())
+        _fillTokenData(data, 6, 2, user);
 
-        // Flax (dispatcher index 3)
-        _fillTokenData(data, 12, flax, 3, user);
+        // Flax (dispatcher index 3 — Uniboost; mint token USDC via primeToken())
+        _fillTokenData(data, 12, 3, user);
 
         // USDS (dispatcher index 4 — BalancerPoolerV2 restored to index 4 by the
         //                          story-048 cutover; the bugged index-6 pooler is disabled).
-        _fillTokenData(data, 18, usds, 4, user);
+        _fillTokenData(data, 18, 4, user);
 
         // WBTC (dispatcher index 5)
-        _fillTokenData(data, 24, wbtc, 5, user);
+        _fillTokenData(data, 24, 5, user);
 
         // Ratchet (dispatcher index 7 — NudgeRatchet. Index 6 is skipped because on
         //                          mainnet it is the permanently-disabled bugged pooler;
         //                          a disabled placeholder occupies index 6 on Anvil so the
         //                          ratchet lands at the same index 7 on every network).
-        _fillTokenData(data, 30, usdc, 7, user);
+        _fillTokenData(data, 30, 7, user);
 
         // Burn totals
         data[36] = burnRecorder.getTotalBurnt(address(eye));
@@ -156,21 +177,29 @@ contract MintPageView is IPageView {
         data[38] = burnRecorder.getTotalBurnt(address(flax));
     }
 
-    /// @dev Fills 6 fields for a given token starting at `offset` in the data array.
-    function _fillTokenData(uint256[] memory data, uint256 offset, IERC20 token, uint256 dispatcherIndex, address user)
+    /// @dev Fills 6 fields for the NFT at `dispatcherIndex`, starting at `offset` in `data`.
+    ///      `allowance` and `balance` are read in the dispatcher's live `primeToken()` — the
+    ///      token the user actually pays to mint — rather than a hardcoded per-index token, so
+    ///      the fields stay correct across dispatcher reconfigurations (e.g. the story-070
+    ///      Burner -> Uniboost swap, which moved the mint token at indices 1/2/3 to USDC).
+    function _fillTokenData(uint256[] memory data, uint256 offset, uint256 dispatcherIndex, address user)
         internal
         view
     {
-        // Allowance of NFTMinter to spend user's token
-        data[offset] = token.allowance(user, address(nftMinter));
+        // Dispatcher address (for the primeToken lookup), price, and growth. `disabled` unused.
+        (address dispatcher, uint256 price, uint256 growthBasisPoints,) = nftMinter.configs(dispatcherIndex);
 
-        // Price and growthBasisPoints from config
-        (, uint256 price, uint256 growthBasisPoints,) = nftMinter.configs(dispatcherIndex);
+        // The token the user actually pays to mint this NFT (e.g. USDC for the Uniboost slots).
+        IERC20 payToken = IERC20(ITokenDispatcherV2(dispatcher).primeToken());
+
+        // Allowance of NFTMinter to spend the user's mint token
+        data[offset] = payToken.allowance(user, address(nftMinter));
+
         data[offset + 1] = price;
         data[offset + 2] = growthBasisPoints;
 
-        // User's token balance
-        data[offset + 3] = token.balanceOf(user);
+        // User's mint-token balance
+        data[offset + 3] = payToken.balanceOf(user);
 
         // User's NFT balance (tokenId == dispatcherIndex always)
         data[offset + 4] = IERC1155(address(nftMinter)).balanceOf(user, dispatcherIndex);

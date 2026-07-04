@@ -29,6 +29,12 @@ contract MockDispatcher {
         primeToken = _primeToken;
     }
 
+    /// @dev Lets a test repoint the mint token, e.g. to model the story-070 Burner->Uniboost
+    ///      swap that changed indices 1/2/3 to charge USDC instead of EYE/SCX/Flax.
+    function setPrimeToken(address _primeToken) external {
+        primeToken = _primeToken;
+    }
+
     function name() external pure returns (string memory) {
         return "MockDispatcher";
     }
@@ -309,6 +315,53 @@ contract MintPageViewTest is Test {
     function testGetData_USDSDispatcherIndex4() public view {
         uint256[] memory data = view_.getData(user);
         assertEq(data[23], 4, "USDS dispatcher index must be 4 (BalancerPoolerV2)");
+    }
+
+    /// @dev Regression for the story-070 staleness bug: the Uniboost dispatchers that replaced
+    ///      the EYE/SCX/Flax Burners at indices 1/2/3 charge USDC (their primeToken), NOT the
+    ///      label token. The allowance/balance fields must follow `dispatcher.primeToken()`, so
+    ///      they report the user's USDC (what actually gates the mint) — even though the field
+    ///      names remain "EYE-*"/"SCX-*"/"Flax-*". Under the old hardcoded-token implementation
+    ///      these assertions would read the user's EYE/SCX/Flax instead and fail.
+    function testAllowanceAndBalanceFollowPrimeTokenNotLabelToken() public {
+        // Model the swap: indices 1/2/3 now mint against USDC.
+        dispatcherEYE.setPrimeToken(address(usdc));
+        dispatcherSCX.setPrimeToken(address(usdc));
+        dispatcherFlax.setPrimeToken(address(usdc));
+
+        // Fund + approve the REAL mint token (USDC).
+        usdc.mint(user, 250 ether);
+        // Fund + approve the label tokens too, with different amounts, to prove the view
+        // does NOT read them.
+        eye.mint(user, 999 ether);
+        scx.mint(user, 999 ether);
+        flax.mint(user, 999 ether);
+
+        vm.startPrank(user);
+        usdc.approve(address(nftMinter), 60 ether);
+        eye.approve(address(nftMinter), 111 ether);
+        scx.approve(address(nftMinter), 111 ether);
+        flax.approve(address(nftMinter), 111 ether);
+        vm.stopPrank();
+
+        uint256[] memory data = view_.getData(user);
+
+        // Allowances (fields 0/6/12) must reflect USDC, not the EYE/SCX/Flax approvals.
+        assertEq(data[0], 60 ether, "EYE-slot allowance must come from primeToken (USDC)");
+        assertEq(data[6], 60 ether, "SCX-slot allowance must come from primeToken (USDC)");
+        assertEq(data[12], 60 ether, "Flax-slot allowance must come from primeToken (USDC)");
+
+        // Balances (fields 3/9/15) must reflect USDC, not the EYE/SCX/Flax balances.
+        assertEq(data[3], 250 ether, "EYE-slot balance must come from primeToken (USDC)");
+        assertEq(data[9], 250 ether, "SCX-slot balance must come from primeToken (USDC)");
+        assertEq(data[15], 250 ether, "Flax-slot balance must come from primeToken (USDC)");
+
+        // USDS/WBTC slots read their own primeToken (USDS/WBTC), which we didn't fund -> 0.
+        assertEq(data[18], 0, "USDS-slot allowance reads USDS primeToken (unfunded)");
+        assertEq(data[24], 0, "WBTC-slot allowance reads WBTC primeToken (unfunded)");
+        // The Ratchet slot's primeToken is USDC, so it correctly picks up the USDC approval —
+        // another confirmation the value tracks primeToken, not any hardcoded label token.
+        assertEq(data[30], 60 ether, "Ratchet-slot allowance reads USDC primeToken");
     }
 
     function testGetNamesAndGetDataLengthsMatch() public view {
