@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-07-04T03:08:42.778Z
+// Generated interface from local.json on 2026-07-04T07:58:42.011Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -46,6 +46,9 @@ export interface ContractAddresses {
   UniboostStakerEYE: string;
   UniboostStakerSCX: string;
   UniboostStakerFLX: string;
+  EyeBatchNFTMinter: string;
+  ScxBatchNFTMinter: string;
+  FlxBatchNFTMinter: string;
   NudgeRatchet: string;
   NudgeRatchetMintDebtHook: string;
   RatchetNFTStaker: string;

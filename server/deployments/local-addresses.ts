@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-07-04T03:08:42.783Z
+// Generated from local.json on 2026-07-04T07:58:42.015Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -47,15 +47,18 @@ export const anvilAddresses: ContractAddresses = {
   UniboostStakerEYE: "0xab16A69A5a8c12C732e0DEFF4BE56A70bb64c926",
   UniboostStakerSCX: "0x2a810409872AfC346F9B5b26571Fd6eC42EA4849",
   UniboostStakerFLX: "0xCA8c8688914e0F7096c920146cd0Ad85cD7Ae8b9",
-  NudgeRatchet: "0xfcDB4564c18A9134002b9771816092C9693622e3",
-  NudgeRatchetMintDebtHook: "0x01c1DeF3b91672704716159C9041Aeca392DdFfb",
-  RatchetNFTStaker: "0xFD6F7A6a5c21A3f503EBaE7a473639974379c351",
-  RatchetBatchNFTMinter: "0x4bf010f1b9beDA5450a8dD702ED602A104ff65EE",
-  StableStaker: "0x870526b7973b56163a6997bB7C886F5E4EA53638",
-  DepositView: "0x51C65cd0Cdb1A8A8b79dfc2eE965B1bA0bb8fc89",
-  ViewRouter: "0x8fC8CFB7f7362E44E472c690A6e025B80E406458",
-  DepositPageView: "0xC7143d5bA86553C06f5730c8dC9f8187a621A8D4",
-  MintPageView: "0xc9952Fc93Fa9bE383ccB39008c786b9f94eAc95d",
+  EyeBatchNFTMinter: "0xfcDB4564c18A9134002b9771816092C9693622e3",
+  ScxBatchNFTMinter: "0x01c1DeF3b91672704716159C9041Aeca392DdFfb",
+  FlxBatchNFTMinter: "0x6C2d83262fF84cBaDb3e416D527403135D757892",
+  NudgeRatchet: "0x5302E909d1e93e30F05B5D6Eea766363D14F9892",
+  NudgeRatchetMintDebtHook: "0x40a42Baf86Fc821f972Ad2aC878729063CeEF403",
+  RatchetNFTStaker: "0xefc1aB2475ACb7E60499Efb171D173be19928a05",
+  RatchetBatchNFTMinter: "0xc582Bc0317dbb0908203541971a358c44b1F3766",
+  StableStaker: "0xefAB0Beb0A557E452b398035eA964948c750b2Fd",
+  DepositView: "0x9385556B571ab92bf6dC9a0DbD75429Dd4d56F91",
+  ViewRouter: "0x162700d1613DfEC978032A909DE02643bC55df1A",
+  DepositPageView: "0x67aD6EA566BA6B0fC52e97Bc25CE46120fdAc04c",
+  MintPageView: "0xcD0048A5628B37B8f743cC2FeA18817A29e97270",
 };
 
 export type AnvilContractName = keyof ContractAddresses;

@@ -96,6 +96,13 @@ export const mainnetAddresses: ContractAddresses = {
   UniboostStakerEYE: "0x0000000000000000000000000000000000000000",
   UniboostStakerSCX: "0x0000000000000000000000000000000000000000",
   UniboostStakerFLX: "0x0000000000000000000000000000000000000000",
+  // Dedicated BatchNFTMinter per Uniboost NFT (EYE/SCX/FLX, dispatcher indices 1/2/3) so the UI
+  // can batch-mint each in one tx. Nudge feature disabled (pure loopers). NOT yet deployed on
+  // mainnet — the underlying Uniboost stack above is itself undeployed on mainnet. Left empty
+  // (per request); patch by hand when they ship.
+  EyeBatchNFTMinter: "",
+  ScxBatchNFTMinter: "",
+  FlxBatchNFTMinter: "",
   // Story 056 (2026-06-04): index-4 dispatcher cut over to the Sky-PSM BalancerPoolerV2.
   // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
   // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).

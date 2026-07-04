@@ -191,6 +191,14 @@ contract DeployMocks is Script {
     // dispatcher index. Payment token derives from the dispatcher's prime token (USDC);
     // its nudge REWARD token is USDS so it never collides with the USDC input.
     BatchNFTMinter public ratchetBatchNFTMinter;
+    // Dedicated BatchNFTMinter per Uniboost NFT (EYE=index 1, SCX=index 2, FLX=index 3) so the
+    // UI can batch-mint each in a single tx. One BatchNFTMinter pins exactly one dispatcher index,
+    // so each Uniboost NFT needs its own instance. The nudge feature is deliberately left DISABLED
+    // on all three (nudgeSize=0, nudgePaymentToken=address(0) — the defaults): these are pure batch
+    // loopers, so they hold no funds and carry none of the nudge-pot drain surface.
+    BatchNFTMinter public eyeBatchNFTMinter;
+    BatchNFTMinter public scxBatchNFTMinter;
+    BatchNFTMinter public flxBatchNFTMinter;
 
     // NFT Staking infrastructure
     BalancerPoolerMintDebtHook public balancerPoolerHook;
@@ -752,6 +760,15 @@ contract DeployMocks is Script {
         _finalizeUniboost(uniboostFLX, uniboostHookFLX, address(batchNFTMinter), deployer);
         uniboostStakerFLX = _deployUniboostStaker(uniboostFLX, uniboostHookFLX, deployer);
         _trackDeployment("UniboostStakerFLX", address(uniboostStakerFLX), 0);
+
+        // ---- Batch minters for the three Uniboost NFTs (EYE/SCX/FLX) ----
+        // A BatchNFTMinter pins exactly one dispatcher index, so each Uniboost NFT (indices 1/2/3)
+        // needs its own instance to be batch-mintable from the UI. Nudge is left disabled on all
+        // three (see the field declarations). Indices are derived from the registered dispatcher
+        // rather than hard-coded so a registration-order change can't silently mis-wire them.
+        eyeBatchNFTMinter = _deployNudgelessBatchMinter(address(uniboostEYE), "EyeBatchNFTMinter", deployer);
+        scxBatchNFTMinter = _deployNudgelessBatchMinter(address(uniboostSCX), "ScxBatchNFTMinter", deployer);
+        flxBatchNFTMinter = _deployNudgelessBatchMinter(address(uniboostFLX), "FlxBatchNFTMinter", deployer);
 
         // ---- Story 068/070: NudgeRatchetDelayRelease dispatcher + mint-debt hook ----
         // Story 070 swapped the index-7 dispatcher from NudgeRatchet (forwards on dispatch) to
@@ -1469,6 +1486,30 @@ contract DeployMocks is Script {
         // Register with the local Pauser like the index-4 NFTStaker (setPauser BEFORE register).
         staker.setPauser(address(pauser));
         pauser.register(address(staker));
+    }
+
+    /**
+     * @dev Deploy a BatchNFTMinter pinned to a single dispatcher, with the nudge feature left
+     *      DISABLED (nudgeSize=0, nudgePaymentToken=address(0) — the constructor defaults, never
+     *      touched). Pure batch looper: it holds no funds, so no nudge/reward wiring is needed and
+     *      none of the nudge-pot drain surface applies. The dispatcher index is derived from the
+     *      registered dispatcher (reverts if unregistered), and the payment token is derived at
+     *      batchMint time from the dispatcher's primeToken() — never a caller-supplied parameter.
+     */
+    function _deployNudgelessBatchMinter(address dispatcher, string memory trackName, address deployer)
+        internal
+        returns (BatchNFTMinter batchMinter)
+    {
+        uint256 idx = nftMinterV2.dispatcherToIndex(dispatcher);
+        require(idx != 0, "batch minter: dispatcher not registered");
+        uint256 gasBefore = gasleft();
+        batchMinter = new BatchNFTMinter(deployer);
+        _trackDeployment(trackName, address(batchMinter), gasBefore - gasleft());
+        // Pin the trusted minter + dispatcher index so batchMint is enabled. Without these,
+        // batchMint reverts BatchMint__MinterNotConfigured / BatchMint__DispatcherNotConfigured.
+        batchMinter.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
+        batchMinter.setDispatcherIndex(idx);
+        console.log(string.concat(trackName, " deployed + wired (index ", vm.toString(idx), "):"), address(batchMinter));
     }
 
     /**
