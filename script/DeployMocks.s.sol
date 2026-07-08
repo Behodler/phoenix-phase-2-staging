@@ -526,9 +526,9 @@ contract DeployMocks is Script {
         console.log("GatherWBTCV2 deployed at:", address(gatherWBTCV2));
 
         // 4. Register V2 dispatchers with NFTMinterV2
-        uint256 v2InitialPrice = 100 * 10 ** 18;
+        uint256 v2InitialPrice = 10 * 10 ** 18;
         uint256 v2WBTCInitialPrice = 100 * 10 ** 8; // WBTC has 8 decimals
-        uint256 v2RatchetInitialPrice = 100 * 10 ** 6; // NudgeRatchet's prime token is 6-decimal USDC
+        uint256 v2RatchetInitialPrice = 10 * 10 ** 6; // NudgeRatchet's prime token is 6-decimal USDC
         // Story 070: uniboost NFT mint price = 10 USDC (6dp), growth 0.1% (10 bps). This is the
         // NFT MINT price (unrelated to the seeded Uniswap pool price). Replaces the burners'
         // 100e18 / 2% registration AT THE SAME SLOT so indices 1/2/3 are preserved.
