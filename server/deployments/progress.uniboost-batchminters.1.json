@@ -1,0 +1,1 @@
+{"chainId": 1,"networkName": "mainnet","deploymentStatus": "completed","contracts": {"EyeBatchNFTMinter": {"address": "0xbbE6c8D4b31E1507376B7c34b4a82C48158F2811","deployed": true},"ScxBatchNFTMinter": {"address": "0x2a1a8fd7ba06A6D1B91385A3c56d2f2cD261e4d4","deployed": true},"FlxBatchNFTMinter": {"address": "0x4695fd1067Fb402DCD4551d5C87B84021BEd0629","deployed": true}}}

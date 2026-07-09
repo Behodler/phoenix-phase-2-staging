@@ -13,7 +13,6 @@
 // Updated 2026-06-04: index-4 dispatcher cut over to Sky-PSM BalancerPoolerV2 + new MintDebtHook (story 056)
 // Updated 2026-06-16: saga 2 migration (2.1) — YieldStrategyDola/USDC + PhusdStableMinter (V2) patched
 // Updated 2026-06-20: NudgeRatchet infrastructure deployed to mainnet (story 069); ratchet addresses + MintPageView patched from broadcast
-// Updated 2026-07-08: Uniboost dispatchers cut over at indices 1/2/3 + index-7 ratchet swapped to NudgeRatchetDelayRelease (story 071, RESUMED); addresses patched from progress file
 import { ContractAddresses } from './addresses';
 
 
@@ -88,35 +87,35 @@ export const mainnetAddresses: ContractAddresses = {
   BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
   BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
   */
-  UniboostEYE: "0x63f4aCE0304d795A458fc2567F2c4eFeB60970CA",
-  UniboostSCX: "0xea6bAa2170E60e9069646d689730533176c59a03",
-  UniboostFLX: "0xb490c48701eB44D59af4A530d75B4fd3E79B5ddD",
-  UniboostHookEYE: "0x0F05c34d458dd8953864a56857a2bb67ecb22683",
-  UniboostHookSCX: "0xfe4Ed16a8450c76768e1EB5FF8292806E2204a2A",
-  UniboostHookFLX: "0x8F48E5431814FfaC9c35cf934Aa2556A946Fb33C",
-  UniboostStakerEYE: "0x66989bb99c1569bf2540f3bB16975801df05864B",
-  UniboostStakerSCX: "0x39e85E62d0Ccb83fb87fb525aA259F8f79A70637",
-  UniboostStakerFLX: "0x6E8cA0E37AadF35Df19F5064f279d9CC96a3403b",
+  UniboostEYE: "0x0000000000000000000000000000000000000000",
+  UniboostSCX: "0x0000000000000000000000000000000000000000",
+  UniboostFLX: "0x0000000000000000000000000000000000000000",
+  UniboostHookEYE: "0x0000000000000000000000000000000000000000",
+  UniboostHookSCX: "0x0000000000000000000000000000000000000000",
+  UniboostHookFLX: "0x0000000000000000000000000000000000000000",
+  UniboostStakerEYE: "0x0000000000000000000000000000000000000000",
+  UniboostStakerSCX: "0x0000000000000000000000000000000000000000",
+  UniboostStakerFLX: "0x0000000000000000000000000000000000000000",
   // Dedicated BatchNFTMinter per Uniboost NFT (EYE/SCX/FLX, dispatcher indices 1/2/3) so the UI
   // can batch-mint each in one tx. Nudge feature disabled (pure loopers). NOT yet deployed on
   // mainnet — the underlying Uniboost stack above is itself undeployed on mainnet. Left empty
   // (per request); patch by hand when they ship.
-  EyeBatchNFTMinter: "0xbbe6c8d4b31e1507376b7c34b4a82c48158f2811",
-  ScxBatchNFTMinter: "0x2a1a8fd7ba06a6d1b91385a3c56d2f2cd261e4d4",
-  FlxBatchNFTMinter: "0x4695fd1067fb402dcd4551d5c87b84021bed0629",
+  EyeBatchNFTMinter: "",
+  ScxBatchNFTMinter: "",
+  FlxBatchNFTMinter: "",
   // Story 056 (2026-06-04): index-4 dispatcher cut over to the Sky-PSM BalancerPoolerV2.
   // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
   // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).
   BalancerPooler: "0x7f74388bc970de5e2822036a1ad06fccd156786b",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
-  MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
+  MultiPooler: "0x0000000000000000000000000000000000000000",
   // View contracts
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
   DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
   // Story 048: reverted from 0xeBEc50cD19310e6ed59D8153313Ec7C888152c1A (index-6 view)
   // to the prior index-4 view ahead of the dispatcher cutover. Verified on-chain:
   // getData(0)[23] == 4 for the address below.
-  MintPageView: "0x9b3ec09c14ec49fe2ac0981cdf43f3a2f69f8fb7",
+  MintPageView: "0x7e329338d319882ba1809b648eba584b3a4630cb",
   // NFT staking
   BalancerPoolerMintDebtHook: "0x4a26ad83306a2f17155799fdd9449f77eb3f8bd7",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
@@ -128,8 +127,8 @@ export const mainnetAddresses: ContractAddresses = {
   // NudgeRatchet dispatcher + its mint-debt hook — not yet deployed on mainnet (story 068).
   // Zero placeholders so this file still satisfies the ContractAddresses interface once the
   // local deploy added these fields. Patch by hand when they ship to mainnet.
-  NudgeRatchet: "0xd4ea91f6096A75a1c34A3c25D7725dE1f5c49f68",
-  NudgeRatchetMintDebtHook: "0x09AceB96337df1316e0D2d7EEEa44d754D1f8d05",
+  NudgeRatchet: "0x7a4ed11160a06bb1c5b59091575d59707be97a72",
+  NudgeRatchetMintDebtHook: "0xdcddb2f6548d5f1bac812110679e4c87e4ba9958",
   // Dedicated NFTStaker for the NudgeRatchet NFT — not yet deployed on mainnet (story 068).
   RatchetNFTStaker: "0x299b0071def42d35eaf5ea24cc0a71cf10655a64",
   // Dedicated BatchNFTMinter for the NudgeRatchet NFT (UI batch-mint entrypoint; pays USDC,

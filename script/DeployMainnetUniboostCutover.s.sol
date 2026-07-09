@@ -275,11 +275,17 @@ contract DeployMainnetUniboostCutover is Script {
         (address d2,,,) = minter.configs(SCX_INDEX);
         (address d3,,,) = minter.configs(FLX_INDEX);
         (address d7,,,) = minter.configs(RATCHET_INDEX);
-        require(d1 == BURNER_EYE, "configs(1).dispatcher != live BurnerV2 (EYE)");
-        require(d2 == BURNER_SCX, "configs(2).dispatcher != live BurnerV2 (SCX)");
-        require(d3 == BURNER_FLX, "configs(3).dispatcher != live BurnerV2 (FLX)");
-        require(d7 == OLD_NUDGE_RATCHET, "configs(7).dispatcher != live NudgeRatchet");
-        console.log("configs(1/2/3) == live burners; configs(7) == live NudgeRatchet: OK");
+        // Resume-aware preconditions: each mutated slot must hold EITHER its pre-cutover live
+        // dispatcher OR the post-swap replacement loaded from the progress file. This lets the
+        // script re-enter after a partial broadcast that already swapped some indices (the swaps
+        // themselves stay gated by _isConfigured("phase2_swap_N")/("phase4_replace7"), so a
+        // completed swap is never repeated). In a fresh deploy the uniboost*/newRatchet fields
+        // are still address(0), so only the burner/old-ratchet branch can match.
+        require(d1 == BURNER_EYE || d1 == uniboostEYE, "configs(1) != BurnerV2(EYE) nor UniboostEYE");
+        require(d2 == BURNER_SCX || d2 == uniboostSCX, "configs(2) != BurnerV2(SCX) nor UniboostSCX");
+        require(d3 == BURNER_FLX || d3 == uniboostFLX, "configs(3) != BurnerV2(FLX) nor UniboostFLX");
+        require(d7 == OLD_NUDGE_RATCHET || d7 == newRatchet, "configs(7) != live NudgeRatchet nor new ratchet");
+        console.log("configs(1/2/3) == burner|uniboost; configs(7) == old|new ratchet: OK (resume-aware)");
 
         // Read RATCHET_SINK from the OLD ratchet, assert == index-4 BatchNFTMinter.
         ratchetSink = INudgeRatchetLike(OLD_NUDGE_RATCHET).batchMinter();
