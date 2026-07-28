@@ -82,6 +82,13 @@ remappings = [
     "yield-claim-nft/=lib/yield-claim-nft/src/",
     "@yield-claim-nft/=lib/yield-claim-nft/src/",
     "nft-staking/=lib/nft-staking/src/",
+    # The nft-staking submodule's upstream repo is named phoenix-nft-staking, and
+    # yield-claim-nft / stable-yield-accumulator import it under that prefix
+    # (e.g. `phoenix-nft-staking/INudgeStreamer.sol`). Point that prefix at the
+    # single top-level pin, and canonicalize SYA's nested vendored copy onto it,
+    # so there is exactly one physical INudgeStreamer.sol.
+    "phoenix-nft-staking/=lib/nft-staking/src/",
+    "lib/stable-yield-accumulator/lib/phoenix-nft-staking/=lib/nft-staking/",
     "lib/yield-claim-nft/src/interfaces/IBurnable.sol=lib/pauser/src/interfaces/IBurnable.sol",
     # --- stable-staker (story 051) ---------------------------------------------
     # StableStaker.sol imports use the prefixes: flax-token/, pauser/,
