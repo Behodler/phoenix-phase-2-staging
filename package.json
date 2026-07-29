@@ -6,7 +6,7 @@
     "//local-deploy": "Story 003 — local Anvil deployment orchestration",
     "start:anvil": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-time 2",
     "clean:local": "rm -rf broadcast/*/31337 server/deployments/progress.31337.json server/deployments/local.json",
-    "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow",
+    "deploy:local": "npm run clean:local && forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow --gas-estimate-multiplier 300",
     "//extract-addresses": "Story 013 — parameterize extract-addresses for multi-chain",
     "extract:addresses": "node server/extract-addresses.js 31337",
     "//generate-ts": "Story 028 — generate TypeScript address interface (anvil only; mainnet-addresses.ts is hand-maintained, story 068)",

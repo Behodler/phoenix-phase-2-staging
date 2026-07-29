@@ -11,6 +11,8 @@ export default defineConfig({
         // Mock contracts for testing
         'MockPhUSD.sol/MockPhUSD.json',
         'MockRewardToken.sol/MockRewardToken.json',
+        // Story 073: third nudge-reward asset on the multi-token batch minter.
+        'MockKendu.sol/MockKendu.json',
 
         // Main Phase 2 contracts
         'PhusdStableMinter.sol/PhusdStableMinter.json',
@@ -33,7 +35,11 @@ export default defineConfig({
         'MultiPooler.sol/MultiPooler.json',
 
         // Dispatchers (yield-claim-nft story-040/043)
+        // NudgeRatchetDelayRelease is RETAINED on purpose: story 073 swapped index 7 back to
+        // NudgeRatchet locally, but the retired type stays readable by the UI during the
+        // transition (the same posture story 072 takes for the mainnet cutover).
         'NudgeRatchetDelayRelease.sol/NudgeRatchetDelayRelease.json',
+        'NudgeRatchet.sol/NudgeRatchet.json',
         'Uniboost.sol/Uniboost.json',
 
         // V2 Dispatch hooks
@@ -44,9 +50,16 @@ export default defineConfig({
 
         // NFT Staking
         'NFTStaker.sol/NFTStaker.json',
+        // NFTStakerDepletion and BatchNFTMinter are RETAINED alongside their story-073
+        // successors: the local chain now ends on the V2 / multi-token types, but the retired
+        // ABIs stay readable while the UI transitions.
         'NFTStakerDepletion.sol/NFTStakerDepletion.json',
+        'NFTStakerDepletionV2.sol/NFTStakerDepletionV2.json',
+        'NFTStakerMigrator.sol/NFTStakerMigrator.json',
         'NFTStakerPriceScaled.sol/NFTStakerPriceScaled.json',
         'BatchNFTMinter.sol/BatchNFTMinter.json',
+        'BatchNFTMinterMultiToken.sol/BatchNFTMinterMultiToken.json',
+        'NudgeStreamer.sol/NudgeStreamer.json',
 
         // Stable Staker (yield farm for stablecoin staking)
         'StableStaker.sol/StableStaker.json',

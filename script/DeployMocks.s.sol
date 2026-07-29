@@ -13,6 +13,7 @@ import "../src/mocks/MockAutoDOLA.sol";
 import "../src/mocks/MockSUSDS.sol";
 import "../src/mocks/MockEYE.sol";
 import "../src/mocks/MockSCX.sol";
+import "../src/mocks/MockKendu.sol";
 import "../src/mocks/MockFlax.sol";
 import "../src/mocks/MockWBTC.sol";
 import "../src/mocks/MockBalancerPool.sol";
@@ -41,8 +42,9 @@ import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
 import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
 import {BalancerPoolerV2} from "@yield-claim-nft/dispatchers/BalancerPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/dispatchers/GatherV2.sol";
-// Story 070: index-7 swapped NudgeRatchet -> NudgeRatchetDelayRelease (held-USDC + releaser flow).
-import {NudgeRatchetDelayRelease} from "@yield-claim-nft/dispatchers/NudgeRatchetDelayRelease.sol";
+// Story 070 put NudgeRatchetDelayRelease at index 7 as a stopgap; story 073 retires it and puts
+// the streamer-aware NudgeRatchet back in the same slot (same ctor, same index, same hook).
+import {NudgeRatchet} from "@yield-claim-nft/dispatchers/NudgeRatchet.sol";
 import {NudgeRatchetMintDebtHook} from "@yield-claim-nft/hooks/NudgeRatchetMintDebtHook.sol";
 import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/hooks/BalancerPoolerMintDebtHook.sol";
 import {IDispatchHook} from "@yield-claim-nft/interfaces/IDispatchHook.sol";
@@ -57,6 +59,12 @@ import {NFTStakerPriceScaled} from "nft-staking/NFTStakerPriceScaled.sol";
 import {NFTStakerDepletion} from "nft-staking/NFTStakerDepletion.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
 import {INFTSupply} from "nft-staking/INFTSupply.sol";
+// Story 073: the streamer-era contract set (mirrors the mainnet cutover planned in story 072).
+import {NudgeStreamer} from "nft-staking/NudgeStreamer.sol";
+import {BatchNFTMinterMultiToken} from "nft-staking/BatchNFTMinterMultiToken.sol";
+import {NFTStakerDepletionV2} from "nft-staking/NFTStakerDepletionV2.sol";
+import {NFTStakerMigrator} from "nft-staking/NFTStakerMigrator.sol";
+import {INFTStakerMigratable} from "nft-staking/INFTStakerMigratable.sol";
 // Story 070: canonical Uniswap V2 (WETH9 + Factory + Router02) deployer + interfaces.
 import {
     UniswapV2Deployer,
@@ -101,6 +109,23 @@ contract DeployMocks is Script {
     // Mirrors MOCK_NUDGE_SPLIT for mental-model parity; LP path still receives 70%.
     uint256 constant MOCK_BATCH_DONATION_SIZE = 30;
 
+    // ---- Story 073: NudgeStreamer-era constants ----
+    // Local stream window. DELIBERATELY 1 hour, NOT mainnet's 7 days (story 073 user decision):
+    // a developer can watch a stream accrue and flush inside one session without vm.warp.
+    // Do NOT "fix" this to match mainnet.
+    uint256 constant LOCAL_STREAM_DURATION = 1 hours;
+    // phUSD budget seeded onto each rehearsal V1 depletion staker before the migration dry-run.
+    // Deliberate, non-default: large enough that per-second emission is non-zero over a 12-month
+    // window (budget / (12 * 30 days) > 0) so the migration exercises a real, non-trivial accrual.
+    uint256 constant REHEARSAL_STAKER_BUDGET = 1_000 * 10 ** 18; // 1,000 phUSD
+    // Distinct mock actors whose positions the V1 -> V2 depletion-staker migration rehearsal
+    // moves. These are anvil's default accounts #1/#2/#3 — real, distinct addresses so
+    // `migrator.migrate(users)` operates on a genuine multi-user list rather than a single
+    // self-staked position.
+    address constant REHEARSAL_ACTOR_1 = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
+    address constant REHEARSAL_ACTOR_2 = 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC;
+    address constant REHEARSAL_ACTOR_3 = 0x90F79bf6EB2c4f870365E785982E1f101E93b906;
+
     // Deployment addresses
     MockPhUSD public phUSD;
     MockRewardToken public rewardToken; // USDC - the consolidated reward token
@@ -129,6 +154,8 @@ contract DeployMocks is Script {
 
     // NFTMinter infrastructure (V2 only — V1 removed in story 059)
     MockSCX public mockSCX;
+    // Story 073: third nudge-reward asset alongside USDC and phUSD on the multi-token batch minter.
+    MockKendu public mockKendu;
     MockFlax public mockFlax;
     MockWBTC public mockWBTC;
     MockBalancerPool public mockBalancerPool;
@@ -147,9 +174,12 @@ contract DeployMocks is Script {
     UniboostMintDebtHook public uniboostHookEYE;
     UniboostMintDebtHook public uniboostHookSCX;
     UniboostMintDebtHook public uniboostHookFLX;
-    NFTStakerDepletion public uniboostStakerEYE;
-    NFTStakerDepletion public uniboostStakerSCX;
-    NFTStakerDepletion public uniboostStakerFLX;
+    // Story 073: the chain now ENDS on NFTStakerDepletionV2. Each of these is the V2 instance the
+    // migration rehearsal migrated into; the transient V1 stakers and migrators are deliberately
+    // not retained as fields (they are rehearsal artifacts, never tracked, never read by the UI).
+    NFTStakerDepletionV2 public uniboostStakerEYE;
+    NFTStakerDepletionV2 public uniboostStakerSCX;
+    NFTStakerDepletionV2 public uniboostStakerFLX;
     // Story 070: batch forwarder authorized to pool() across all three Uniboost dispatchers. It is
     // the ONLY authorized pooler on each Uniboost (the deployer is deliberately NOT whitelisted).
     MultiPooler public multiPooler;
@@ -179,7 +209,10 @@ contract DeployMocks is Script {
     // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook.
     // Story 070 — swapped the dispatcher to NudgeRatchetDelayRelease (HOLDS USDC on dispatch,
     // releaser-gated release to batchMinter). Same index 7, same hook, same price/growth.
-    NudgeRatchetDelayRelease public nudgeRatchet;
+    // Story 073 — retires the DelayRelease stopgap and restores the streamer-aware NudgeRatchet
+    // in the SAME slot (index 7). The variable name is intentionally type-agnostic so the
+    // `_trackDeployment("NudgeRatchet", ...)` key stays correct.
+    NudgeRatchet public nudgeRatchet;
     NudgeRatchetMintDebtHook public nudgeRatchetHook;
     // Dedicated NFTStakerPriceScaled for the NudgeRatchet NFT (dispatcher index 7). Uses the
     // price-scaled variant because the ratchet's prime token is 6-decimal USDC while the reward
@@ -203,7 +236,15 @@ contract DeployMocks is Script {
     // NFT Staking infrastructure
     BalancerPoolerMintDebtHook public balancerPoolerHook;
     NFTStaker public nftStaker;
-    BatchNFTMinter public batchNFTMinter;
+    // Story 073: the shared donor sink is now a BatchNFTMinterMultiToken (USDC / phUSD / Kendu),
+    // fed through the NudgeStreamer rather than by direct transfers. Keeps the "BatchNFTMinter"
+    // tracked key so the address pipeline and the UI keep resolving it.
+    BatchNFTMinterMultiToken public batchNFTMinter;
+
+    // Story 073: buffers bursty donations per (batchMinter, token) and streams them linearly.
+    // Six donors route through it: Uniboost x3, BalancerPoolerV2, the index-7 NudgeRatchet and
+    // StableYieldAccumulator.
+    NudgeStreamer public nudgeStreamer;
 
     // Stable Staking infrastructure (story 051)
     StableStaker public stableStaker;
@@ -307,6 +348,13 @@ contract DeployMocks is Script {
         mockSCX = new MockSCX();
         _trackDeployment("MockSCX", address(mockSCX), gasBefore - gasleft());
         console.log("MockSCX deployed at:", address(mockSCX));
+
+        // Story 073: third nudge-reward asset on the multi-token batch minter. 18 decimals,
+        // no burn surface, no transfer fee (the streamer assumes transfer(x) delivers exactly x).
+        gasBefore = gasleft();
+        mockKendu = new MockKendu();
+        _trackDeployment("MockKendu", address(mockKendu), gasBefore - gasleft());
+        console.log("MockKendu deployed at:", address(mockKendu));
 
         gasBefore = gasleft();
         mockFlax = new MockFlax();
@@ -704,34 +752,11 @@ contract DeployMocks is Script {
         nftStaker.setTargetAPY(0.3e18);
         console.log("NFTStaker.setTargetAPY -> 0.3e18 (30%)");
 
-        // 8. Deploy BatchNFTMinter (owner-administered nudge, deployer is initial owner)
-        gasBefore = gasleft();
-        batchNFTMinter = new BatchNFTMinter(deployer);
-        _trackDeployment("BatchNFTMinter", address(batchNFTMinter), gasBefore - gasleft());
-        console.log("BatchNFTMinter deployed at:", address(batchNFTMinter));
-
-        // 9. Wire nudge config on BatchNFTMinter (story 045.5)
-        //    nudgePaymentToken first, then nudgeSize (mirrors story 046 mainnet sequence).
-        //    The runtime guard (BatchNFTMinter.sol:122-126) requires
-        //    nudgePaymentToken != paymentToken at batchMint time. The mock V2 mint flow
-        //    uses non-USDC prime tokens (EYE/SCX/Flax/USDS), so the constraint holds.
-        batchNFTMinter.setNudgePaymentToken(address(rewardToken)); // USDC
-        console.log("BatchNFTMinter.setNudgePaymentToken -> USDC");
-
-        batchNFTMinter.setNudgeSize(MOCK_NUDGE_SIZE);
-        console.log("BatchNFTMinter.setNudgeSize ->", MOCK_NUDGE_SIZE);
-
-        // Pin the trusted minter + dispatcher index so batchMint is enabled.
-        // Without these, batchMint reverts BatchMint__MinterNotConfigured /
-        // BatchMint__DispatcherNotConfigured before pulling any funds. The
-        // BalancerPoolerV2 was registered at index 4 above; derive it rather
-        // than hard-coding so a registration-order change can't silently break.
-        uint256 batchDispatcherIndex = nftMinterV2.dispatcherToIndex(address(balancerPoolerV2));
-        require(batchDispatcherIndex != 0, "BalancerPoolerV2 not registered with NFTMinterV2");
-        batchNFTMinter.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
-        console.log("BatchNFTMinter.setTokenMinter -> NFTMinterV2");
-        batchNFTMinter.setDispatcherIndex(batchDispatcherIndex);
-        console.log("BatchNFTMinter.setDispatcherIndex ->", batchDispatcherIndex);
+        // 8/9. Story 073 — deploy the NudgeStreamer and the multi-token batch minter, whitelist
+        //      the three nudge-reward tokens, and register their streams. Extracted into a helper
+        //      because run() is at its stack-depth ceiling (see the gas-tracking note further
+        //      down); the mandated call ordering lives inside the helper.
+        _deployStreamerAndBatchMinter(deployer);
 
         // ---- Story 045.5 Phase 7: Finalise BalancerPoolerV2 batch-donation wiring ----
         // BatchNFTMinter is now deployed — point the donation recipient at it and
@@ -744,21 +769,33 @@ contract DeployMocks is Script {
         balancerPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
         console.log("BalancerPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
 
+        // Story 073: the index-4 donation branch is streamer-gated. Without this the donation
+        // reverts inside `_psmDonate` and `_dispatch`'s try/catch swallows it — the mint succeeds
+        // but zero USDC ever reaches the batch minter (the exact silent breakage this story fixes).
+        // MUST come after registerStream(batchNFTMinter, USDC) inside the helper above.
+        balancerPoolerV2.setNudgeStreamer(address(nudgeStreamer));
+        console.log("BalancerPoolerV2.setNudgeStreamer -> NudgeStreamer");
+
         // ---- Story 070: deferred Uniboost wiring (donation split + staker + Pauser) ----
         // batchNFTMinter now exists, so this is the phase where the uniboost dispatchers learn
         // their donation recipient. Recipient is `batchNFTMinter` (the BalancerPoolerV2 index-4
         // LSP batch minter) — NOT ratchetBatchNFTMinter — so 50% of each mint's USDC nudges
         // protocol-pooler (LSP) minting; the remaining 50% is retained for pool().
+        //
+        // Story 073: `_finalizeUniboost` additionally calls setNudgeStreamer, and the staker step
+        // is now the full V1 -> migrator -> V2 depletion-staker migration REHEARSAL. The chain ends
+        // on NFTStakerDepletionV2 under the existing UniboostStaker* keys; the V1 stakers and the
+        // migrators are transient rehearsal artifacts and are deliberately NOT tracked.
         _finalizeUniboost(uniboostEYE, uniboostHookEYE, address(batchNFTMinter), deployer);
-        uniboostStakerEYE = _deployUniboostStaker(uniboostEYE, uniboostHookEYE, deployer);
+        uniboostStakerEYE = _rehearseStakerMigration(uniboostEYE, uniboostHookEYE, deployer, "EYE");
         _trackDeployment("UniboostStakerEYE", address(uniboostStakerEYE), 0);
 
         _finalizeUniboost(uniboostSCX, uniboostHookSCX, address(batchNFTMinter), deployer);
-        uniboostStakerSCX = _deployUniboostStaker(uniboostSCX, uniboostHookSCX, deployer);
+        uniboostStakerSCX = _rehearseStakerMigration(uniboostSCX, uniboostHookSCX, deployer, "SCX");
         _trackDeployment("UniboostStakerSCX", address(uniboostStakerSCX), 0);
 
         _finalizeUniboost(uniboostFLX, uniboostHookFLX, address(batchNFTMinter), deployer);
-        uniboostStakerFLX = _deployUniboostStaker(uniboostFLX, uniboostHookFLX, deployer);
+        uniboostStakerFLX = _rehearseStakerMigration(uniboostFLX, uniboostHookFLX, deployer, "FLX");
         _trackDeployment("UniboostStakerFLX", address(uniboostStakerFLX), 0);
 
         // ---- Batch minters for the three Uniboost NFTs (EYE/SCX/FLX) ----
@@ -770,30 +807,34 @@ contract DeployMocks is Script {
         scxBatchNFTMinter = _deployNudgelessBatchMinter(address(uniboostSCX), "ScxBatchNFTMinter", deployer);
         flxBatchNFTMinter = _deployNudgelessBatchMinter(address(uniboostFLX), "FlxBatchNFTMinter", deployer);
 
-        // ---- Story 068/070: NudgeRatchetDelayRelease dispatcher + mint-debt hook ----
-        // Story 070 swapped the index-7 dispatcher from NudgeRatchet (forwards on dispatch) to
-        // NudgeRatchetDelayRelease (HOLDS USDC on dispatch; a whitelisted releaser later calls
-        // release(amount) to move held USDC to batchMinter). Same constructor signature
-        // (token_, batchMinter_, initialOwner), same 6-decimal USDC guard, same non-zero
-        // batchMinter sink, same index-7 registration slot/price/growth. The release sink stays
-        // `batchNFTMinter` (NOT ratchetBatchNFTMinter), mirroring the prior NudgeRatchet wiring.
+        // ---- Story 068/070/073: NudgeRatchet dispatcher + mint-debt hook ----
+        // Story 070 swapped the index-7 dispatcher from NudgeRatchet to NudgeRatchetDelayRelease
+        // (HOLDS USDC on dispatch; a whitelisted releaser later released it). Story 073 retires
+        // that stopgap: the streamer-aware NudgeRatchet forwards on dispatch again, but through
+        // the NudgeStreamer, which supplies the same anti-burst smoothing the DelayRelease hack
+        // approximated manually. Same constructor signature (token_, batchMinter_, initialOwner),
+        // same 6-decimal USDC guard, same non-zero batchMinter sink, same index-7 registration
+        // slot/price/growth. There is no releaser concept on NudgeRatchet, so setReleaser is gone.
         gasBefore = gasleft();
-        nudgeRatchet = new NudgeRatchetDelayRelease(
+        nudgeRatchet = new NudgeRatchet(
             address(rewardToken), // token_ — existing 6-decimal MockRewardToken (USDC)
-            address(batchNFTMinter), // batchMinter_ — existing nudge-reward sink (release target)
+            address(batchNFTMinter), // batchMinter_ — the multi-token nudge-reward sink
             deployer // initialOwner
         );
         _trackDeployment("NudgeRatchet", address(nudgeRatchet), gasBefore - gasleft());
-        console.log("NudgeRatchetDelayRelease deployed at:", address(nudgeRatchet));
+        console.log("NudgeRatchet deployed at:", address(nudgeRatchet));
 
         // 1. Point the dispatcher's minter at NFTMinterV2.
         nudgeRatchet.setMinter(address(nftMinterV2));
-        console.log("NudgeRatchetDelayRelease.setMinter -> NFTMinterV2");
+        console.log("NudgeRatchet.setMinter -> NFTMinterV2");
 
-        // 1b. Whitelist the deployer as a releaser so release(amount) (held USDC -> batchMinter)
-        //     is callable in local dev. release() is onlyReleaser; the deployer is the local admin.
-        nudgeRatchet.setReleaser(deployer, true);
-        console.log("NudgeRatchetDelayRelease.setReleaser(deployer, true)");
+        // 1b. Story 073: route the USDC sweep through the NudgeStreamer. `_dispatch` sweeps the
+        //     full USDC balance and `collectNudge` reverts unless the streamer is set, so without
+        //     this EVERY index-7 dispatch reverts "NudgeRatchet: nudgeStreamer unset". Ordering is
+        //     mandated (NudgeRatchet.sol:39-43): whitelist -> registerStream -> setNudgeStreamer;
+        //     the first two already ran in _deployStreamerAndBatchMinter above.
+        nudgeRatchet.setNudgeStreamer(address(nudgeStreamer));
+        console.log("NudgeRatchet.setNudgeStreamer -> NudgeStreamer");
 
         // 2. Deploy the matching mint-debt hook. NudgeRatchet._dispatch reverts unless the
         //    installed hook is a NudgeRatchetMintDebtHook (hookTypeId() guard), so this hook
@@ -834,6 +875,10 @@ contract DeployMocks is Script {
         //    change can't silently mis-wire the staker.
         uint256 ratchetIndex = nftMinterV2.dispatcherToIndex(address(nudgeRatchet));
         require(ratchetIndex != 0, "NudgeRatchet not registered with NFTMinterV2");
+        // Story 073: MintPageView hard-codes index 7 for the ratchet row. The index-6 disabled
+        // placeholder above exists solely so this lands on 7 — assert it, loudly, rather than
+        // letting a registration-order change silently shift the UI's pinned slot.
+        require(ratchetIndex == 7, "NudgeRatchet must occupy dispatcher index 7");
         // priceScale = 1e12: NudgeRatchet's prime token is 6-decimal USDC; phUSD is 18-decimal.
         // Without scaling, latestPrice floor-divides the emission rate to zero.
         uint256 ratchetPriceScale = 1e12;
@@ -1006,7 +1051,13 @@ contract DeployMocks is Script {
         // ====== PHASE 7.5: StableYieldAccumulator Configuration ======
         console.log("\n=== Phase 7.5: StableYieldAccumulator Configuration ===");
 
-        // Set reward token to USDC (rewardToken is MockRewardToken which is USDC)
+        // Set reward token to USDC (rewardToken is MockRewardToken which is USDC).
+        //
+        // STORY 073 — ORDERING IS LOAD-BEARING. yield-accumulator:027 added a conditional guard to
+        // setRewardToken: once the nudge path is live (nudgeSplit != 0 && nudgeStreamer != 0 &&
+        // nudge != 0) it requires the streamer to already hold a registered stream for the NEW
+        // reward token. Calling setRewardToken FIRST — before setNudgeAddress / setNudgeSplit /
+        // setNudgeStreamer below — keeps the guard dormant at deploy time. Do not reorder.
         stableYieldAccumulator.setRewardToken(address(rewardToken));
         console.log("Set reward token to USDC:", address(rewardToken));
 
@@ -1060,6 +1111,14 @@ contract DeployMocks is Script {
 
         stableYieldAccumulator.setNudgeSplit(MOCK_NUDGE_SPLIT);
         console.log("SYA.setNudgeSplit ->", MOCK_NUDGE_SPLIT);
+
+        // Story 073: sixth and last donor onto the streamer. claim() now PULLS the nudge slice via
+        // collectNudge(nudge, rewardToken, nudgeAmount) instead of pushing it straight at the batch
+        // minter. Must run after registerStream(batchNFTMinter, USDC) (done in Phase 3.7) and after
+        // setRewardToken above, or the first claim() reverts.
+        stableYieldAccumulator.setNudgeStreamer(address(nudgeStreamer));
+        console.log("SYA.setNudgeStreamer ->", address(nudgeStreamer));
+        require(stableYieldAccumulator.nudgeStreamer() == address(nudgeStreamer), "SYA nudgeStreamer not wired");
 
         // ====== PHASE 8: Pauser Registration ======
         console.log("\n=== Phase 8: Pauser Registration ===");
@@ -1239,6 +1298,7 @@ contract DeployMocks is Script {
         _markConfigured("MockDola", 0);
         _markConfigured("MockEYE", 0);
         _markConfigured("MockSCX", 0);
+        _markConfigured("MockKendu", 0);
         _markConfigured("MockFlax", 0);
         _markConfigured("MockWBTC", 0);
         _markConfigured("MockAutoDOLA", 0);
@@ -1280,6 +1340,7 @@ contract DeployMocks is Script {
         _markConfigured("NFTStaker", 0);
         _markConfigured("RatchetNFTStaker", 0);
         _markConfigured("BatchNFTMinter", 0);
+        _markConfigured("NudgeStreamer", 0);
         _markConfigured("RatchetBatchNFTMinter", 0);
         _markConfigured("StableStaker", 0);
         _markConfigured("DepositView", 0);
@@ -1453,9 +1514,276 @@ contract DeployMocks is Script {
 
     /// @dev Deferred (Phase 3.7) per-dispatcher donation wiring: 50% of mint USDC -> batchNFTMinter
     ///      (the BalancerPoolerV2 index-4 LSP batch minter), remaining 50% retained for pool().
+    /// @dev Story 073: the donation branch is now streamer-gated. `Uniboost._dispatch` reverts
+    ///      `"Uniboost: nudgeStreamer unset"` whenever `donationAmount > 0` and no streamer is
+    ///      wired — i.e. every mint on indices 1/2/3. `setNudgeStreamer` therefore is NOT optional
+    ///      polish; it is what keeps these three dispatchers mintable at all. Mandated ordering
+    ///      (Uniboost.sol:38-41) is whitelist -> registerStream -> setNudgeStreamer, and the first
+    ///      two already ran in `_deployStreamerAndBatchMinter`.
     function _finalizeUniboost(Uniboost dispatcher, UniboostMintDebtHook, address batchMinter, address) internal {
         dispatcher.setRecipient(batchMinter);
         dispatcher.setDonationSplit(50);
+        dispatcher.setNudgeStreamer(address(nudgeStreamer));
+    }
+
+    // =====================================================================
+    // Story 073: NudgeStreamer + multi-token batch minter
+    // =====================================================================
+
+    /// @dev Deploys the `NudgeStreamer` and replaces the shared `BatchNFTMinter` donor sink with a
+    ///      `BatchNFTMinterMultiToken` carrying three nudge-reward tokens (USDC / phUSD / Kendu).
+    ///      Extracted from `run()` because `run()` sits at its stack-depth ceiling.
+    ///
+    ///      THE CALL ORDER BELOW IS MANDATORY, not stylistic:
+    ///        1. `setTokenMinter` + `setDispatcherIndex` — `setNudgeTokenWhitelist` runs
+    ///           `_resolvePaymentPath()` on every add and reverts
+    ///           `BatchMint__MinterNotConfigured` / `BatchMint__DispatcherNotConfigured`
+    ///           without them.
+    ///        2. whitelist the reward tokens — `NudgeStreamer.registerStream` calls
+    ///           `isNudgeToken(token)` and reverts `NudgeStreamer__NotWhitelisted` otherwise.
+    ///           (That same call is the structural guard that only a MultiToken batch minter can
+    ///           ever be registered with the streamer — a legacy `BatchNFTMinter` has no such view.)
+    ///        3. `registerStream` per token.
+    ///        4. `setNudgeStreamer` on the batch minter and, later, on all six donors.
+    ///
+    ///      Local divergence from mainnet, deliberate (story 073 user decision): mainnet registers
+    ///      a stream for USDC ONLY, leaving phUSD and Kendu whitelisted-but-unregistered with
+    ///      permanently zero rewards. All three are registered here so the UI can render three
+    ///      non-zero reward slots. Do not read local behaviour as a prediction of mainnet's.
+    function _deployStreamerAndBatchMinter(address deployer) internal {
+        uint256 gasBefore = gasleft();
+        nudgeStreamer = new NudgeStreamer(deployer);
+        _trackDeployment("NudgeStreamer", address(nudgeStreamer), gasBefore - gasleft());
+        console.log("NudgeStreamer deployed at:", address(nudgeStreamer));
+
+        gasBefore = gasleft();
+        batchNFTMinter = new BatchNFTMinterMultiToken(deployer);
+        // Reuse the EXISTING "BatchNFTMinter" tracked key: the address pipeline, mainnet-addresses
+        // and the UI all resolve the shared donor sink under that name, and it is still the shared
+        // donor sink — only its type changed.
+        _trackDeployment("BatchNFTMinter", address(batchNFTMinter), gasBefore - gasleft());
+        console.log("BatchNFTMinterMultiToken deployed at:", address(batchNFTMinter));
+
+        // Derive the pinned dispatcher index rather than hard-coding it, so a registration-order
+        // change can't silently mis-wire the batch minter.
+        uint256 batchDispatcherIndex = nftMinterV2.dispatcherToIndex(address(balancerPoolerV2));
+        require(batchDispatcherIndex != 0, "BalancerPoolerV2 not registered with NFTMinterV2");
+
+        // THE SINGLE HIGHEST-RISK LINE IN THIS STORY. `setNudgeTokenWhitelist(token, true)` reverts
+        // `BatchMint__RewardTokenIsPaymentToken(token)` when the added token equals the pinned
+        // dispatcher's `primeToken()`. Mainnet index 4 is USDS-primed, so USDC is addable there.
+        // Locally the pooler derives its prime token from `IERC4626(sUSDS).asset()`, which is USDS
+        // — assert it explicitly so a mock rewire fails loudly HERE rather than as a confusing
+        // revert three calls later.
+        require(
+            balancerPoolerV2.primeToken() == address(usds),
+            "index-4 prime token must be USDS (else USDC is unwhitelistable)"
+        );
+
+        batchNFTMinter.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
+        console.log("BatchNFTMinter.setTokenMinter -> NFTMinterV2");
+        batchNFTMinter.setDispatcherIndex(batchDispatcherIndex);
+        console.log("BatchNFTMinter.setDispatcherIndex ->", batchDispatcherIndex);
+
+        // `setNudgePaymentToken` does not exist on the multi-token contract — the single-token
+        // nudge field is replaced by this ordered whitelist. The ORDER here is the order
+        // `batchMint`'s `minRewards` array must use (see `getNudgeTokens()`); unwhitelisting uses
+        // swap-and-pop, so callers must re-fetch rather than cache it.
+        batchNFTMinter.setNudgeTokenWhitelist(address(rewardToken), true); // USDC (6dp)
+        batchNFTMinter.setNudgeTokenWhitelist(address(phUSD), true); // phUSD (18dp)
+        batchNFTMinter.setNudgeTokenWhitelist(address(mockKendu), true); // Kendu (18dp)
+        require(batchNFTMinter.getNudgeTokens().length == 3, "expected 3 whitelisted nudge tokens");
+        console.log("BatchNFTMinter nudge tokens whitelisted: USDC, phUSD, Kendu");
+
+        batchNFTMinter.setNudgeSize(MOCK_NUDGE_SIZE);
+        console.log("BatchNFTMinter.setNudgeSize ->", MOCK_NUDGE_SIZE);
+
+        // Story 072 flags the mainnet batch minter as un-pausable (a gap it inherits); close it
+        // here. setPauser BEFORE register — register() validates pauser() == address(this).
+        batchNFTMinter.setPauser(address(pauser));
+        pauser.register(address(batchNFTMinter));
+        console.log("BatchNFTMinter registered with Pauser");
+
+        // Streams must exist before any donor is pointed at the streamer, or the first donation
+        // reverts. `LOCAL_STREAM_DURATION` is 1 hour by deliberate local divergence.
+        nudgeStreamer.registerStream(address(batchNFTMinter), address(rewardToken), LOCAL_STREAM_DURATION);
+        nudgeStreamer.registerStream(address(batchNFTMinter), address(phUSD), LOCAL_STREAM_DURATION);
+        nudgeStreamer.registerStream(address(batchNFTMinter), address(mockKendu), LOCAL_STREAM_DURATION);
+        console.log("NudgeStreamer streams registered for USDC / phUSD / Kendu, duration:", LOCAL_STREAM_DURATION);
+
+        // Last: the batch minter learns to flush its own accrued stream inside batchMint.
+        batchNFTMinter.setNudgeStreamer(address(nudgeStreamer));
+        console.log("BatchNFTMinter.setNudgeStreamer -> NudgeStreamer");
+    }
+
+    // =====================================================================
+    // Story 073: V1 -> migrator -> V2 depletion-staker migration rehearsal
+    // =====================================================================
+
+    /// @dev Deploys the V1 Uniboost staker exactly as before, seeds it with a real multi-user
+    ///      staked position, then runs the COMPLETE `NFTStakerMigrator` sequence so the local chain
+    ///      ends on `NFTStakerDepletionV2` with migrated balances. This exists because story 072's
+    ///      mainnet Phase 6 is its riskiest, least-exercised phase and this is the only place it
+    ///      can be dry-run for free.
+    /// @return v2 The `NFTStakerDepletionV2` the position was migrated into. This is what gets
+    ///         tracked under the existing `UniboostStaker*` key; the V1 staker and the migrator are
+    ///         transient rehearsal artifacts and are never tracked (mirroring story 072's
+    ///         "no interface keys for migrators" rule).
+    function _rehearseStakerMigration(
+        Uniboost dispatcher,
+        UniboostMintDebtHook hook,
+        address deployer,
+        string memory label
+    ) internal returns (NFTStakerDepletionV2 v2) {
+        uint256 idx = nftMinterV2.dispatcherToIndex(address(dispatcher));
+        require(idx != 0, "Uniboost dispatcher not registered");
+
+        // ---- 1. V1, exactly as deployed today ----
+        NFTStakerDepletion v1 = _deployUniboostStaker(dispatcher, hook, deployer);
+
+        // ---- 2. Real reward budget + a real multi-user staked position ----
+        uint256 preMigrationTotal = _seedV1Position(v1, idx, deployer);
+        console.log(string.concat("[", label, "] V1 rehearsal staked total:"), preMigrationTotal);
+
+        // ---- 3. V2, IDENTICAL constructor args ----
+        v2 = new NFTStakerDepletionV2(
+            IERC1155(address(nftMinterV2)), idx, IERC20(address(phUSD)), deployer, INFTSupply(address(nftMinterV2)), idx
+        );
+        v2.setDepletionWindow(12);
+        v2.setPauser(address(pauser));
+        pauser.register(address(v2));
+
+        // ---- 4-9. The migration itself ----
+        _runStakerMigration(v1, v2, hook, idx, deployer);
+
+        // ---- 10. Post-conditions ----
+        require(v1.totalStaked() == 0, "rehearsal: V1 still holds stake");
+        require(v2.totalStaked() == preMigrationTotal, "rehearsal: V2 total != pre-migration total");
+        require(phUSD.balanceOf(address(v2)) > 0, "rehearsal: V2 has no reward budget");
+        console.log(string.concat("[", label, "] migration rehearsal OK -> V2 at"), address(v2));
+    }
+
+    /// @dev Mints three NFTs of `idx` to the deployer and credits them to three DISTINCT mock
+    ///      actors, so `migrator.migrate(users)` operates on a genuine multi-user list.
+    ///
+    ///      `depositFor` is `onlyMigrator`, so the deployer is TEMPORARILY installed as the
+    ///      migrator for the seeding and replaced by the real `NFTStakerMigrator` in
+    ///      `_runStakerMigration`. This is the local stand-in for three separately-signed user
+    ///      `stake()` calls, which a single-key broadcast script cannot produce; the resulting
+    ///      on-chain state (three non-zero `userInfo` entries) is identical.
+    /// @return preMigrationTotal `v1.totalStaked()` immediately after seeding.
+    function _seedV1Position(NFTStakerDepletion v1, uint256 idx, address deployer)
+        internal
+        returns (uint256 preMigrationTotal)
+    {
+        // Reward budget. The deployer is authorised as a phUSD minter for local dev so the
+        // rehearsal does not have to compete with the seeded protocol balances.
+        phUSD.setMinter(deployer, true);
+        phUSD.mint(deployer, REHEARSAL_STAKER_BUDGET);
+        phUSD.approve(address(v1), REHEARSAL_STAKER_BUDGET);
+        v1.topUp(REHEARSAL_STAKER_BUDGET);
+
+        // Mint three NFTs of this dispatcher's id. Each mint routes prime USDC through the
+        // Uniboost donation branch, so this doubles as a live smoke test that setNudgeStreamer
+        // landed (an unwired streamer reverts the mint outright).
+        uint256 budget = nftMinterV2.getPrice(idx) * 6; // generous: price grows 0.1% per mint
+        rewardToken.mint(deployer, budget);
+        rewardToken.approve(address(nftMinterV2), budget);
+        nftMinterV2.mint(idx, deployer);
+        nftMinterV2.mint(idx, deployer);
+        nftMinterV2.mint(idx, deployer);
+
+        address[3] memory actors = [REHEARSAL_ACTOR_1, REHEARSAL_ACTOR_2, REHEARSAL_ACTOR_3];
+        nftMinterV2.setApprovalForAll(address(v1), true);
+        v1.setMigrator(deployer);
+        for (uint256 i = 0; i < 3; i++) {
+            v1.depositFor(actors[i], 1);
+        }
+        nftMinterV2.setApprovalForAll(address(v1), false);
+
+        preMigrationTotal = v1.totalStaked();
+        require(preMigrationTotal == 3, "rehearsal: expected 3 staked units on V1");
+    }
+
+    /// @dev Steps 4-9 of the rehearsal. Split out of `_rehearseStakerMigration` purely to stay
+    ///      under the stack-depth ceiling.
+    ///
+    ///      TWO DEVIATIONS FROM THE STORY'S LITERAL STEP ORDER, both forced by the contracts and
+    ///      both recorded in the story's Autonomous Decisions section:
+    ///
+    ///      (a) `v1.pause()` is `onlyPauser`, and V1's pauser is the GLOBAL `Pauser`, whose
+    ///          `pause()` burns EYE and pauses every registered contract. A global pause is not an
+    ///          acceptable end state for a dev chain, so V1's pauser is repointed to the deployer
+    ///          and V1 is unregistered from the global Pauser first. The unregister is mandatory,
+    ///          not tidiness: leaving a contract registered whose `pauser` is no longer the Pauser
+    ///          would make a later global `Pauser.unpause()` revert for everyone.
+    ///
+    ///      (b) The budget move happens AFTER `initiateMigration`, and moves
+    ///          `balance - committedDebt`, not the full balance. `rescueERC20` requires the
+    ///          post-transfer balance still covers `committedDebt`, and `_exitPosition` ->
+    ///          `_safePayTo` requires the balance to cover each user's frozen pending. Rescuing the
+    ///          FULL balance (the story's literal step 7) therefore reverts as soon as any accrual
+    ///          exists — which it always does, since `--slow` puts seconds between the seeding and
+    ///          the migration. Settling first (`initiateMigration` freezes emissions) makes
+    ///          `committedDebt` final, so the split is exact: V1 keeps precisely what it owes its
+    ///          departing users, V2 receives the rest. THIS IS THE FINDING THE REHEARSAL EXISTS TO
+    ///          PRODUCE — story 072's mainnet Phase 6 must apply the same correction.
+    function _runStakerMigration(
+        NFTStakerDepletion v1,
+        NFTStakerDepletionV2 v2,
+        UniboostMintDebtHook hook,
+        uint256 idx,
+        address deployer
+    ) internal {
+        NFTStakerMigrator migrator = new NFTStakerMigrator(
+            INFTStakerMigratable(address(v1)),
+            INFTStakerMigratable(address(v2)),
+            IERC1155(address(nftMinterV2)),
+            idx,
+            IERC20(address(phUSD)),
+            deployer
+        );
+
+        // BOTH sides, or the pair is half-met: V1 needs it for initiateMigration/batchMigrate,
+        // V2 needs it for depositFor.
+        v1.setMigrator(address(migrator));
+        v2.setMigrator(address(migrator));
+
+        // MANDATORY. V1's `stake` is ungated during `Migrating` (audit-20 M-05), so a
+        // permissionless stake mid-migration wedges `finalizeAndReset`'s
+        // `require(totalStaked == 0)`. V2 fixed this; V1 relies on the pause-before-migrate
+        // operational remedy. See deviation (a) above for why the pauser is repointed first.
+        v1.setPauser(deployer);
+        pauser.unregister(address(v1));
+        v1.pause();
+
+        // Settle + freeze BEFORE moving the budget — see deviation (b) above.
+        migrator.initiateMigration();
+
+        // The moved amount is a CONSTANT FRACTION of the seeded budget, deliberately NOT
+        // `balanceOf(v1) - committedDebt()`. A forge script builds its calldata during the
+        // simulation pass, where every rehearsal tx shares one block timestamp and
+        // `committedDebt` is therefore 0; the broadcast then replays that baked-in number
+        // against a `--slow` chain where seconds have elapsed and `committedDebt > 0`, and
+        // `rescueERC20` reverts "NFTStaker: rescue breaches committedDebt". Any on-chain-state-
+        // dependent amount has the same defect. 90% is safe by a wide margin: over a 12-month
+        // depletion window a few seconds of accrual is ~1e-7 of the budget, so the 10% left
+        // behind covers every departing user's frozen pending many times over.
+        uint256 movable = (REHEARSAL_STAKER_BUDGET * 90) / 100;
+        v1.rescueERC20(IERC20(address(phUSD)), deployer, movable);
+        phUSD.approve(address(v2), movable);
+        v2.topUp(movable);
+
+        address[] memory users = new address[](3);
+        users[0] = REHEARSAL_ACTOR_1;
+        users[1] = REHEARSAL_ACTOR_2;
+        users[2] = REHEARSAL_ACTOR_3;
+        migrator.migrate(users);
+
+        // Repoint the mint-debt hook at V2 and complete the two-sided wiring, or every subsequent
+        // dispatch would keep funding the abandoned V1.
+        hook.setRecipient(address(v2));
+        v2.setDispatcherHook(IUniboostMintDebtHook(address(hook)));
     }
 
     /// @dev Deploys the uniboost staker (NFTStakerDepletion), wires it to the dispatcher hook, sets
@@ -1470,12 +1798,7 @@ contract DeployMocks is Script {
         uint256 idx = nftMinterV2.dispatcherToIndex(address(dispatcher));
         require(idx != 0, "Uniboost dispatcher not registered");
         staker = new NFTStakerDepletion(
-            IERC1155(address(nftMinterV2)),
-            idx,
-            IERC20(address(phUSD)),
-            deployer,
-            INFTSupply(address(nftMinterV2)),
-            idx
+            IERC1155(address(nftMinterV2)), idx, IERC20(address(phUSD)), deployer, INFTSupply(address(nftMinterV2)), idx
         );
         staker.setDispatcherHook(IUniboostMintDebtHook(address(hook)));
         // pull() is onlyOwnerOrRecipient; the staker must be the hook's recipient to sweep mint debt.
