@@ -110,10 +110,18 @@ contract DeployMocks is Script {
     uint256 constant MOCK_BATCH_DONATION_SIZE = 30;
 
     // ---- Story 073: NudgeStreamer-era constants ----
-    // Local stream window. DELIBERATELY 1 hour, NOT mainnet's 7 days (story 073 user decision):
-    // a developer can watch a stream accrue and flush inside one session without vm.warp.
-    // Do NOT "fix" this to match mainnet.
-    uint256 constant LOCAL_STREAM_DURATION = 1 hours;
+    // Local stream window. DELIBERATELY 6 hours, NOT mainnet's 7 days (story 073 user decision):
+    // a developer can watch a stream accrue and flush inside one session without vm.warp, while
+    // still leaving a seeded buffer non-empty across a working session rather than fully depleting
+    // an hour in. Do NOT "fix" this to match mainnet.
+    uint256 constant LOCAL_STREAM_DURATION = 6 hours;
+    // Seed donations pushed through `collectNudge` at deploy time so the phUSD and Kendu reward
+    // slots read non-zero on a fresh local chain. Mainnet has no donor for either token, so both
+    // slots are permanently zero there — this is part of the deliberate local divergence, not a
+    // prediction of mainnet behaviour. Sized so a 6-hour stream emits a visible amount per block
+    // without dwarfing the USDC slot the real donors fund.
+    uint256 constant LOCAL_PHUSD_NUDGE_SEED = 5_000 * 10 ** 18; // 5,000 phUSD (18dp)
+    uint256 constant LOCAL_KENDU_NUDGE_SEED = 50_000 * 10 ** 18; // 50,000 Kendu (18dp)
     // phUSD budget seeded onto each rehearsal V1 depletion staker before the migration dry-run.
     // Deliberate, non-default: large enough that per-second emission is non-zero over a 12-month
     // window (budget / (12 * 30 days) > 0) so the migration exercises a real, non-trivial accrual.
@@ -1605,15 +1613,57 @@ contract DeployMocks is Script {
         console.log("BatchNFTMinter registered with Pauser");
 
         // Streams must exist before any donor is pointed at the streamer, or the first donation
-        // reverts. `LOCAL_STREAM_DURATION` is 1 hour by deliberate local divergence.
+        // reverts. `LOCAL_STREAM_DURATION` is 6 hours by deliberate local divergence.
         nudgeStreamer.registerStream(address(batchNFTMinter), address(rewardToken), LOCAL_STREAM_DURATION);
         nudgeStreamer.registerStream(address(batchNFTMinter), address(phUSD), LOCAL_STREAM_DURATION);
         nudgeStreamer.registerStream(address(batchNFTMinter), address(mockKendu), LOCAL_STREAM_DURATION);
         console.log("NudgeStreamer streams registered for USDC / phUSD / Kendu, duration:", LOCAL_STREAM_DURATION);
 
+        // Seed the two donorless streams. USDC is funded by real donors (Uniboost, the ratchet, the
+        // pooler, SYA); phUSD and Kendu have none, so without this the UI renders two permanently
+        // empty reward slots and the three-stream divergence buys nothing. `collectNudge` requires
+        // a registered stream, hence its position after the registerStream block.
+        _seedNudgeStream(deployer, address(phUSD), LOCAL_PHUSD_NUDGE_SEED);
+        _seedNudgeStream(deployer, address(mockKendu), LOCAL_KENDU_NUDGE_SEED);
+
         // Last: the batch minter learns to flush its own accrued stream inside batchMint.
         batchNFTMinter.setNudgeStreamer(address(nudgeStreamer));
         console.log("BatchNFTMinter.setNudgeStreamer -> NudgeStreamer");
+    }
+
+    /// @dev Acts as a DONOR of `token` to `batchNFTMinter`'s stream: mints `amount` to the
+    ///      deployer, approves the streamer and calls `collectNudge`. This is the local stand-in
+    ///      for the organic donors USDC has and phUSD/Kendu do not.
+    ///
+    ///      Doubles as the fee-on-transfer probe. `collectNudge` does
+    ///      `safeTransferFrom(donor, streamer, amount)` and then credits `buffer += amount`
+    ///      UNCONDITIONALLY — it never measures what actually landed. A taxed token would
+    ///      therefore over-credit the buffer and the stream would run dry mid-window, so the
+    ///      balance-delta assertion below is load-bearing, not decorative. The delta is exact
+    ///      rather than approximate because the stream was registered moments ago with an empty
+    ///      buffer, so `collectNudge`'s pre-settle transfers nothing out.
+    function _seedNudgeStream(address deployer, address token, uint256 amount) internal {
+        if (token == address(phUSD)) {
+            // Local dev only: the deployer needs mint rights to act as a donor of its own.
+            phUSD.setMinter(deployer, true);
+            phUSD.mint(deployer, amount);
+        } else {
+            MockKendu(token).mint(deployer, amount);
+        }
+
+        uint256 streamerBefore = IERC20(token).balanceOf(address(nudgeStreamer));
+        (, uint256 bufferBefore,,) = nudgeStreamer.streams(address(batchNFTMinter), token);
+
+        IERC20(token).approve(address(nudgeStreamer), amount);
+        nudgeStreamer.collectNudge(address(batchNFTMinter), token, amount);
+
+        uint256 received = IERC20(token).balanceOf(address(nudgeStreamer)) - streamerBefore;
+        require(received == amount, "nudge seed token is fee-on-transfer: streamer received < sent");
+
+        (, uint256 bufferAfter,,) = nudgeStreamer.streams(address(batchNFTMinter), token);
+        require(bufferAfter - bufferBefore == amount, "nudge seed did not credit the stream buffer");
+
+        console.log("Seeded nudge stream:", token, amount);
     }
 
     // =====================================================================
@@ -1718,16 +1768,25 @@ contract DeployMocks is Script {
     ///          not tidiness: leaving a contract registered whose `pauser` is no longer the Pauser
     ///          would make a later global `Pauser.unpause()` revert for everyone.
     ///
-    ///      (b) The budget move happens AFTER `initiateMigration`, and moves
-    ///          `balance - committedDebt`, not the full balance. `rescueERC20` requires the
-    ///          post-transfer balance still covers `committedDebt`, and `_exitPosition` ->
-    ///          `_safePayTo` requires the balance to cover each user's frozen pending. Rescuing the
-    ///          FULL balance (the story's literal step 7) therefore reverts as soon as any accrual
-    ///          exists — which it always does, since `--slow` puts seconds between the seeding and
-    ///          the migration. Settling first (`initiateMigration` freezes emissions) makes
-    ///          `committedDebt` final, so the split is exact: V1 keeps precisely what it owes its
-    ///          departing users, V2 receives the rest. THIS IS THE FINDING THE REHEARSAL EXISTS TO
-    ///          PRODUCE — story 072's mainnet Phase 6 must apply the same correction.
+    ///      (b) The budget move happens AFTER `initiateMigration`, and moves strictly less than the
+    ///          full balance. `rescueERC20` requires the post-transfer balance still covers
+    ///          `committedDebt`, and `_exitPosition` -> `_safePayTo` requires the balance to cover
+    ///          each user's frozen pending. Rescuing the FULL balance (the story's literal step 7)
+    ///          therefore reverts as soon as any accrual exists — which it always does, since
+    ///          `--slow` puts seconds between the seeding and the migration.
+    ///
+    ///          ORDERING IS THE FINDING THE REHEARSAL EXISTS TO PRODUCE: settle and freeze
+    ///          (`initiateMigration`) BEFORE moving the budget, so `committedDebt` is final rather
+    ///          than still growing under the transfer. Story 072's mainnet Phase 6 must apply that
+    ///          correction.
+    ///
+    ///          SIZING IS NOT THE FINDING, AND IS NOT SOLVED HERE. This rehearsal moves a flat 90%
+    ///          of the seeded budget — a script-local expedient forced by forge's simulate-then-
+    ///          replay model, explained at the `movable` line below. It is NOT `balance -
+    ///          committedDebt`, it is not exact, and it leaves an arbitrary 10% stranded in V1.
+    ///          Story 072 inherits the question of how much a mainnet migration should move as
+    ///          OPEN. Do not read this 90% as a validated answer; the rehearsal proves nothing
+    ///          about sizing.
     function _runStakerMigration(
         NFTStakerDepletion v1,
         NFTStakerDepletionV2 v2,

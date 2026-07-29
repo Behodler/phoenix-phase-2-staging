@@ -49,7 +49,7 @@ contract TestNudgePayout is Script {
     // Mirror DeployMocks constants — keep in sync if the dev devnet tunes them.
     uint256 constant MOCK_NUDGE_SPLIT = 30;
     uint256 constant MOCK_NUDGE_SIZE = 25;
-    uint256 constant LOCAL_STREAM_DURATION = 1 hours;
+    uint256 constant LOCAL_STREAM_DURATION = 6 hours;
 
     // Story 070 replaced BurnerEYEV2 with UniboostEYE at index 1; story 073 keeps the slot.
     // The dispatcher's prime token is USDC (6dp), NOT EYE — payment is derived from the
