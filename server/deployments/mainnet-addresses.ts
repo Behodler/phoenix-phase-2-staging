@@ -14,6 +14,8 @@
 // Updated 2026-06-16: saga 2 migration (2.1) — YieldStrategyDola/USDC + PhusdStableMinter (V2) patched
 // Updated 2026-06-20: NudgeRatchet infrastructure deployed to mainnet (story 069); ratchet addresses + MintPageView patched from broadcast
 // Updated 2026-07-08: Uniboost dispatchers cut over at indices 1/2/3 + index-7 ratchet swapped to NudgeRatchetDelayRelease (story 071, RESUMED); addresses patched from progress file
+// Updated 2026-07-29: zero-address placeholders added for Kendu + NudgeStreamer so the hand-
+// maintained key-set still matches the regenerated ContractAddresses interface (story 073)
 import { ContractAddresses } from './addresses';
 
 
@@ -57,6 +59,9 @@ export const mainnetAddresses: ContractAddresses = {
   // External tokens
   USDS: "0xdC035D45d973E3EC169d2276DDab16f1e407384F",
   SCX: "0x1B8568FbB47708E9E9D31Ff303254f748805bF21",
+  // Story 073 (2026-07-29): PLACEHOLDER. MockKendu exists only on the local anvil chain (its
+  // extractor-derived key is `Kendu`). Story 072 owns the mainnet Kendu address, if any.
+  Kendu: "0x0000000000000000000000000000000000000000",
   Flax: "0x0cf758D4303295C43CD95e1232f0101ADb3DA9E8",
   WBTC: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
   EYE: "0x155ff1A85F440EE0A382eA949f24CE4E0b751c65",
@@ -121,6 +126,9 @@ export const mainnetAddresses: ContractAddresses = {
   BalancerPoolerMintDebtHook: "0x4a26ad83306a2f17155799fdd9449f77eb3f8bd7",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
+  // Story 073 (2026-07-29): PLACEHOLDER. The NudgeStreamer is deployed on the local anvil chain
+  // only; story 072 owns the mainnet deploy and will replace this with the broadcast address.
+  NudgeStreamer: "0x0000000000000000000000000000000000000000",
   BatchNFTMinter: "0x86866e01a115C17892Ed04c548F2e8638851029d",
   // Stable Staking — deployed 2026-06-10 by ResumeStableStakerMigration (story 055).
   // Pools: DOLA 5 / USDC 7 / USDe 10 phUSD per day, 10% set-aside buffer.

@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-07-06T21:50:32.397Z
+// Generated interface from local.json on 2026-07-29T01:03:40.335Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -12,6 +12,7 @@ export interface ContractAddresses {
   Dola: string;
   EYE: string;
   SCX: string;
+  Kendu: string;
   Flax: string;
   WBTC: string;
   Pauser: string;
@@ -42,6 +43,7 @@ export interface ContractAddresses {
   SkyPSM: string;
   BalancerPoolerMintDebtHook: string;
   NFTStaker: string;
+  NudgeStreamer: string;
   BatchNFTMinter: string;
   UniboostStakerEYE: string;
   UniboostStakerSCX: string;
