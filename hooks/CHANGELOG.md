@@ -5,6 +5,18 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-31
+
+Catch-up release: `generated.ts` was regenerated in story-073 without a version bump, so 0.10.1 on the registry was missing everything below.
+
+### Added
+- BatchNFTMinterMultiToken hooks — multi-token batch mint helper
+- NudgeStreamer & NudgeRatchet hooks — story-073 nudge stream cutover
+- NFTStakerDepletionV2 & NFTStakerMigrator hooks
+- MockKendu hooks (local/test token)
+- BalancerPoolerV2, Uniboost: `nudgeStreamer` / `setNudgeStreamer` + `NudgeStreamerUpdated` event
+- StableYieldAccumulator: `nudgeStreamer` / `setNudgeStreamer`, `batchMinter`, reward-token setter, plus `NudgeStreamNotRegistered` / `NudgeStreamerNotConfigured` errors and `NudgeStreamerUpdated` / `RewardTokenUpdated` events
+
 ## [0.10.0] - 2026-06-27
 
 ### Added
