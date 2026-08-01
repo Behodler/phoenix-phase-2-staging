@@ -12,6 +12,13 @@ fs_permissions = [
     # Story 070: canonical Uniswap V2 + WETH9 creation-bytecode artifacts read via
     # vm.getCode/vm.deployCode during the local (anvil 31337) mock deploy.
     { access = "read", path = "./script/uniswap-artifacts" },
+    # Story 075: READ-ONLY. test/VerifyPromotionReadyGuards.t.sol asserts source-level
+    # properties of script/VerifyPromotionReady.s.sol that no behavioural model can reach —
+    # chiefly that it contains no `balanceOf(OLD_POOLER)` live-read fallback for the BPT
+    # cutover baseline. That fallback is the exact regression audit run-22 warns re-classifies
+    # finding L-02 from Low to Medium, and a green verifier run proves nothing without it
+    # pinned. Read access only; nothing writes under ./script.
+    { access = "read", path = "./script" },
 ]
 
 # Story 070: these legacy scripts are hard-wired to the V1 yield-claim-nft contracts

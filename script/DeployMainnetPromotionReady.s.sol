@@ -331,6 +331,27 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     uint256 public bptAtCutoverPersisted;
     bool public bptBaselineFromProgressFile;
 
+    /// @dev phUSD MINT-AUTHORITY BASELINE (story 075, audit run-22 M-01 stage 3).
+    ///
+    ///      Phase 7 asserts nothing about phUSD's minter set, and the `5ae94bd` correction
+    ///      reassigned that obligation to story-072 checklist line 1195, which is unticked —
+    ///      so mint-authority invariance is verified NOWHERE today. The cutover makes zero
+    ///      `phUSD.setMinter` calls (all three `setMinter` sites are
+    ///      `dispatcher.setMinter(NFTMinterV2)` on `ATokenDispatcherV2`, a different function
+    ///      on a different contract), so the correct claim is INVARIANCE: the membership of a
+    ///      fixed candidate set, and phUSD's global `mintVersion`, must be byte-identical
+    ///      before and after.
+    ///
+    ///      Snapshotted here as a bitmask over `_phusdMinterCandidates()` — index i of that
+    ///      array maps to bit i — and persisted beside `bptAtCutover`. This side only ever
+    ///      RECORDS; `VerifyPromotionReady` is what asserts. Deliberately so: a new abort in
+    ///      Phase 0 could brick a live resume leg, and the invariant is a post-broadcast
+    ///      claim anyway.
+    uint256 public phusdMinterMaskAtPhase0;
+    uint256 public phusdMintVersionAtPhase0;
+    bool public phusdMinterBaselineRecorded;
+    bool public phusdMinterBaselineFromProgressFile;
+
     string constant PROGRESS_FILE = "server/deployments/progress.promotion-ready.1.json";
     string constant SNAPSHOT_FILE = "scripts/snapshots/depletion-stakers-latest.json";
     uint256 constant CHAIN_ID = 1;
@@ -354,7 +375,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         require(block.chainid == CHAIN_ID, "Wrong chain id - expected Mainnet (1)");
     }
 
-    function run() external {
+    /// @dev `virtual` so `script/VerifyPromotionReady.s.sol` can override it with a read-only
+    ///      post-broadcast entry point (audit run-22, M-01). Both npm keys name their contract
+    ///      explicitly (`:DeployMainnetPromotionReady`), so nothing about the cutover path
+    ///      changes. NOTHING ELSE in this function is touched by story 075.
+    function run() external virtual {
         console.log("=================================================");
         console.log("  MAINNET PROMOTION-READY CUTOVER (story 072)");
         console.log("=================================================");
@@ -547,6 +572,9 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
             "BPT baseline is 0 - on a fresh run the old pooler must hold BPT; on a resume the progress file must carry baselines.bptAtCutover. Investigate before re-running"
         );
 
+        // ---- phUSD mint-authority baseline (story 075). Record only; never abort. ----
+        _snapshotPhusdMinterSet();
+
         // ---- The three V1 depletion stakers. ----
         _logV1Staker("V1 StakerEYE", V1_STAKER_EYE, IDX_EYE);
         _logV1Staker("V1 StakerSCX", V1_STAKER_SCX, IDX_SCX);
@@ -565,6 +593,103 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     function _hasNudgeStreamer(address target) internal view returns (bool) {
         (bool ok, bytes memory ret) = target.staticcall(abi.encodeWithSignature("nudgeStreamer()"));
         return ok && ret.length >= 32;
+    }
+
+    // =====================================================================
+    //  phUSD mint-authority baseline (story 075 / audit run-22 M-01 stage 3)
+    // =====================================================================
+
+    /// @notice The FIXED candidate set whose phUSD mint authority must not change across the
+    ///         cutover. Order is part of the persisted encoding — index i is bit i of the
+    ///         mask — so entries may only ever be APPENDED, never reordered or removed, or an
+    ///         old progress file would decode against a different meaning.
+    ///
+    ///         Every entry is a compile-time `constant`. Runtime-deployed addresses are
+    ///         deliberately absent: on a fresh leg they are still `address(0)` when this
+    ///         snapshot is taken, so they cannot carry a meaningful "before" reading. The
+    ///         verifier covers them with a stronger ABSOLUTE assertion instead — none of the
+    ///         14 newly deployed contracts may hold phUSD mint authority at all.
+    function _phusdMinterCandidates() internal pure returns (address[] memory set) {
+        set = new address[](19);
+        uint256 i;
+        set[i++] = NFT_MINTER_V2;
+        set[i++] = OLD_BATCH_MINTER;
+        set[i++] = OLD_POOLER;
+        set[i++] = OLD_SYA;
+        set[i++] = OLD_UNIBOOST_EYE;
+        set[i++] = OLD_UNIBOOST_SCX;
+        set[i++] = OLD_UNIBOOST_FLX;
+        set[i++] = OLD_DELAY_RELEASE;
+        set[i++] = HOOK_EYE;
+        set[i++] = HOOK_SCX;
+        set[i++] = HOOK_FLX;
+        set[i++] = HOOK_POOLER;
+        set[i++] = HOOK_RATCHET;
+        set[i++] = NFT_STAKER;
+        set[i++] = RATCHET_NFT_STAKER;
+        set[i++] = V1_STAKER_EYE;
+        set[i++] = V1_STAKER_SCX;
+        set[i++] = V1_STAKER_FLX;
+        set[i++] = OWNER;
+        require(i == 19, "phUSD minter candidate count drifted");
+    }
+
+    /// @dev Reads phUSD's authorization for one address via staticcall rather than a typed
+    ///      call, so an unexpected live interface degrades to "unreadable" instead of
+    ///      reverting a mainnet leg. `IFlax.authorizedMinters(address)` returns a
+    ///      `MinterInfo{bool canMint; uint256 mintVersion;}`, ABI-encoded as two words.
+    function _readPhusdMinter(address who) internal view returns (bool ok, bool canMint, uint256 version) {
+        (bool success, bytes memory ret) = PHUSD.staticcall(abi.encodeWithSignature("authorizedMinters(address)", who));
+        if (!success || ret.length < 64) return (false, false, 0);
+        (canMint, version) = abi.decode(ret, (bool, uint256));
+        ok = true;
+    }
+
+    /// @dev Reads the live membership bitmask plus phUSD's global `mintVersion`. `ok` is false
+    ///      if phUSD exposes no usable read path, in which case NOTHING is persisted and the
+    ///      verifier fails loudly on the absent baseline rather than silently passing.
+    function _livePhusdMinterMask() internal view returns (bool ok, uint256 mask, uint256 globalVersion) {
+        (bool vOk, bytes memory vRet) = PHUSD.staticcall(abi.encodeWithSignature("mintVersion()"));
+        if (!vOk || vRet.length < 32) return (false, 0, 0);
+        globalVersion = abi.decode(vRet, (uint256));
+
+        address[] memory set = _phusdMinterCandidates();
+        for (uint256 i = 0; i < set.length; i++) {
+            (bool rOk, bool canMint, uint256 grantedAt) = _readPhusdMinter(set[i]);
+            if (!rOk) return (false, 0, 0);
+            // A grant issued against a superseded `mintVersion` is inert — `mint()` requires
+            // `minterInfo.mintVersion == mintVersion` — so it must NOT read as membership.
+            if (canMint && grantedAt == globalVersion) mask |= (1 << i);
+        }
+        ok = true;
+    }
+
+    /// @dev Write-once: a persisted baseline always wins, so a resume leg can never overwrite
+    ///      the true pre-cutover reading with a post-cutover one. Records only — the assertion
+    ///      lives in `VerifyPromotionReady`.
+    function _snapshotPhusdMinterSet() internal {
+        if (phusdMinterBaselineFromProgressFile) {
+            console.log("--- phUSD mint-authority baseline (from progress file) ---");
+            console.log("  membership mask:", phusdMinterMaskAtPhase0);
+            console.log("  mintVersion:    ", phusdMintVersionAtPhase0);
+            return;
+        }
+
+        (bool ok, uint256 mask, uint256 globalVersion) = _livePhusdMinterMask();
+        if (!ok) {
+            // Not fatal here on purpose: bricking a live cutover over a verification nicety
+            // would be a worse outcome than the gap it closes. The verifier treats an absent
+            // baseline as a loud failure, so the gap cannot pass silently either.
+            console.log("WARNING: phUSD exposes no readable minter set - mint-authority baseline NOT recorded.");
+            console.log("         VerifyPromotionReady will FAIL on the missing baseline; verify line 1195 by hand.");
+            return;
+        }
+        phusdMinterMaskAtPhase0 = mask;
+        phusdMintVersionAtPhase0 = globalVersion;
+        phusdMinterBaselineRecorded = true;
+        console.log("--- phUSD mint-authority baseline (live) ---");
+        console.log("  membership mask:", mask);
+        console.log("  mintVersion:    ", globalVersion);
     }
 
     function _logHook(string memory label, address hook, address expectedDispatcher, address expectedRecipient)
@@ -1894,6 +2019,18 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
             bptBaselineFromProgressFile = true;
             console.log("Loaded persisted BPT cutover baseline:", bptAtCutoverPersisted);
         }
+        // Story 075: a SIBLING key inside the same `baselines` object. Independently guarded,
+        // so a file carrying only `bptAtCutover` (written before story 075) still parses.
+        if (
+            vm.keyExistsJson(json, ".baselines.phusdMinterMask")
+                && vm.keyExistsJson(json, ".baselines.phusdMintVersion")
+        ) {
+            phusdMinterMaskAtPhase0 = vm.parseUint(vm.parseJsonString(json, ".baselines.phusdMinterMask"));
+            phusdMintVersionAtPhase0 = vm.parseUint(vm.parseJsonString(json, ".baselines.phusdMintVersion"));
+            phusdMinterBaselineFromProgressFile = true;
+            phusdMinterBaselineRecorded = true;
+            console.log("Loaded persisted phUSD minter mask:", phusdMinterMaskAtPhase0);
+        }
     }
 
     /// @dev Every key the progress file can carry — deployments first, then the config-step
@@ -2067,7 +2204,15 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         // STRING so JS `JSON.parse` round-trips all 23 digits. `bptAtPhase0` is already the
         // monotonic maximum of the persisted and live readings (see `_phase0_preconditions`),
         // so re-emitting it here can never shrink the recorded baseline.
-        json = string.concat(json, '"baselines": {"bptAtCutover": "', vm.toString(bptAtPhase0), '"},');
+        json = string.concat(json, '"baselines": {"bptAtCutover": "', vm.toString(bptAtPhase0), '"');
+        // Story 075: appended as a SIBLING key. `bptAtCutover` above is untouched — story 074
+        // owns it. Omitted entirely when phUSD's minter set was unreadable, so the verifier
+        // fails loudly on the absent baseline instead of asserting against a fabricated 0.
+        if (phusdMinterBaselineRecorded) {
+            json = string.concat(json, ', "phusdMinterMask": "', vm.toString(phusdMinterMaskAtPhase0), '"');
+            json = string.concat(json, ', "phusdMintVersion": "', vm.toString(phusdMintVersionAtPhase0), '"');
+        }
+        json = string.concat(json, "},");
         json = string.concat(json, '"contracts": {');
         for (uint256 i = 0; i < contractNames.length; i++) {
             string memory name = contractNames[i];
