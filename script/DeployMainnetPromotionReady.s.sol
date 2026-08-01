@@ -324,6 +324,13 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     uint256 public bptAtPhase0;
     bool public kenduWhitelisted;
 
+    /// @dev The BPT cutover baseline as recovered from the progress file's top-level
+    ///      `baselines` block, and whether it was actually present there. Kept separate from
+    ///      `bptAtPhase0` so Phase 0 can tell "resumed with a baseline" from "resumed without
+    ///      one" and fail loudly in the second case (audit run-22, L-02).
+    uint256 public bptAtCutoverPersisted;
+    bool public bptBaselineFromProgressFile;
+
     string constant PROGRESS_FILE = "server/deployments/progress.promotion-ready.1.json";
     string constant SNAPSHOT_FILE = "scripts/snapshots/depletion-stakers-latest.json";
     uint256 constant CHAIN_ID = 1;
@@ -502,16 +509,43 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         _logHook("NudgeRatchetHook", HOOK_RATCHET, OLD_DELAY_RELEASE, RATCHET_NFT_STAKER);
 
         // ---- Stranded value. Recorded, never hardcoded. ----
-        bptAtPhase0 = IERC20(BALANCER_POOL).balanceOf(OLD_POOLER);
+        // WRITE-ONCE BPT CUTOVER BASELINE (audit run-22, L-02).
+        //
+        // This used to be an unconditional live read, which quietly broke resume: once
+        // `_moveBPT()` has landed the old pooler is EMPTY, so a re-derived baseline is 0 and
+        // Phase 7's conservation assertion collapses to `balanceOf(newPooler) >= 0` — true even
+        // if the whole position were sitting on a third address. `//promotion-ready:resume`
+        // calls this "THE ONE STEP A BAD RESUME COULD RUIN", so the baseline is persisted in
+        // the progress file (`baselines.bptAtCutover`) and adopted here instead.
+        //
+        // Monotonic by construction: take the LARGER of the persisted and the live reading, so
+        // a later leg can never downgrade a non-zero baseline to a smaller value or to zero.
+        uint256 liveBpt = IERC20(BALANCER_POOL).balanceOf(OLD_POOLER);
+        bptAtPhase0 = bptAtCutoverPersisted > liveBpt ? bptAtCutoverPersisted : liveBpt;
         console.log("--- stranded value (live) ---");
         console.log("  old BatchNFTMinter USDC:", IERC20(USDC).balanceOf(OLD_BATCH_MINTER));
         console.log("  DelayRelease USDC:      ", IERC20(USDC).balanceOf(OLD_DELAY_RELEASE));
-        console.log("  old pooler BPT:         ", bptAtPhase0);
+        console.log("  old pooler BPT (live):  ", liveBpt);
         console.log("  old pooler USDS dust:   ", IERC20(USDS).balanceOf(OLD_POOLER));
         console.log("  V1 StakerEYE phUSD:     ", IERC20(PHUSD).balanceOf(V1_STAKER_EYE));
         console.log("  V1 StakerSCX phUSD:     ", IERC20(PHUSD).balanceOf(V1_STAKER_SCX));
         console.log("  V1 StakerFLX phUSD:     ", IERC20(PHUSD).balanceOf(V1_STAKER_FLX));
-        require(bptAtPhase0 > 0 || newPooler != address(0), "old pooler holds 0 BPT on a fresh run - investigate");
+        console.log("  BPT cutover baseline:   ", bptAtPhase0);
+
+        // A resume that has already moved the BPT MUST arrive carrying the baseline. Falling
+        // back to the emptied live reading is precisely the bug this section closes, so refuse
+        // rather than proceed with an assertion that cannot fail.
+        require(
+            !_isConfigured("pooler_bpt") || bptBaselineFromProgressFile,
+            "RESUME ABORT: pooler_bpt is already configured but the progress file carries no baselines.bptAtCutover - restore that block verbatim (hand-trimming must NEVER remove it); re-deriving from the emptied old pooler makes the Phase 7 BPT conservation assertion vacuous"
+        );
+        // Tightened from `bptAtPhase0 > 0 || newPooler != address(0)`: the old escape hatch
+        // existed only to let the emptied-old-pooler resume case through, and the persisted
+        // baseline now handles that case properly. Leaving it would re-admit the vacuous path.
+        require(
+            bptAtPhase0 > 0,
+            "BPT baseline is 0 - on a fresh run the old pooler must hold BPT; on a resume the progress file must carry baselines.bptAtCutover. Investigate before re-running"
+        );
 
         // ---- The three V1 depletion stakers. ----
         _logV1Staker("V1 StakerEYE", V1_STAKER_EYE, IDX_EYE);
@@ -1561,7 +1595,16 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         require(IERC20(USDC).balanceOf(OLD_BATCH_MINTER) == 0, "old batch minter holds USDC");
         require(IERC20(USDC).balanceOf(OLD_DELAY_RELEASE) == 0, "DelayRelease holds USDC");
         require(IERC20(BALANCER_POOL).balanceOf(OLD_POOLER) == 0, "old pooler still holds BPT");
-        require(IERC20(BALANCER_POOL).balanceOf(newPooler) >= bptAtPhase0, "new pooler BPT below the Phase 0 reading");
+        // `bptAtPhase0` is the WRITE-ONCE baseline, not a fresh read of an already-emptied old
+        // pooler, so this stays a real conservation assertion on every resume leg (audit L-02).
+        require(IERC20(BALANCER_POOL).balanceOf(newPooler) >= bptAtPhase0, "new pooler BPT below the cutover baseline");
+        // Belt and braces (the audit's cheaper stopgap, kept alongside the real fix): once the
+        // move is recorded, the new pooler must hold SOMETHING. Guarantees this branch is never
+        // fully vacuous even if the baseline were somehow lost.
+        require(
+            !_isConfigured("pooler_bpt") || IERC20(BALANCER_POOL).balanceOf(newPooler) > 0,
+            "pooler_bpt recorded as moved but the new pooler holds 0 BPT"
+        );
         console.log("  retiring contracts drained; BPT fully on the new pooler");
 
         console.log("Phase 7: ALL WIRING ASSERTIONS PASS");
@@ -1809,6 +1852,7 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     }
 
     function _parseProgressJson(string memory json) internal {
+        _parseBaselines(json);
         string[] memory names = _allProgressKeys();
         for (uint256 i = 0; i < names.length; i++) {
             _parseEntry(json, names[i]);
@@ -1827,6 +1871,29 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         migratorEYE = deployments["NFTStakerMigratorEYE"].addr;
         migratorSCX = deployments["NFTStakerMigratorSCX"].addr;
         migratorFLX = deployments["NFTStakerMigratorFLX"].addr;
+    }
+
+    /// @dev Recovers the top-level `baselines` block. Guarded by `keyExistsJson` so a progress
+    ///      file written by an older binary — or one a human trimmed — parses instead of
+    ///      bricking the leg; Phase 0 is what turns a MISSING baseline into a loud failure.
+    ///
+    ///      TRUST NOTE — read this before "simplifying" it away. `//promotion-ready:resume`
+    ///      warns in capitals that the progress file LIES, and it is right about every
+    ///      *write-side* entry: those are recorded during forge's LOCAL execution pass, before
+    ///      anything is broadcast, so a crash leaves behind addresses for contracts that were
+    ///      never deployed. `bptAtCutover` is categorically different. It is a READ of
+    ///      pre-existing on-chain state, taken at Phase 0 before this session dispatches its
+    ///      first transaction. No crash can falsify it, which is exactly why it is safe to
+    ///      trust across legs when a deployed address is not.
+    function _parseBaselines(string memory json) internal {
+        if (vm.keyExistsJson(json, ".baselines.bptAtCutover")) {
+            // Decimal STRING, not a JSON number: `scripts/patch-mainnet-addresses-*.js` reads
+            // and rewrites this file through JS `JSON.parse`, which cannot round-trip a
+            // 23-digit integer losslessly.
+            bptAtCutoverPersisted = vm.parseUint(vm.parseJsonString(json, ".baselines.bptAtCutover"));
+            bptBaselineFromProgressFile = true;
+            console.log("Loaded persisted BPT cutover baseline:", bptAtCutoverPersisted);
+        }
     }
 
     /// @dev Every key the progress file can carry — deployments first, then the config-step
@@ -1994,6 +2061,13 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         json = string.concat(json, '"chainId": ', vm.toString(CHAIN_ID), ",");
         json = string.concat(json, '"networkName": "', NETWORK_NAME, '",');
         json = string.concat(json, '"deploymentStatus": "', status, '",');
+        // Top-level sibling of `contracts`, deliberately NOT a ContractDeployment record: the
+        // Node patcher walks `.contracts.<Name>` by name (patch-mainnet-addresses-
+        // promotion-ready.js:82-105) and a baseline is not a contract. Written as a decimal
+        // STRING so JS `JSON.parse` round-trips all 23 digits. `bptAtPhase0` is already the
+        // monotonic maximum of the persisted and live readings (see `_phase0_preconditions`),
+        // so re-emitting it here can never shrink the recorded baseline.
+        json = string.concat(json, '"baselines": {"bptAtCutover": "', vm.toString(bptAtPhase0), '"},');
         json = string.concat(json, '"contracts": {');
         for (uint256 i = 0; i < contractNames.length; i++) {
             string memory name = contractNames[i];
