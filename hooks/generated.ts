@@ -1625,11 +1625,6 @@ export const batchNftMinterMultiTokenAbi = [
     ],
     name: 'BatchMint__RewardBelowMinimum',
   },
-  {
-    type: 'error',
-    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
-    name: 'BatchMint__RewardTokenIsPaymentToken',
-  },
   { type: 'error', inputs: [], name: 'BatchMint__ZeroCount' },
   { type: 'error', inputs: [], name: 'BatchMint__ZeroNudgeToken' },
   { type: 'error', inputs: [], name: 'BatchMint__ZeroRecipient' },
@@ -10282,6 +10277,7 @@ export const nudgeStreamerAbi = [
   },
   { type: 'error', inputs: [], name: 'NudgeStreamer__ZeroAmount' },
   { type: 'error', inputs: [], name: 'NudgeStreamer__ZeroDuration' },
+  { type: 'error', inputs: [], name: 'NudgeStreamer__ZeroReceived' },
   {
     type: 'error',
     inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],

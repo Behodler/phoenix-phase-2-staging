@@ -5,6 +5,31 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-01
+
+Story-072 mainnet promotion-ready cutover. ABIs regenerated against the pinned upstream tips
+(`lib/nft-staking` @ `9611312`, `lib/yield-claim-nft` @ `9c18020`,
+`lib/stable-yield-accumulator` @ `6eab35c`). 0.11.0 already named every contract in this
+release, so the package `description` is unchanged; what moved is the ABI content below.
+
+### Changed
+- `batchNftMinterMultiTokenAbi`: **`BatchMint__RewardTokenIsPaymentToken` REMOVED.** `nft-staking:032`
+  deleted the error and the `_resolvePaymentPath()` call from `setNudgeTokenWhitelist`'s add
+  branch, so a reward token may now be whitelisted on a bare, unconfigured minter and the
+  payment token may itself be a reward token. Any UI decoding that error must drop it.
+- `nudgeStreamerAbi`: **`NudgeStreamer__ZeroReceived` ADDED.** `nft-staking:031` made
+  `collectNudge` credit the MEASURED receipt (`min(balanceDelta, amount)`) rather than the
+  requested amount, and revert when a non-zero request delivers a zero delta.
+
+### UI-breaking note (not an ABI change)
+`batchMint(count, recipient, paymentAmount, minRewards)` now runs against a THREE-token
+whitelist (USDC / phUSD / Kendu) on the shared batch minter. `minRewards.length` must equal
+`getNudgeTokens().length` or the call reverts `BatchMint__ArrayLengthMismatch`, and the token
+order changes on removal (swap-and-pop), so callers must re-fetch `getNudgeTokens()`
+immediately before each batch. Two batch-minter ABIs now coexist on mainnet: the multi-token
+one on the shared minter, and the legacy `batchNftMinterAbi` on the four nudge-disabled
+per-token UI entrypoints.
+
 ## [0.11.0] - 2026-07-31
 
 Catch-up release: `generated.ts` was regenerated in story-073 without a version bump, so 0.10.1 on the registry was missing everything below.
