@@ -46,12 +46,16 @@
  *   The three `NFTStakerMigrator` instances are transient orchestrators and deliberately
  *   have no interface key, so they are absent from FIELDS by design.
  *
- * KENDU IS CONDITIONAL. The Foundry script only records a `Kendu` progress entry if the
- * fee-on-transfer preflight passed (a non-zero amount round-tripped through
- * `collectNudge` credited a buffer delta exactly equal to the amount sent). If Kendu is
- * taxed it is not whitelisted, no stream is registered for it, and its key must STAY a
- * zero placeholder — so a missing `Kendu` progress entry is NOT an error here, it is the
- * documented negative outcome. Every other key is mandatory.
+ * KENDU IS TOLERATED-MISSING, NOT CONDITIONAL IN PRACTICE. The Foundry script records a
+ * `Kendu` progress entry whenever `isNudgeToken(KENDU)` reads true after Phase 2, and
+ * Phase 2 whitelists Kendu UNCONDITIONALLY. The fee-on-transfer preflight lives in Phase 8,
+ * which runs only under PREVIEW_MODE, so in a broadcast run it never executes: the tax gate
+ * is PROCEDURAL — the operator runs `promotion-ready:dry` first and the probe's `require`
+ * aborts there — not structural. `optional: true` below is therefore a defensive fallback
+ * for the case where the whitelist call did not land (which would also fail Phase 2's
+ * `getNudgeTokens().length == 3` require), not the expected negative outcome. If it ever
+ * does fire, the correct state is the same: Kendu unwhitelisted, no stream registered, key
+ * left as a zero placeholder. Every other key is mandatory.
  *
  * Exit codes:
  *   0 - Success
@@ -74,7 +78,7 @@ const INTERFACE_FILE = path.join(ROOT, 'server', 'deployments', 'addresses.ts');
 // tsField (mainnet-addresses.ts key) -> progress-file contract key.
 //   update:false -> fill a zero placeholder only; a non-zero existing value is a collision.
 //   update:true  -> overwrite the live value.
-//   optional:true -> a missing progress entry is tolerated (Kendu only; see header).
+//   optional:true -> a missing progress entry is tolerated (Kendu only; defensive, see header).
 const FIELDS = [
     // ---- FILL: zero placeholders added by story 073 ----
     { tsField: 'NudgeStreamer', progressKey: 'NudgeStreamer', update: false },
@@ -185,7 +189,7 @@ function run() {
         const missing = !entry || !entry.address || entry.address.toLowerCase() === ZERO_ADDRESS;
 
         if (missing && f.optional) {
-            summary.push(`  SKIP-OPT ${f.tsField.padEnd(26)} no progress entry — left as-is (Kendu preflight failed / token not whitelisted)`);
+            summary.push(`  SKIP-OPT ${f.tsField.padEnd(26)} no progress entry — left as-is (token not whitelisted; unexpected in a normal run, see header)`);
             continue;
         }
         if (missing) {

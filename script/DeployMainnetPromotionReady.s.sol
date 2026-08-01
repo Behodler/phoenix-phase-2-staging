@@ -64,8 +64,12 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
  *  repointing so the ledger is clean across the swap."
  *
  *  Consequences, all deliberate:
- *    * ZERO `phUSD.setMinter` calls in this entire script. Mint authority is not touched.
- *      Phase 7 asserts the five hooks' authorisation is byte-identical to Phase 0's reading.
+ *    * ZERO `phUSD.setMinter` calls in this entire script. Mint authority is not touched,
+ *      so it is byte-identical before and after BY CONSTRUCTION — there is no call that
+ *      could change it. Note that this script does NOT assert that on-chain: neither
+ *      Phase 0 nor Phase 7 reads phUSD's minter set. The confirmation is the post-broadcast
+ *      HUMAN checklist item ("phUSD's minter set is byte-identical to its pre-cutover
+ *      state"), verified with `cast` after the Ledger session.
  *    * Each hook keeps its `ratio`, `recipient` and `mintDebt` across the swap, so a tuned
  *      ratio cannot be silently reset to a constructor default. That matters most at index
  *      7, where `NudgeRatchetMintDebtHook`'s DEFAULT_RATIO is 100 while the other two hook
@@ -629,6 +633,10 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
             _trackConfig("bm_wl_phusd");
             console.log("  whitelist phUSD (18dp)");
         }
+        // Kendu is whitelisted UNCONDITIONALLY here. Its fee-on-transfer preflight is Phase 8,
+        // which only runs under PREVIEW_MODE — so the protection is procedural: run
+        // `promotion-ready:dry` before broadcasting and let `_probeKenduFeeOnTransfer`'s
+        // `require` abort the run. Do not read this call as gated by that probe.
         if (!_isConfigured("bm_wl_kendu")) {
             bm_.setNudgeTokenWhitelist(KENDU, true);
             _trackConfig("bm_wl_kendu");
@@ -1848,8 +1856,13 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         names[i++] = "UniboostHookFLX";
         names[i++] = "BalancerPoolerMintDebtHook";
         names[i++] = "NudgeRatchetMintDebtHook";
-        // Kendu: recorded ONLY if the Phase 8 fee-on-transfer probe passed and the token was
-        // whitelisted. A missing entry is the documented negative outcome, not an error.
+        // Kendu: recorded whenever `isNudgeToken(KENDU)` reads true after Phase 2 — which in
+        // a broadcast run is UNCONDITIONAL, because Phase 2 whitelists it unconditionally
+        // (`:633`). The fee-on-transfer probe lives in Phase 8 and Phase 8 runs only under
+        // PREVIEW_MODE, so the tax gate is PROCEDURAL, not structural: the operator must run
+        // `promotion-ready:dry` first, where the probe's `require` aborts before any
+        // broadcast. The `optional: true` branch in the patcher is a defensive fallback for
+        // the case where the whitelist call did not land; it is not the normal negative path.
         names[i++] = "Kendu";
         // Config-step flags.
         names[i++] = "bm_setTokenMinter";
