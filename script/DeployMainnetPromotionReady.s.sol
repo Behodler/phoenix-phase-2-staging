@@ -195,9 +195,18 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     // ---- BalancerPoolerV2 constructor inputs ----
     // `sUSDS_`, `pool_` and `vault_` are readable off the live instance and Phase 0 asserts
     // the constants below match. `router_` and `sUSDSIsFirst_` are `private immutable` with
-    // NO getter (`BalancerPoolerV2.sol:82-83`), so `cast call` reverts on them; they are
-    // recovered from the script that deployed the live instance,
-    // `script/DeployMainnetNudgePoolerV2.s.sol:138` and `:152`.
+    // NO getter (`BalancerPoolerV2.sol:82-83`), so `cast call` reverts on them.
+    //
+    // They are not inferred. All six were decoded from the live instance's CREATION
+    // TRANSACTION calldata, tx 0x98c5ab00bf31232d736177e16c13cfcde8cc0ba09e214eadc4d93c3ec4a421a2,
+    // whose trailing ABI-encoded constructor arguments read, in order:
+    //   sUSDS_        0xa3931d71877c0e7a3148cb7eb4463524fec27fbd
+    //   pool_         0x642bb6860b4776cc10b26b8f361fd139e7f0db04
+    //   vault_        0xba1333333333a1ba1108e8412f11850a5c319ba9
+    //   router_       0x5c6fb490bdfd3246eb0bb062c168decaf4bd9fdd
+    //   sUSDSIsFirst_ 0x...01  (true)
+    //   initialOwner  0xcad1a7864a108dbff67f4b8af71fab0c7a86d0b6
+    // That matches `script/DeployMainnetNudgePoolerV2.s.sol:138` / `:152` exactly.
     address public constant BALANCER_POOL = 0x642BB6860b4776CC10b26B8f361Fd139E7f0db04; // 50/50 phUSD/sUSDS
     address public constant BALANCER_VAULT = 0xbA1333333333a1BA1108E8412f11850A5C319bA9;
     address public constant BALANCER_ROUTER = 0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd;
