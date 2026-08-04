@@ -26,8 +26,17 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         after the dispatch has settled, so every read it performs is a read of real,
  *         post-broadcast mainnet state.
  *
+ *         STORY 076 EXTENDED IT. The cutover now includes a PhlimboV3 deployment and a
+ *         PhlimboV2 user-base migration (Phase 4e), so this verifier gained two runtime
+ *         addresses, a second persisted baseline (`baselines.phlimboV2StakedAtCutover`) and a
+ *         RESTATED mint-authority claim. That last one matters: story 075 asserted phUSD
+ *         mint-authority INVARIANCE because story 072 made zero `setMinter` calls. Phase 4e
+ *         makes two — grant PhlimboV3, revoke PhlimboV2 — so invariance would now FAIL on a
+ *         correct cutover. It is replaced by an expected TWO-SIDED DELTA plus a POSITIVE
+ *         assertion on PhlimboV3. See `_verifyMintAuthorityInvariance`.
+ *
  *         INHERITANCE, NOT DUPLICATION. Deriving from the deploy script gives this file all
- *         ~200 address constants, the 14 runtime address members, `_loadProgressFile()`,
+ *         ~200 address constants, the 16 runtime address members, `_loadProgressFile()`,
  *         `_phase7_wiringAssertions()` and its `_assertSlot`/`_assertHookPair`/`_assertStream`
  *         helpers for free. Copying them into a second file would guarantee eventual drift,
  *         and drift in exactly this file is what audit run-22 was cleaning up.
@@ -52,6 +61,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         for the forbidden call and for state-mutating cheatcodes, so those literals are
  *         deliberately never spelled out verbatim anywhere in this file.)
  *
+ *         THE SAME ARGUMENT APPLIES VERBATIM TO STORY 076's SECOND BASELINE. Post-broadcast
+ *         PhlimboV2 is ALWAYS empty — the cutover's own completeness gate demands
+ *         `totalStaked() == 0` — so re-deriving the migration baseline from a live read gives
+ *         0, and the conservation assertion collapses to `phlimboV3.totalStaked() >= 0`. It is
+ *         consumed from `baselines.phlimboV2StakedAtCutover` and aborts if absent or zero. Do
+ *         not add a fallback there either.
+ *
  *         Usage: `npm run promotion-ready:verify`
  */
 contract VerifyPromotionReady is DeployMainnetPromotionReady {
@@ -69,6 +85,7 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
         _requireNoBroadcastFlag();
         _loadAndValidateProgressFile();
         _adoptPersistedBptBaseline();
+        _adoptPersistedPhlimboBaseline();
 
         // The whole point: Phase 7's absolute wiring assertions, re-run against LIVE
         // post-broadcast state rather than the local pre-broadcast pass.
@@ -121,7 +138,12 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
         _requireResolved(migratorEYE, "NFTStakerMigratorEYE");
         _requireResolved(migratorSCX, "NFTStakerMigratorSCX");
         _requireResolved(migratorFLX, "NFTStakerMigratorFLX");
-        console.log("Progress file resolved all 14 runtime addresses.");
+        // Story 076. `MigratorV2V3` is resolved here even though it is transient and gets no
+        // `mainnet-addresses.ts` key: Phase 7 asserts its cursor, its seed flag and both of
+        // its immutable endpoints, all of which need the address.
+        _requireResolved(newPhlimboV3, "PhlimboV3");
+        _requireResolved(migratorV2V3, "MigratorV2V3");
+        console.log("Progress file resolved all 16 runtime addresses.");
 
         // A verifier run against a file the cutover never finished writing is a false
         // negative waiting to happen: the run may simply not be over yet.
@@ -157,21 +179,60 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
         console.log("  new pooler BPT (live):              ", IERC20(BALANCER_POOL).balanceOf(newPooler));
     }
 
-    /// @dev Story 075 stage 3. Two independent claims:
+    /// @dev Story 076, exactly the same crux as `_adoptPersistedBptBaseline` applied to the
+    ///      PhlimboV2 -> PhlimboV3 stake migration.
     ///
-    ///        1. INVARIANCE over the fixed candidate set — membership and phUSD's global
-    ///           `mintVersion` must be byte-identical to the Phase 0 snapshot. The cutover
-    ///           makes zero `phUSD.setMinter` calls, so any drift is unexplained.
-    ///        2. ABSOLUTE, for the 14 newly deployed contracts — none of them may hold phUSD
-    ///           mint authority. This needs no baseline (they did not exist at Phase 0) and is
-    ///           the stronger of the two claims: it is what "the cutover granted no new mint
-    ///           authority" actually means.
+    ///      DO NOT add a live-read fallback here either. Post-broadcast PhlimboV2 is ALWAYS
+    ///      empty — the cutover's own completeness gate requires `totalStaked() == 0` — so a
+    ///      re-derived baseline is 0 and Phase 7's conservation assertion collapses to
+    ///      `phlimboV3.totalStaked() >= 0`, which passes no matter where the migrated stake
+    ///      actually went. An absent or zero baseline therefore ABORTS.
+    function _adoptPersistedPhlimboBaseline() internal {
+        require(
+            phlimboBaselineFromProgressFile,
+            "ABORT: progress file carries no baselines.phlimboV2StakedAtCutover. Without it the PhlimboV3 stake-conservation assertion is vacuous (totalStaked >= 0). Restore the baselines block verbatim from the broadcast run - NEVER hand-trim it - or re-derive it from the pre-migration PhlimboV2 totalStaked recorded in the run logs"
+        );
+        require(
+            phlimboV2StakedAtCutover > 0,
+            "ABORT: persisted baselines.phlimboV2StakedAtCutover is 0 - that cannot be the real pre-migration PhlimboV2 stake, and a 0 baseline makes the conservation assertion vacuous"
+        );
+        console.log("Adopted persisted PhlimboV2 migration baseline:", phlimboV2StakedAtCutover);
+    }
+
+    /// @dev Story 075 stage 3, RESTATED BY STORY 076. Three claims now:
+    ///
+    ///        1. EXPECTED TWO-SIDED DELTA over the fixed candidate set. Story 075's claim was
+    ///           INVARIANCE — byte-identical membership — because story 072 made zero
+    ///           `phUSD.setMinter` calls. Phase 4e makes two, so invariance is now the WRONG
+    ///           claim and would fail on a correct cutover. The right claim is that the mask
+    ///           lost EXACTLY the PhlimboV2 bit and NOTHING ELSE moved. Asserting both
+    ///           directions is what keeps the control meaningful: a one-sided "V2 was revoked"
+    ///           check would not notice an unintended grant or revoke elsewhere in the set.
+    ///
+    ///           phUSD's global `mintVersion` is still asserted UNCHANGED. `setMinter` does
+    ///           not touch it (`FlaxToken.sol:44-51`); only `revokeAllMintPrivileges` does
+    ///           (`:88-90`), and the cutover never calls that.
+    ///
+    ///        2. POSITIVE, for PhlimboV3. It is a runtime CREATE, so it cannot live in the
+    ///           `pure` compile-time candidate set and its grant cannot be expressed as a mask
+    ///           bit. It is asserted directly instead — and it MUST be asserted somewhere,
+    ///           because a missing grant fails SILENTLY: `PhlimboV3._claimRewards` banks a
+    ///           failed mint rather than reverting (`PhlimboV3.sol:913`).
+    ///
+    ///        3. ABSOLUTE, for the other 15 newly deployed contracts — none may hold phUSD
+    ///           mint authority. PhlimboV3 is the ONE declared exclusion; every other new
+    ///           contract, `MigratorV2V3` included, stays in the sweep. `MigratorV2V3`
+    ///           genuinely needs no mint role: V2 itself mints the pending phUSD rewards
+    ///           during `withdraw` (`MigratorV2V3.sol:54-56`). A blanket relaxation to
+    ///           accommodate PhlimboV3 would silently discard a real control.
     function _verifyMintAuthorityInvariance() internal view {
-        console.log("\n=== phUSD mint-authority invariance (story 075) ===");
+        console.log("\n=== phUSD mint-authority delta (story 075, restated by story 076) ===");
         require(
             phusdMinterBaselineFromProgressFile,
-            "ABORT: progress file carries no baselines.phusdMinterMask/phusdMintVersion. phUSD mint-authority invariance is verified NOWHERE ELSE (story-072 checklist line 1195 is unticked) - either the cutover predates story 075, or phUSD exposed no readable minter set at Phase 0. Verify line 1195 BY HAND before disconnecting the Ledger"
+            "ABORT: progress file carries no baselines.phusdMinterMask/phusdMintVersion. The phUSD mint-authority delta is verified NOWHERE ELSE (story-072 checklist line 1195 is unticked) - either the cutover predates story 075, or phUSD exposed no readable minter set at Phase 0. Verify line 1195 BY HAND before disconnecting the Ledger"
         );
+        // Cheap guard against a reordered candidate array silently repointing the bit below.
+        _requirePhlimboV2BitIndex();
 
         (bool ok, uint256 liveMask, uint256 liveVersion) = _livePhusdMinterMask();
         require(
@@ -182,13 +243,40 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
             liveVersion == phusdMintVersionAtPhase0,
             "phUSD global mintVersion changed across the cutover - every existing mint grant was revoked or re-issued. STOP"
         );
+
+        // THE TWO-SIDED DELTA. Clearing exactly one known bit from the baseline and requiring
+        // byte-equality with the live mask asserts both directions at once: nothing else may
+        // have been revoked, and nothing at all may have been granted.
+        uint256 v2Bit = 1 << PHUSD_MINTER_BIT_PHLIMBO_V2;
         require(
-            liveMask == phusdMinterMaskAtPhase0,
-            "phUSD minter-set membership changed across the cutover. The cutover makes zero phUSD.setMinter calls, so this is unexplained. STOP"
+            liveMask == (phusdMinterMaskAtPhase0 & ~v2Bit),
+            "phUSD minter-set membership does not match the EXPECTED delta. The cutover may clear exactly the PhlimboV2 bit and change nothing else; any other movement is unexplained. STOP"
         );
-        console.log("  candidate-set membership and mintVersion unchanged; mask:", liveMask);
+        // A baseline whose PhlimboV2 bit was never set means the revoke was a no-op, which
+        // makes the delta above degenerate into the old invariance check. Not an error - V2
+        // may legitimately never have held the grant - but say so rather than let a green run
+        // imply a revoke was verified.
+        if (phusdMinterMaskAtPhase0 & v2Bit == 0) {
+            console.log("  NOTE: PhlimboV2 did not hold phUSD mint authority at Phase 0 - the revoke was a no-op.");
+        } else {
+            console.log("  PhlimboV2's phUSD mint authority was revoked, and nothing else in the set moved.");
+        }
+        console.log("  mintVersion unchanged; baseline / live mask:", phusdMinterMaskAtPhase0, liveMask);
+
+        // The POSITIVE half (story 076). PhlimboV3 MUST hold mint authority.
+        {
+            (bool okV3, bool canMint, uint256 grantedAt) = _readPhusdMinter(newPhlimboV3);
+            require(okV3, "phUSD minter read failed for PhlimboV3");
+            require(
+                canMint && grantedAt == liveVersion,
+                "PhlimboV3 does NOT hold phUSD mint authority. Its reward mints will silently bank as unpayable instead of reverting (PhlimboV3.sol:913), so nothing else would ever surface this. STOP"
+            );
+            console.log("  PhlimboV3 holds phUSD mint authority at the current mintVersion");
+        }
 
         // The absolute half. No baseline needed - these contracts did not exist at Phase 0.
+        // PhlimboV3 is deliberately ABSENT from this sweep and asserted positively above; it
+        // is the ONLY exclusion.
         _requireNotPhusdMinter(nudgeStreamer, "NudgeStreamer");
         _requireNotPhusdMinter(newBatchMinter, "BatchNFTMinter");
         _requireNotPhusdMinter(newPooler, "BalancerPooler");
@@ -203,8 +291,11 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
         _requireNotPhusdMinter(migratorEYE, "NFTStakerMigratorEYE");
         _requireNotPhusdMinter(migratorSCX, "NFTStakerMigratorSCX");
         _requireNotPhusdMinter(migratorFLX, "NFTStakerMigratorFLX");
-        console.log("  none of the 14 newly deployed contracts holds phUSD mint authority");
-        console.log("phUSD mint-authority invariance: PASS");
+        // Story 076: MigratorV2V3 stays IN the sweep. It needs no mint role - V2 itself mints
+        // the pending phUSD rewards during `withdraw` (MigratorV2V3.sol:54-56).
+        _requireNotPhusdMinter(migratorV2V3, "MigratorV2V3");
+        console.log("  none of the other 15 newly deployed contracts holds phUSD mint authority");
+        console.log("phUSD mint-authority delta: PASS");
     }
 
     function _requireNotPhusdMinter(address who, string memory label) internal view {

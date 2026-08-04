@@ -17,6 +17,16 @@ export default defineConfig({
         // Main Phase 2 contracts
         'PhusdStableMinter.sol/PhusdStableMinter.json',
         'PhlimboV2.sol/PhlimboV2.json',
+        // Story 076: the promotion-ready cutover's Phase 4e deploys PhlimboV3 and migrates
+        // the V2 user base into it. V2 is RETAINED alongside it -- it continues to exist
+        // post-cutover (wound down, not paused), so the UI must stay able to read it.
+        'PhlimboV3.sol/PhlimboV3.json',
+        // MigratorV2V3 is TRANSIENT and gets no address key, so hooks for it are arguably
+        // noise. It is included anyway for the ABI alone: `UserMigrationSkipped` and
+        // `RewardForwardFailed` are the ONLY diagnostic surface for a failed migration pass
+        // (the pass completes even when wholly misconfigured -- MigratorV2V3.sol:68-73), and
+        // decoding those events off-chain is exactly what an operator needs.
+        'MigratorV2V3.sol/MigratorV2V3.json',
 
         // Key interfaces (path-prefixed to avoid duplicate artifact conflicts)
         'src/IFlax.sol/IFlax.json',

@@ -24,6 +24,16 @@ export interface ContractAddresses {
   YieldStrategyUSDe: string;
   PhusdStableMinter: string;
   PhlimboEA: string;
+  /**
+   * Story 076. PhlimboV3, deployed by the promotion-ready cutover's Phase 4e. ADDED
+   * ALONGSIDE `PhlimboEA`, never in place of it: `PhlimboEA` is the V2 address and V2
+   * continues to exist post-cutover (wound down to APY 0 and mint-revoked, but not paused,
+   * so any late staker can still exit).
+   *
+   * `MigratorV2V3` deliberately has NO key here — it is a transient orchestrator, following
+   * the same precedent as the three `NFTStakerMigrator` instances.
+   */
+  PhlimboV3: string;
   StableYieldAccumulator: string;
   BalancerPool: string;
   BalancerVault: string;
