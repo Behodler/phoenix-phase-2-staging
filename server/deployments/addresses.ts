@@ -66,8 +66,5 @@ export interface ContractAddresses {
   RatchetNFTStaker: string;
   RatchetBatchNFTMinter: string;
   StableStaker: string;
-  DepositView: string;
   ViewRouter: string;
-  DepositPageView: string;
-  MintPageView: string;
 }

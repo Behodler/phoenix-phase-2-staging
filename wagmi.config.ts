@@ -82,8 +82,17 @@ export default defineConfig({
         'Pauser.sol/Pauser.json',
 
         // View contracts for UI polling
+        // Story 078 removed the DepositView / DepositPageView / MintPageView ADDRESS keys from
+        // the address books, leaving ViewRouter as the sole view key — but the ABIs below are
+        // all RETAINED, on the same reasoning as NudgeRatchetDelayRelease and NFTStakerDepletion
+        // above: superseded types stay readable while the UI transitions. The two surfaces are
+        // decoupled — this config declares no `deployments:`, so it emits bare `…Abi` exports
+        // and no addresses, and keeping an ABI therefore cannot reintroduce a second
+        // address-resolution path. Retaining DepositPageViewV3's predecessors also keeps
+        // `getRetiredPromoBanks` and the old layouts callable, which the router cannot forward.
         'DepositView.sol/DepositView.json',
         'DepositPageView.sol/DepositPageView.json',
+        'DepositPageViewV3.sol/DepositPageViewV3.json',
         'ViewRouter.sol/ViewRouter.json',
         'MintPageView.sol/MintPageView.json',
       ],

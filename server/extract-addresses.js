@@ -38,7 +38,30 @@ const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "Ba
  * local NudgeRatchet lands at index 7). It is never enabled and never minted, so it
  * must not be surfaced as a consumable address in the ContractAddresses interface.
  */
-const DROPPED_CONTRACT_NAMES = ["NFTMigrator", "BuggedPoolerV2Index6"];
+/*
+ * Story 078: the three page views are dropped for a different reason from the two above —
+ * not because they are local-only or bugged, but because they are RESOLVED THROUGH
+ * `ViewRouter`. `ViewRouter.pages(keccak256("<page>"))` publishes each page's address
+ * on-chain, so a second, hand-maintained address key is a competing resolution path. That
+ * duplication is exactly how the mainnet deposit page went unnoticed for months resolving to
+ * a PhlimboEA (V1) view while the keyed `DepositView` named the V2-correct one. `ViewRouter`
+ * stays; every page behind it goes.
+ *
+ * `DeployMocks.s.sol` still deploys all three locally and nothing about the anvil environment
+ * changes — dropping them here only stops them being PUBLISHED into the generated
+ * `ContractAddresses` interface. Without this entry, the hand-deletions in `addresses.ts` /
+ * `local-addresses.ts` are undone by the very next local deploy.
+ *
+ * `DepositPageViewV3`, the replacement page, is deliberately never tracked by
+ * `DeployMocks.s.sol` as a UI-consumable address either — it is keyless by design.
+ */
+const DROPPED_CONTRACT_NAMES = [
+    "NFTMigrator",
+    "BuggedPoolerV2Index6",
+    "DepositView",
+    "DepositPageView",
+    "MintPageView",
+];
 
 /**
  * Raw Uniswap V2 stack that backs the Uniboost dispatchers (WETH9, the canonical
