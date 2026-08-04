@@ -28,6 +28,12 @@ import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 import {MigratorV2V3} from "@phlimbo-ea/MigratorV2V3.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+// Story 078, Phase 4f. `ViewRouter` itself is deliberately NOT imported — the router is live and
+// untouched, so a local `IViewRouterLike` (see the bottom of this file) is enough, matching
+// `DeployMainnetMintPageView.s.sol:112-116`.
+import {DepositPageViewV3} from "../src/views/DepositPageViewV3.sol";
+import {IPageView} from "../src/views/IPageView.sol";
+import {IPhlimboV3} from "@phlimbo-ea/interfaces/IPhlimboV3.sol";
 
 /**
  * @title  DeployMainnetPromotionReady
@@ -173,6 +179,16 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
  *       `totalStaked()==0`, revoke V2's phUSD mint authority. RUNS IMMEDIATELY BEFORE
  *       PHASE 5 so Phase 5 can point the fresh accumulator at V3 in one place, rather than
  *       mirroring V2 and correcting afterwards.
+ *   4f  (story 078) THE READ SIDE OF 4e. New `DepositPageViewV3` bound to the Phase 4e
+ *       `PhlimboV3`, then `ViewRouter.setPage(keccak256("deposit"), ...)` as the phase's LAST
+ *       step. RUNS AFTER 4e (the view's `phlimbo` is immutable, so the V3 must already exist)
+ *       and BEFORE PHASE 5 (registering a page has no bearing on the accumulator rewiring, and
+ *       keeping the cutover's write and read legs adjacent is what makes Phase 7 read in order).
+ *       Repointing EARLIER than 4e's migration would show not-yet-migrated users a
+ *       zero-balance V3 page. FIXES A LIVE BUG: `pages("deposit")` has never once been
+ *       repointed and still names a `DepositPageView` baked to PhlimboEA (V1).
+ *       NO ADDRESS-BOOK KEY is minted for the new view — `ViewRouter` is the sole view key
+ *       after this story; see `_phase4f_depositViewCutover`.
  *   5   New `StableYieldAccumulator` (pointed at the Phase 4e `PhlimboV3`), rewire
  *       strategies / burner / Pauser, deactivate old.
  *   4d  Retire the old batch-minter (`setPauser(OWNER)` + `pause()`). RUNS AFTER PHASE 5 —
@@ -297,6 +313,16 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
 
     // ---- View layer (Phase 8 resolves it; a stale build is a story-071 style follow-up) ----
     address public constant MINT_PAGE_VIEW = 0x9b3ec09C14ec49FE2AC0981cDf43f3a2f69f8FB7;
+
+    /// @dev Story 078. The live `ViewRouter` — the ONLY view-related address a consumer needs,
+    ///      and after this story the only view key left in the address books. Every page is a
+    ///      `pages(bytes32)` call away. NOT redeployed here: `setPage` is `onlyOwner` and the
+    ///      Ledger key already owns it.
+    address public constant VIEW_ROUTER = 0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a;
+
+    /// @dev Story 078. `keccak256("deposit")` — the router slot Phase 4f repoints. Its incumbent
+    ///      is `DepositPageView` 0x50D4...03b8, still baked to PhlimboEA (V1); see Phase 4f.
+    bytes32 public constant DEPOSIT_KEY = keccak256("deposit");
 
     // =====================================================================
     //  CONFIGURATION CONSTANTS
@@ -448,6 +474,13 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     address public newPhlimboV3;
     address public migratorV2V3;
 
+    /// @dev Story 078, Phase 4f. PERMANENT, but deliberately gets NO `mainnet-addresses.ts` key —
+    ///      unlike `PhlimboV3` above. Consumers resolve it through
+    ///      `ViewRouter.pages(keccak256("deposit"))`; a second, hand-maintained resolution path is
+    ///      precisely the failure mode this story removes. It still gets a progress-file record so
+    ///      a resume leg can find it.
+    address public newDepositPageViewV3;
+
     // Phase 0 readings retained for Phase 7's conservation assertions.
     uint256 public bptAtPhase0;
     bool public kenduWhitelisted;
@@ -573,6 +606,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         // Phase 5 would leave a window in which a freshly deployed accumulator is wired to a
         // Phlimbo that is about to be retired, then corrected — strictly worse.
         _phase4e_phlimboV3Cutover();
+        // Story 078. The read-side half of the same cutover. AFTER 4e because the view's
+        // `phlimbo` is immutable and must name the V3 that 4e deploys; BEFORE Phase 5 because
+        // registering a page has no bearing on the accumulator rewiring and keeping the write
+        // and read legs adjacent is what makes Phase 7 readable. See the function's NatSpec.
+        _phase4f_depositViewCutover();
         _phase5_stableYieldAccumulator();
         // Sequenced after Phase 5 on purpose — see the function's NatSpec.
         _phase4d_retireOldBatchMinter();
@@ -733,12 +771,43 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         // ---- PhlimboV3 cutover preconditions (story 076, Phase 4e). ----
         _phase0_phlimboV3Preconditions();
 
+        // ---- Deposit-page cutover preconditions (story 078, Phase 4f). ----
+        _phase0_depositViewPreconditions();
+
         // ---- The three V1 depletion stakers. ----
         _logV1Staker("V1 StakerEYE", V1_STAKER_EYE, IDX_EYE);
         _logV1Staker("V1 StakerSCX", V1_STAKER_SCX, IDX_SCX);
         _logV1Staker("V1 StakerFLX", V1_STAKER_FLX, IDX_FLX);
 
         console.log("Phase 0 preconditions: PASS");
+    }
+
+    // =====================================================================
+    //  PHASE 0 — deposit-page cutover preconditions (story 078)
+    // =====================================================================
+
+    /// @dev Everything Phase 4f depends on, read before any mutation.
+    ///
+    ///      DELIBERATELY NOT REQUIRED: any particular incumbent at `pages(DEPOSIT_KEY)`. The whole
+    ///      premise of Phase 4f is that the incumbent is WRONG — a `DepositPageView` still baked to
+    ///      PhlimboEA (V1) — so pinning it would abort the very run that fixes it, and pinning it
+    ///      to the *new* view would abort every fresh run. It is logged, not asserted.
+    function _phase0_depositViewPreconditions() internal view {
+        console.log("--- deposit-page cutover preconditions (story 078) ---");
+
+        require(VIEW_ROUTER.code.length > 0, "ViewRouter has no code at the pinned address");
+        require(
+            IViewRouterLike(VIEW_ROUTER).owner() == OWNER, "ViewRouter.owner != OWNER - Phase 4f cannot setPage"
+        );
+
+        address incumbent = IViewRouterLike(VIEW_ROUTER).pages(DEPOSIT_KEY);
+        console.log("  ViewRouter:             ", VIEW_ROUTER);
+        console.log("  pages('deposit') now:   ", incumbent);
+        if (incumbent == address(0)) {
+            console.log("  (unregistered - Phase 4f will register the deposit page for the first time)");
+        } else {
+            console.log("  (WILL BE DISPLACED by Phase 4f's DepositPageViewV3)");
+        }
     }
 
     // =====================================================================
@@ -1613,10 +1682,6 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     }
 
     // =====================================================================
-    //  PHASE 5 — StableYieldAccumulator
-    // =====================================================================
-
-    // =====================================================================
     //  PHASE 4e — PhlimboV3 cutover and V2 user-base migration (story 076)
     // =====================================================================
 
@@ -1932,6 +1997,101 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         string memory json = vm.readFile(SNAPSHOT_V2_FILE);
         users = vm.parseJsonAddressArray(json, ".users");
     }
+
+    // =====================================================================
+    //  PHASE 4f — deposit-page cutover onto DepositPageViewV3 (story 078)
+    // =====================================================================
+
+    /// @dev THE READ SIDE OF PHASE 4e. Phase 4e moved every position and the yield funnel onto
+    ///      PhlimboV3 but left the UI resolving the deposit page through a view that has never
+    ///      once been repointed:
+    ///
+    ///        ViewRouter                            0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a
+    ///        ViewRouter.pages(keccak256("deposit")) -> DepositPageView 0x50D4...03b8, still
+    ///                                                 baked to PhlimboEA (V1)
+    ///        DepositView 0x0725...5251              -> PhlimboV2, but NOT the routed one
+    ///
+    ///      `RewireSYAToPhlimboV2.s.sol:45-50` records the V1->V2 decision that produced that
+    ///      inversion: `DepositPageView` was judged deprecated and deliberately not redeployed,
+    ///      while the one actually MARKED deprecated, `DepositView`, was. The only
+    ///      `setPage("deposit")` anywhere in
+    ///      this repo is the local `DeployMocks.s.sol:1278`. THIS PHASE IS THE FIRST TIME THE
+    ///      MAINNET DEPOSIT PAGE IS REPOINTED.
+    ///
+    ///      ORDER IS LOAD-BEARING, in two directions:
+    ///
+    ///        * AFTER Phase 4e. `DepositPageViewV3.phlimbo` is IMMUTABLE, so the view cannot be
+    ///          constructed before the PhlimboV3 it must name exists.
+    ///        * `setPage` LAST, after 4e's migration completed and V2 was wound down. Repointing
+    ///          earlier would show every not-yet-migrated user a zero-balance V3 page — a
+    ///          "your deposit vanished" screen, mid-Ledger-session, with no way to hurry it.
+    ///        * BEFORE Phase 5. Registering a page is a pure read-side change with no bearing on
+    ///          the accumulator rewiring, so keeping it adjacent to 4e keeps the cutover's write
+    ///          and read legs together and lets Phase 7 read in narrative order.
+    ///
+    ///      Deliberately NOT done: no address-book key is minted for the new view. Its address is
+    ///      published on-chain by `ViewRouter.pages(DEPOSIT_KEY)` and recorded in the progress
+    ///      file by `_trackDeployment`. A hand-maintained key would recreate exactly the
+    ///      dual-resolution ambiguity that let the V1/V2 inversion above go unnoticed for months.
+    ///
+    ///      Both mutating steps are `_isConfigured`/`_isDeployed`-gated, so a resumed leg neither
+    ///      redeploys the view nor re-sends a `setPage` that already landed.
+    function _phase4f_depositViewCutover() internal {
+        console.log("\n=== Phase 4f: deposit-page cutover -> DepositPageViewV3 (story 078) ===");
+
+        require(newPhlimboV3 != address(0), "Phase 4f reached with no PhlimboV3 - Phase 4e must run first");
+
+        // ---- 1. Owner precheck. Without it the broadcast reverts deep inside the phase with an
+        //         opaque `OwnableUnauthorizedAccount`. Mirrors DeployMainnetMintPageView.s.sol:66.
+        require(
+            IViewRouterLike(VIEW_ROUTER).owner() == OWNER, "ViewRouter.owner != OWNER (setPage would revert)"
+        );
+
+        // ---- 2. Record what is about to be displaced, so the broadcast log carries it. ----
+        address incumbent = IViewRouterLike(VIEW_ROUTER).pages(DEPOSIT_KEY);
+        console.log("  ViewRouter 'deposit' page currently:", incumbent);
+
+        // ---- 3. Deploy the V3-native view. ----
+        if (_isDeployed("DepositPageViewV3")) {
+            newDepositPageViewV3 = deployments["DepositPageViewV3"].addr;
+            console.log("  DepositPageViewV3 already deployed at:", newDepositPageViewV3);
+        } else {
+            uint256 g = gasleft();
+            DepositPageViewV3 view_ = new DepositPageViewV3(IPhlimboV3(newPhlimboV3), IERC20(PHUSD));
+            newDepositPageViewV3 = address(view_);
+            _trackDeployment("DepositPageViewV3", newDepositPageViewV3, g - gasleft());
+            console.log("  DepositPageViewV3 deployed at:", newDepositPageViewV3);
+        }
+
+        // Constructor-arg read-back. Both members are immutable, so a mismatch here is
+        // unrecoverable-in-place and must abort before the router is repointed at it.
+        require(
+            address(DepositPageViewV3(newDepositPageViewV3).phlimbo()) == newPhlimboV3,
+            "DepositPageViewV3.phlimbo != new PhlimboV3"
+        );
+        require(
+            address(DepositPageViewV3(newDepositPageViewV3).phUSD()) == PHUSD, "DepositPageViewV3.phUSD != phUSD"
+        );
+
+        // ---- 4. LAST STEP OF THE PHASE: repoint the router. ----
+        if (_isConfigured("viewRouter_setPage_deposit")) {
+            console.log("  viewRouter_setPage_deposit already applied (resumed leg)");
+        } else {
+            IViewRouterLike(VIEW_ROUTER).setPage(DEPOSIT_KEY, IPageView(newDepositPageViewV3));
+            _trackConfig("viewRouter_setPage_deposit");
+            console.log("  ViewRouter.setPage('deposit') -> DepositPageViewV3");
+        }
+
+        require(
+            IViewRouterLike(VIEW_ROUTER).pages(DEPOSIT_KEY) == newDepositPageViewV3,
+            "ViewRouter 'deposit' page did not repoint"
+        );
+        console.log("  displaced:", incumbent, "->", newDepositPageViewV3);
+    }
+
+    // =====================================================================
+    //  PHASE 5 — StableYieldAccumulator
+    // =====================================================================
 
     function _phase5_stableYieldAccumulator() internal {
         console.log("\n=== Phase 5: StableYieldAccumulator ===");
@@ -2365,8 +2525,52 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         console.log("  retiring contracts drained; BPT fully on the new pooler");
 
         _phase7_phlimboV3Assertions();
+        _phase7_depositViewAssertions();
 
         console.log("Phase 7: ALL WIRING ASSERTIONS PASS");
+    }
+
+    /// @dev Story 078's half of Phase 7. `view` for the same reason as the block above:
+    ///      `VerifyPromotionReady` re-runs the entire phase against LIVE post-broadcast state by
+    ///      inheritance alone, so nothing here may mutate or reach for a cheatcode.
+    ///
+    ///      The second assertion is THE ONE THAT MATTERS. `pages("deposit") == theNewView` alone
+    ///      would have passed happily throughout the V1->V2 era — the router pointed at a view,
+    ///      just not at one wired to the live Phlimbo. Asserting the view's immutable `phlimbo`
+    ///      equals the PhlimboV3 Phase 4e deployed is what actually closes that hole.
+    ///
+    ///      The round-trips go THROUGH the router, not directly at the view, because the router is
+    ///      the only sanctioned resolution path after this story — testing the direct call would
+    ///      verify a path no consumer is supposed to take.
+    function _phase7_depositViewAssertions() internal view {
+        require(newDepositPageViewV3 != address(0), "Phase 7: no DepositPageViewV3 address resolved");
+        require(newPhlimboV3 != address(0), "Phase 7: no PhlimboV3 address resolved");
+
+        require(
+            IViewRouterLike(VIEW_ROUTER).pages(DEPOSIT_KEY) == newDepositPageViewV3,
+            "ViewRouter 'deposit' page != DepositPageViewV3 - the deposit page still resolves to the old view"
+        );
+
+        DepositPageViewV3 v = DepositPageViewV3(newDepositPageViewV3);
+        require(
+            address(v.phlimbo()) == newPhlimboV3,
+            "DepositPageViewV3.phlimbo != PhlimboV3 - the deposit page reads a Phlimbo the protocol no longer uses"
+        );
+        require(address(v.phUSD()) == PHUSD, "DepositPageViewV3.phUSD != phUSD");
+
+        // Exactly 23, not `>= 23`. Story 077 declares the array append-only, so a changed count is
+        // drift worth failing on; bumping one integer is a trivial cost when the layout is
+        // intentionally extended.
+        require(
+            IViewRouterLike(VIEW_ROUTER).getNames(DEPOSIT_KEY).length == 23,
+            "router getNames('deposit').length != 23"
+        );
+        require(
+            IViewRouterLike(VIEW_ROUTER).getData(DEPOSIT_KEY, OWNER).length == 23,
+            "router getData('deposit').length != 23"
+        );
+
+        console.log("  deposit page: router repointed to DepositPageViewV3, bound to PhlimboV3, 23 fields round-trip");
     }
 
     /// @dev Story 076's half of Phase 7. Every assertion here is `view`, which is what lets
@@ -2490,6 +2694,7 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
 
         _probeKenduFeeOnTransfer();
         _probeMintPageView();
+        _probeDepositPageView();
         _probeDonorPaths();
         _probeBatchMint();
         _probeArrayLengthMismatch();
@@ -2631,6 +2836,54 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         } else {
             console.log("  !! getData() REVERTED against the post-cutover lineup.");
             console.log("  !! A MintPageView redeploy + ViewRouter.setPage('mint', ...) leg is required.");
+        }
+    }
+
+    /// @dev Story 078. The deposit-page sibling of `_probeMintPageView`, and the only place the
+    ///      new page's VALUES (rather than just its wiring) are printed for a human to eyeball.
+    ///
+    ///      Reads THROUGH the router — the sanctioned path, and the one Phase 4f actually
+    ///      changed. WARNS RATHER THAN REVERTS, exactly like its sibling: Phase 8 is a preview
+    ///      diagnostic, and blowing up the whole preview over an unregistered page would destroy
+    ///      the run that was about to explain why. The hard failure lives in Phase 7, which is
+    ///      `require`-gated and re-run post-broadcast by `VerifyPromotionReady`.
+    function _probeDepositPageView() internal view {
+        console.log("--- ViewRouter.getData('deposit') (story 078) ---");
+
+        address page = IViewRouterLike(VIEW_ROUTER).pages(DEPOSIT_KEY);
+        if (page == address(0)) {
+            console.log("  !! 'deposit' page is UNREGISTERED on the router.");
+            console.log("  !! Phase 4f's setPage did not land - the UI would resolve nothing.");
+            return;
+        }
+        console.log("  resolves to:", page);
+        if (page != newDepositPageViewV3) {
+            console.log("  !! but Phase 4f deployed:", newDepositPageViewV3);
+            console.log("  !! the router points at a DIFFERENT view than this run built.");
+        }
+
+        (bool okNames, bytes memory retNames) =
+            VIEW_ROUTER.staticcall(abi.encodeWithSignature("getNames(bytes32)", DEPOSIT_KEY));
+        (bool okData, bytes memory retData) =
+            VIEW_ROUTER.staticcall(abi.encodeWithSignature("getData(bytes32,address)", DEPOSIT_KEY, OWNER));
+
+        if (!okNames || !okData) {
+            console.log("  !! getNames/getData REVERTED through the router.");
+            console.log("  !! DepositPageViewV3 is documented as never-reverting; investigate before broadcasting.");
+            return;
+        }
+
+        string[] memory names = abi.decode(retNames, (string[]));
+        uint256[] memory data = abi.decode(retData, (uint256[]));
+        if (names.length != data.length) {
+            console.log("  !! names/data length mismatch:", names.length, data.length);
+            return;
+        }
+        if (names.length != 23) {
+            console.log("  !! expected 23 fields, got:", names.length);
+        }
+        for (uint256 i = 0; i < names.length; i++) {
+            console.log("  ", names[i], data[i]);
         }
     }
 
@@ -2861,9 +3114,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     /// @dev Every key the progress file can carry — deployments first, then the config-step
     ///      flags. Used for both parsing and (implicitly) the write path's ordering.
     function _allProgressKeys() internal pure returns (string[] memory names) {
-        // Sized with headroom above the `require(i == 60)` below (story 076 raised the count
-        // from 50 to 60, which exactly filled the previous allocation). Only `i` entries are
-        // ever read — `all` is built from `i + j`, not from this length.
+        // Sized with headroom above the `require(i == 62)` below (story 076 raised the count
+        // from 50 to 60, which exactly filled the previous allocation; story 078 added the
+        // `DepositPageViewV3` deployment and the `viewRouter_setPage_deposit` flag, 60 -> 62).
+        // 70 still leaves 8 free slots. Only `i` entries are ever read — `all` is built from
+        // `i + j`, not from this length.
         names = new string[](70);
         uint256 i;
         // Deployments (address-bearing).
@@ -2887,6 +3142,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         // regardless, so a resume leg can find them.
         names[i++] = "PhlimboV3";
         names[i++] = "MigratorV2V3";
+        // Story 078, Phase 4f. Permanent, but deliberately gets NO `mainnet-addresses.ts` key:
+        // `ViewRouter.pages(keccak256("deposit"))` publishes its address on-chain, and this
+        // record is how a resume leg finds it. A hand-maintained key would recreate the
+        // dual-resolution ambiguity the story exists to remove.
+        names[i++] = "DepositPageViewV3";
         // The five repointed hooks: recorded at their EXISTING addresses so the patch script
         // can round-trip them by name. Not deployments; nothing is created for these.
         names[i++] = "UniboostHookEYE";
@@ -2942,9 +3202,14 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         names[i++] = "p4e_v2_apyZero";
         names[i++] = "p4e_v2_revokeMigrator";
         names[i++] = "p4e_v2_mintRevoke";
+        // Story 078, Phase 4f. Its only config step; the deployment record is up with the
+        // address-bearing keys above.
+        names[i++] = "viewRouter_setPage_deposit";
         // Bumped by story 076: +2 deployment records (PhlimboV3, MigratorV2V3) and +8 Phase
         // 4e config flags. 50 -> 60.
-        require(i == 60, "progress key count drifted");
+        // Bumped by story 078: +1 deployment record (DepositPageViewV3) and +1 Phase 4f config
+        // flag (viewRouter_setPage_deposit). 60 -> 62.
+        require(i == 62, "progress key count drifted");
         // Per-token Uniboost + staker flags.
         string[3] memory labels = ["EYE", "SCX", "FLX"];
         string[5] memory ubSteps = ["_pull", "_config", "_rescue", "_repointHook", "_replace"];
@@ -3275,6 +3540,18 @@ interface IPhlimboV2Like {
     function paused() external view returns (bool);
     function userInfo(address user) external view returns (uint256 amount, uint256 phUSDDebt, uint256 stableDebt);
     function setMigrator(address newMigrator) external;
+}
+
+/// @dev Story 078. The live `ViewRouter`'s read/admin surface, declared locally rather than
+///      importing `src/views/ViewRouter.sol`, matching `DeployMainnetMintPageView.s.sol:112-116`.
+///      The router is deployed, owned by the Ledger key and never redeployed by this script, so
+///      pulling its implementation into the script's bytecode would buy nothing.
+interface IViewRouterLike {
+    function owner() external view returns (address);
+    function pages(bytes32 key) external view returns (address);
+    function setPage(bytes32 key, IPageView page) external;
+    function getNames(bytes32 page) external view returns (string[] memory);
+    function getData(bytes32 page, address user) external view returns (uint256[] memory);
 }
 
 /// @dev Story 076. The two-step APY setter, identical on V2 and V3, so one helper drives

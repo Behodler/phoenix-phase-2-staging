@@ -16,15 +16,6 @@
 // Updated 2026-07-08: Uniboost dispatchers cut over at indices 1/2/3 + index-7 ratchet swapped to NudgeRatchetDelayRelease (story 071, RESUMED); addresses patched from progress file
 // Updated 2026-07-29: zero-address placeholders added for Kendu + NudgeStreamer so the hand-
 // maintained key-set still matches the regenerated ContractAddresses interface (story 073)
-// Updated 2026-08-04: the DepositView, DepositPageView and MintPageView keys were DELETED
-// (story 078). ViewRouter is now the SOLE view-resolution path: consumers call
-// `ViewRouter.pages(keccak256("<page>"))` rather than reading a hand-maintained address. The
-// two competing paths are exactly how the deposit page went unnoticed for months pointing at a
-// PhlimboEA (V1) view while the keyed DepositView pointed at V2. The replacement
-// DepositPageViewV3 (promotion-ready Phase 4f) is INTENTIONALLY KEYLESS for the same reason —
-// its address is published on-chain by the router and recorded in progress.1.json. Do not add
-// a key for it. This is a deliberate, owner-sanctioned break for downstream UI consumers that
-// copied the ContractAddresses interface.
 import { ContractAddresses } from './addresses';
 
 
@@ -52,6 +43,7 @@ export const mainnetAddresses: ContractAddresses = {
   // scripts/patch-mainnet-addresses-promotion-ready.js. Zero until that broadcast lands.
   PhlimboV3: "0x0000000000000000000000000000000000000000",
   StableYieldAccumulator: "0x3C690EC3B2524104dE269bf0F9baa7f045eF8270",
+  DepositView: "0x0725722b50287f2285b873f534d5848e76c15251",
   // Story 055 migration (executed 2026-06-10: MigrateStableStakerMainnet run txs 1-20 +
   // ResumeStableStakerMigration run, all receipts 0x1). DOLA/USDC are plain
   // ERC4626YieldStrategy; USDe is ERC4626MarketYieldStrategy @ 30 bps (sUSDe cooldown
@@ -130,9 +122,12 @@ export const mainnetAddresses: ContractAddresses = {
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts
-  // Story 078: ViewRouter is now the ONLY view-related key. Every page is resolved with
-  // `ViewRouter.pages(keccak256("<page>"))` — "deposit", "mint", … — not from this file.
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
+  DepositPageView: "0x50D4443782bB9A6e8D65dAcd593684EDd3FF03b8",
+  // Story 048: reverted from 0xeBEc50cD19310e6ed59D8153313Ec7C888152c1A (index-6 view)
+  // to the prior index-4 view ahead of the dispatcher cutover. Verified on-chain:
+  // getData(0)[23] == 4 for the address below.
+  MintPageView: "0x9b3ec09c14ec49fe2ac0981cdf43f3a2f69f8fb7",
   // NFT staking
   BalancerPoolerMintDebtHook: "0x4a26ad83306a2f17155799fdd9449f77eb3f8bd7",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",

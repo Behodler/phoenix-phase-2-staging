@@ -57,10 +57,7 @@ export const anvilAddresses: ContractAddresses = {
   RatchetNFTStaker: "0x2c8ED11fd7A058096F2e5828799c68BE88744E2F",
   RatchetBatchNFTMinter: "0x975Ab64F4901Af5f0C96636deA0b9de3419D0c2F",
   StableStaker: "0xdF46e54aAadC1d55198A4a8b4674D7a4c927097A",
-  DepositView: "0xc0Bb1650A8eA5dDF81998f17B5319afD656f4c11",
   ViewRouter: "0x5322471a7E37Ac2B8902cFcba84d266b37D811A0",
-  DepositPageView: "0x90c84237fDdf091b1E63f369AF122EB46000bc70",
-  MintPageView: "0x103A3b128991781EE2c8db0454cA99d67b257923",
 };
 
 export type AnvilContractName = keyof ContractAddresses;

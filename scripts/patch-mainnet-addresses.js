@@ -35,9 +35,10 @@ const PROGRESS_TO_TS_KEY = {
     BalancerPooler: 'BalancerPooler',
     GatherWBTC: 'GatherWBTC',
     NewStableYieldAccumulator: 'StableYieldAccumulator',
-    ViewRouter: 'ViewRouter',
-    DepositPageView: 'DepositPageView',
-    MintPageView: 'MintPageView',
+    // Story 078: the ViewRouter / DepositPageView / MintPageView entries were REMOVED. The two
+    // page keys no longer exist in mainnet-addresses.ts at all (ViewRouter.pages() is the sole
+    // resolution path), and ViewRouter itself is live, immutable and never redeployed, so this
+    // one-shot patcher has nothing left to write for any of them.
 };
 
 function run() {

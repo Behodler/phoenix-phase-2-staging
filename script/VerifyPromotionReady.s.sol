@@ -35,8 +35,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         correct cutover. It is replaced by an expected TWO-SIDED DELTA plus a POSITIVE
  *         assertion on PhlimboV3. See `_verifyMintAuthorityInvariance`.
  *
+ *         STORY 078 EXTENDED IT AGAIN, and cheaply: Phase 4f's deposit-page cutover adds one
+ *         runtime address (`DepositPageViewV3`) and a `view`-only assertion block inside Phase 7,
+ *         so this verifier inherits the whole of it. The only edits here are resolving that
+ *         address from the progress file — the ONLY off-chain record of it, since the story
+ *         deliberately mints no address-book key — and adding it to the mint-authority sweep.
+ *
  *         INHERITANCE, NOT DUPLICATION. Deriving from the deploy script gives this file all
- *         ~200 address constants, the 16 runtime address members, `_loadProgressFile()`,
+ *         ~200 address constants, the 17 runtime address members, `_loadProgressFile()`,
  *         `_phase7_wiringAssertions()` and its `_assertSlot`/`_assertHookPair`/`_assertStream`
  *         helpers for free. Copying them into a second file would guarantee eventual drift,
  *         and drift in exactly this file is what audit run-22 was cleaning up.
@@ -143,7 +149,11 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
         // its immutable endpoints, all of which need the address.
         _requireResolved(newPhlimboV3, "PhlimboV3");
         _requireResolved(migratorV2V3, "MigratorV2V3");
-        console.log("Progress file resolved all 16 runtime addresses.");
+        // Story 078. `DepositPageViewV3` is resolved here even though it deliberately gets NO
+        // `mainnet-addresses.ts` key — the progress file is the ONLY off-chain record of its
+        // address, and Phase 7 asserts its two immutables and the router slot that names it.
+        _requireResolved(newDepositPageViewV3, "DepositPageViewV3");
+        console.log("Progress file resolved all 17 runtime addresses.");
 
         // A verifier run against a file the cutover never finished writing is a false
         // negative waiting to happen: the run may simply not be over yet.
@@ -219,12 +229,13 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
     ///           because a missing grant fails SILENTLY: `PhlimboV3._claimRewards` banks a
     ///           failed mint rather than reverting (`PhlimboV3.sol:913`).
     ///
-    ///        3. ABSOLUTE, for the other 15 newly deployed contracts — none may hold phUSD
+    ///        3. ABSOLUTE, for the other 16 newly deployed contracts — none may hold phUSD
     ///           mint authority. PhlimboV3 is the ONE declared exclusion; every other new
-    ///           contract, `MigratorV2V3` included, stays in the sweep. `MigratorV2V3`
-    ///           genuinely needs no mint role: V2 itself mints the pending phUSD rewards
-    ///           during `withdraw` (`MigratorV2V3.sol:54-56`). A blanket relaxation to
-    ///           accommodate PhlimboV3 would silently discard a real control.
+    ///           contract, `MigratorV2V3` and (story 078) `DepositPageViewV3` included, stays
+    ///           in the sweep. `MigratorV2V3` genuinely needs no mint role: V2 itself mints the
+    ///           pending phUSD rewards during `withdraw` (`MigratorV2V3.sol:54-56`);
+    ///           `DepositPageViewV3` is a pure view. A blanket relaxation to accommodate
+    ///           PhlimboV3 would silently discard a real control.
     function _verifyMintAuthorityInvariance() internal view {
         console.log("\n=== phUSD mint-authority delta (story 075, restated by story 076) ===");
         require(
@@ -294,7 +305,12 @@ contract VerifyPromotionReady is DeployMainnetPromotionReady {
         // Story 076: MigratorV2V3 stays IN the sweep. It needs no mint role - V2 itself mints
         // the pending phUSD rewards during `withdraw` (MigratorV2V3.sol:54-56).
         _requireNotPhusdMinter(migratorV2V3, "MigratorV2V3");
-        console.log("  none of the other 15 newly deployed contracts holds phUSD mint authority");
+        // Story 078: DepositPageViewV3 is a newly deployed contract, so it joins the sweep. It is
+        // a pure view with no mint call anywhere in it, which is exactly why the sweep — not a
+        // judgement call — is what proves it holds no authority. 15 -> 16 swept, 17 new contracts
+        // in total once the positively-asserted PhlimboV3 is counted.
+        _requireNotPhusdMinter(newDepositPageViewV3, "DepositPageViewV3");
+        console.log("  none of the other 16 newly deployed contracts holds phUSD mint authority");
         console.log("phUSD mint-authority delta: PASS");
     }
 

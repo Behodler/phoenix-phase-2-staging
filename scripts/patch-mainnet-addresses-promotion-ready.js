@@ -44,7 +44,9 @@
  * WHAT IT NEVER DOES
  *   Add or remove a key. `mainnet-addresses.ts` is hand-maintained and never regenerated;
  *   its key-set must exactly equal the `ContractAddresses` interface in `addresses.ts`
- *   (58 == 58 after story 076 added `PhlimboV3` to BOTH files), which is the `tsc --strict`
+ *   (55 == 55 after story 078 DELETED `DepositView`, `DepositPageView` and `MintPageView`
+ *   from both files, 58 -> 55; story 076 had taken it to 58 by adding `PhlimboV3`), which is
+ *   the `tsc --strict`
  *   drift guard. That equality is re-checked below AFTER patching, and a mismatch is a
  *   non-zero exit. Adding a key means adding it to both files in the same commit.
  *
