@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-07-31T22:21:43.248Z",
+  "extractedAt": "2026-08-03T22:47:12.730Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -288,14 +288,14 @@
       "address": "0xA7c59f010700930003b33aB25a7a0679C860f29c",
       "deployed": true,
       "configured": true,
-      "deployGas": 687812,
+      "deployGas": 749921,
       "configGas": 0
     },
     "BatchNFTMinter": {
       "address": "0xfaAddC93baf78e89DCf37bA67943E1bE8F37Bb8c",
       "deployed": true,
       "configured": true,
-      "deployGas": 1460812,
+      "deployGas": 1545167,
       "configGas": 0
     },
     "UniboostStakerEYE": {
