@@ -3062,6 +3062,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         migratorFLX = deployments["NFTStakerMigratorFLX"].addr;
         newPhlimboV3 = deployments["PhlimboV3"].addr;
         migratorV2V3 = deployments["MigratorV2V3"].addr;
+        // Story 078. Without this line the read-only VerifyPromotionReady — which never runs
+        // Phase 4f, the only other place this member is assigned — sees address(0) and aborts
+        // in `_requireResolved(newDepositPageViewV3, "DepositPageViewV3")`, taking the whole
+        // trailing verify leg of `promotion-ready:broadcast` with it.
+        newDepositPageViewV3 = deployments["DepositPageViewV3"].addr;
     }
 
     /// @dev Recovers the top-level `baselines` block. Guarded by `keyExistsJson` so a progress

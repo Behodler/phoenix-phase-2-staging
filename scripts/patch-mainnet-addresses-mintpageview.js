@@ -9,6 +9,14 @@
  * Requires exactly one landed MintPageView CREATE; unconditionally replaces the existing value.
  *
  * Exit: 0 ok | 1 broadcast/addresses missing | 3 != 1 landed MintPageView | 4 field not found
+ *
+ * ===== DEAD AS OF STORY 078. RETAINED AS HISTORY; NOT WIRED INTO ANY npm KEY. =====
+ * Story 078 deleted the MintPageView key from mainnet-addresses.ts (with DepositView and
+ * DepositPageView), leaving ViewRouter as the sole view key: views resolve on-chain through
+ * ViewRouter.pages(keccak256("<page>")), never through a hand-maintained address book. There is
+ * no longer a field for this script to patch, so it can only exit 4. Its call was therefore
+ * removed from the `mintpageview:broadcast` npm key, which was a spent one-shot leg anyway.
+ * Do not re-wire it; register a redeployed view with ViewRouter.setPage instead.
  */
 const fs = require('fs');
 const path = require('path');

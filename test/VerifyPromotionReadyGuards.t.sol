@@ -28,6 +28,9 @@ import "forge-std/Test.sol";
  */
 contract VerifyPromotionReadyGuardsTest is Test {
     string constant VERIFIER_SRC = "script/VerifyPromotionReady.s.sol";
+    /// @dev Story 078. The verifier inherits its progress-file parser from the cutover script,
+    ///      so the two files must be read together to prove the parse/consume halves agree.
+    string constant DEPLOY_SRC = "script/DeployMainnetPromotionReady.s.sol";
 
     // -----------------------------------------------------------------
     //  Local model of the verifier's baseline-consumption guard.
@@ -142,6 +145,126 @@ contract VerifyPromotionReadyGuardsTest is Test {
     }
 
     // -----------------------------------------------------------------
+    //  Story 078 regression. EVERY address the verifier demands from the
+    //  progress file must actually be HYDRATED from it.
+    // -----------------------------------------------------------------
+
+    /// @dev THE BUG THIS PINS. Story 078 added `_requireResolved(newDepositPageViewV3, …)` to
+    ///      the verifier but no matching `newDepositPageViewV3 = deployments["DepositPageViewV3"].addr;`
+    ///      to `_parseProgressJson()`. The member is otherwise assigned only inside
+    ///      `_phase4f_depositViewCutover()`, which the read-only verifier never runs — so the
+    ///      verifier resolved `address(0)` and aborted on EVERY post-broadcast run, taking the
+    ///      trailing verify leg of `promotion-ready:broadcast` with it. Nothing caught it: the
+    ///      dry run writes no progress file and never invokes the verifier, and `forge build`
+    ///      is perfectly happy with an unassigned member.
+    ///
+    ///      This is a CLASS of bug, not a one-off — the two halves live ~1500 lines apart in
+    ///      two different files — so the check is derived from the source rather than from a
+    ///      hardcoded list: it re-reads every `_requireResolved` call site and demands the
+    ///      corresponding assignment, scoped to `_parseProgressJson`'s own body. Scoping is
+    ///      load-bearing: the phase bodies assign these same members from the same map, and an
+    ///      unscoped search would have passed on the broken code.
+    function test_everyRequiredAddressIsHydratedFromProgressFile() public view {
+        string memory verifier = vm.readFile(VERIFIER_SRC);
+        string memory parseBody = _parseProgressJsonBody(vm.readFile(DEPLOY_SRC));
+
+        uint256 checked;
+        uint256 cursor;
+        while (true) {
+            (bool found, uint256 at) = _find(verifier, "_requireResolved(", cursor);
+            if (!found) break;
+            uint256 open = at + bytes("_requireResolved(").length;
+            (bool closed, uint256 close) = _find(verifier, ")", open);
+            require(closed, "unterminated _requireResolved call");
+            cursor = close;
+
+            string memory args = _slice(verifier, open, close);
+            (bool split, uint256 comma) = _find(args, ",", 0);
+            if (!split) continue;
+            string memory member = _trim(_slice(args, 0, comma));
+            string memory name = _unquote(_trim(_slice(args, comma + 1, bytes(args).length)));
+
+            // Skip the declaration itself (`function _requireResolved(address a, string memory name)`).
+            if (_contains(member, " ")) continue;
+
+            assertTrue(
+                _contains(parseBody, string.concat(member, ' = deployments["', name, '"].addr;')),
+                string.concat(
+                    "VerifyPromotionReady requires '",
+                    name,
+                    "' but _parseProgressJson never hydrates '",
+                    member,
+                    "' - the verifier will abort on address(0)"
+                )
+            );
+            checked++;
+        }
+        assertEq(checked, 17, "expected 17 resolved runtime addresses; update this test if the lineup changed");
+    }
+
+    /// @dev Isolates `_parseProgressJson`'s body, terminated by the first function-level
+    ///      closing brace (four-space indent). Keeps the assertion above from being satisfied
+    ///      by an assignment that lives in a deployment phase the verifier never executes.
+    function _parseProgressJsonBody(string memory src) internal pure returns (string memory) {
+        (bool found, uint256 at) = _find(src, "function _parseProgressJson(", 0);
+        require(found, "_parseProgressJson not found - was it renamed?");
+        (bool ended, uint256 end) = _find(src, "\n    }", at);
+        require(ended, "could not locate the end of _parseProgressJson");
+        return _slice(src, at, end);
+    }
+
+    // -----------------------------------------------------------------
+
+    function _find(string memory haystack, string memory needle, uint256 from)
+        internal
+        pure
+        returns (bool, uint256)
+    {
+        bytes memory h = bytes(haystack);
+        bytes memory n = bytes(needle);
+        if (n.length == 0 || n.length > h.length) return (false, 0);
+        for (uint256 i = from; i <= h.length - n.length; i++) {
+            bool matched = true;
+            for (uint256 j = 0; j < n.length; j++) {
+                if (h[i + j] != n[j]) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return (true, i);
+        }
+        return (false, 0);
+    }
+
+    function _slice(string memory s, uint256 start, uint256 end) internal pure returns (string memory) {
+        bytes memory b = bytes(s);
+        if (end > b.length) end = b.length;
+        if (start >= end) return "";
+        bytes memory out = new bytes(end - start);
+        for (uint256 i = 0; i < end - start; i++) {
+            out[i] = b[start + i];
+        }
+        return string(out);
+    }
+
+    function _trim(string memory s) internal pure returns (string memory) {
+        bytes memory b = bytes(s);
+        uint256 lo;
+        uint256 hi = b.length;
+        while (lo < hi && (b[lo] == 0x20 || b[lo] == 0x0a || b[lo] == 0x0d || b[lo] == 0x09)) {
+            lo++;
+        }
+        while (hi > lo && (b[hi - 1] == 0x20 || b[hi - 1] == 0x0a || b[hi - 1] == 0x0d || b[hi - 1] == 0x09)) {
+            hi--;
+        }
+        return _slice(s, lo, hi);
+    }
+
+    function _unquote(string memory s) internal pure returns (string memory) {
+        bytes memory b = bytes(s);
+        if (b.length >= 2 && b[0] == 0x22 && b[b.length - 1] == 0x22) return _slice(s, 1, b.length - 1);
+        return s;
+    }
 
     function _contains(string memory haystack, string memory needle) internal pure returns (bool) {
         bytes memory h = bytes(haystack);

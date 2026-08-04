@@ -10,8 +10,10 @@
  *   1. The four ratchet fields (NudgeRatchet, NudgeRatchetMintDebtHook,
  *      RatchetNFTStaker, RatchetBatchNFTMinter) are zero-address placeholders and
  *      are only patched when currently zero; a non-zero value aborts (collision).
- *   2. MintPageView is an UPDATE: the field currently holds the old (live) view.
- *      It is replaced unconditionally with the new deployed address.
+ *   2. (REMOVED by story 078.) This leg used to also UPDATE the MintPageView field. That
+ *      key no longer exists in mainnet-addresses.ts -- views resolve through
+ *      ViewRouter.pages(keccak256("<page>")), not a hand-maintained key -- so the row was
+ *      deleted rather than left to fail "field not found" and abort the whole patcher.
  *   3. Strips any trailing `// not yet deployed` / `// placeholder` /
  *      `// PLACEHOLDER:` comment on patched lines.
  *   4. Verifies the broadcast corresponds to the current run by cross-checking
@@ -43,14 +45,21 @@ const ADDRESSES_FILE = path.join(ROOT, 'server', 'deployments', 'mainnet-address
 // instance, so its broadcast contractName is "BatchNFTMinter". It is the only
 // BatchNFTMinter CREATE in this script's broadcast, so a name match is unambiguous.
 //
-// `update: true`  -> replace whatever is there (MintPageView).
+// `update: true`  -> replace whatever is there.
 // `update: false` -> only replace a zero-address placeholder (the four ratchet fields).
+//
+// STORY 078 removed the `{ contractName: 'MintPageView', tsField: 'MintPageView', update: true }`
+// row. `MintPageView` is no longer a key in `mainnet-addresses.ts` at all — story 078 deleted
+// `DepositView`, `DepositPageView` and `MintPageView`, leaving `ViewRouter` as the sole view key,
+// because views are resolved through `ViewRouter.pages(keccak256("<page>"))` on-chain and a
+// hand-maintained second path is exactly how the deposit page sat on a V1 view for months. The
+// row would now fail "field not found" on a leg that is otherwise still valid, so it is deleted
+// rather than left to break the whole patcher. The four ratchet fields are untouched.
 const DEPLOY_ORDER = [
     { contractName: 'BatchNFTMinter',           tsField: 'RatchetBatchNFTMinter',    update: false },
     { contractName: 'NudgeRatchet',             tsField: 'NudgeRatchet',             update: false },
     { contractName: 'NudgeRatchetMintDebtHook', tsField: 'NudgeRatchetMintDebtHook', update: false },
     { contractName: 'NFTStakerPriceScaled',     tsField: 'RatchetNFTStaker',         update: false },
-    { contractName: 'MintPageView',             tsField: 'MintPageView',             update: true },
 ];
 
 function fail(code, msg) {
@@ -122,7 +131,7 @@ function matchDeploysToExpected(broadcast) {
 /**
  * Replace a flat field at the top level of mainnetAddresses.
  *   update === false -> only replaces zero-address placeholders (abort on non-zero).
- *   update === true  -> replaces unconditionally (used for MintPageView).
+ *   update === true  -> replaces unconditionally (no field uses this since story 078).
  */
 function patchFlatField(source, field, newAddress, update) {
     const re = new RegExp(`^(\\s*${field}:\\s*)"(0x[0-9a-fA-F]{40})"(.*)$`, 'm');
@@ -178,7 +187,7 @@ function run() {
     if (!/Updated .*NudgeRatchet infrastructure deployed/.test(source)) {
         source = source.replace(
             /(\/\/ Updated [^\n]*\n)(?=import)/,
-            `$1// Updated ${today}: NudgeRatchet infrastructure deployed to mainnet (story 069); ratchet addresses + MintPageView patched from broadcast\n`
+            `$1// Updated ${today}: NudgeRatchet infrastructure deployed to mainnet (story 069); ratchet addresses patched from broadcast\n`
         );
     }
 
