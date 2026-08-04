@@ -24,6 +24,8 @@ import {NFTStakerMigrator} from "nft-staking/NFTStakerMigrator.sol";
 import {INFTStakerMigratable} from "nft-staking/INFTStakerMigratable.sol";
 import {INFTSupply} from "nft-staking/INFTSupply.sol";
 import {StableYieldAccumulator} from "@stable-yield-accumulator/StableYieldAccumulator.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
+import {MigratorV2V3} from "@phlimbo-ea/MigratorV2V3.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -53,6 +55,40 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
  *           5. (Off-chain, in the release step) regenerate wagmi hooks and publish the
  *              phase2-wagmi-hooks package at 0.12.0.
  *
+ *         STORY 076 ADDS A SIXTH: the PhlimboV3 cutover (Phase 4e). Story 072 was planned
+ *         before the PhlimboV3 promo work landed and never contemplated it, so Phase 5 wired
+ *         the fresh accumulator straight back at PhlimboV2 — leaving the whole
+ *         "promotion-ready" stack pointed at a Phlimbo with no promotional-reward machinery
+ *         at all. Phase 4e deploys `PhlimboV3`, grants it phUSD mint authority, deploys and
+ *         wires `MigratorV2V3`, migrates the V2 user base in chunks, winds V2 down and
+ *         revokes its mint authority; Phase 5 then points the new accumulator at V3.
+ *
+ * ======================== PHLIMBO V2 IS WOUND DOWN, NEVER PAUSED ========================
+ *
+ *  This is the exact INVERSE of Phase 6, where pausing V1 before `initiateMigration` is
+ *  MANDATORY. Do not copy Phase 6's pause discipline into Phase 4e.
+ *
+ *  `MigratorV2V3` reads each position LIVE off V2 and calls `phlimboV2.withdraw`, which is
+ *  `whenNotPaused` (`PhlimboV2.sol:363`) — so pausing V2 blocks the migrator itself
+ *  (`MigratorV2V3.sol:22-24`). Worse, it does not fail loudly: the per-user body runs inside
+ *  a try/catch, so a `"Pausable: paused"` revert is absorbed as a `UserMigrationSkipped`
+ *  event and the pass COMPLETES with every user skipped, looking identical to a good one
+ *  (`MigratorV2V3.sol:65-73`). Phase 4e therefore decodes and logs every skip event, and
+ *  gates on `phlimboV2.totalStaked() == 0`.
+ *
+ *  The wind-down is operational, per `MigratorV2V3.sol:40-44`: `setDesiredAPY(0)`, stop
+ *  feeding `collectReward` (which is what Phase 5's accumulator repoint actually
+ *  accomplishes), and `setMigrator(address(0))` once the pass is done.
+ *
+ * ============================== NO PROMOTION IS ARMED HERE ==============================
+ *
+ *  `PhlimboV3` ships at `promoPhase == None` with `promoToken == address(0)`, which is a
+ *  first-class designed-for state at every one of its nine consumption sites (`:106-107`,
+ *  `:875`, `:946`, `:370`, `:1047`; `MigratorV2V3.sol:240-246`, `:262-271`, `:323-327`).
+ *  `startPromotion` is a separate, later, deliberate owner action with its own funding step
+ *  and its own depletion clock, and this script NEVER calls it. Phase 7 asserts the negative.
+ *
+ *
  * ============================ HOOKS ARE REPOINTED, NOT REDEPLOYED ============================
  *
  *  The five mint-debt hooks keep their addresses. `dispatcher` is MUTABLE STORAGE on all
@@ -64,12 +100,35 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
  *  repointing so the ledger is clean across the swap."
  *
  *  Consequences, all deliberate:
- *    * ZERO `phUSD.setMinter` calls in this entire script. Mint authority is not touched,
- *      so it is byte-identical before and after BY CONSTRUCTION — there is no call that
- *      could change it. Note that this script does NOT assert that on-chain: neither
- *      Phase 0 nor Phase 7 reads phUSD's minter set. The confirmation is the post-broadcast
- *      HUMAN checklist item ("phUSD's minter set is byte-identical to its pre-cutover
- *      state"), verified with `cast` after the Ledger session.
+ *    * The HOOK REPOINT itself makes zero `phUSD.setMinter` calls — mint authority is not
+ *      touched by any part of the hook/dispatcher swap.
+ *
+ *      AMENDED BY STORY 076. The old, stronger claim here was "ZERO `phUSD.setMinter` calls
+ *      in this ENTIRE script ... byte-identical before and after BY CONSTRUCTION". That is
+ *      now FALSE, and deliberately so. Phase 4e makes exactly two:
+ *
+ *          phUSD.setMinter(phlimboV3, true)    // PhlimboV3 mints the phUSD reward leg
+ *          phUSD.setMinter(PHLIMBO_V2, false)  // gated on phlimboV2.totalStaked() == 0
+ *
+ *      So the correct post-cutover claim is not invariance but an EXPECTED, ASSERTED,
+ *      TWO-SIDED DELTA: the candidate-set mask must have lost exactly the PhlimboV2 bit and
+ *      nothing else, and PhlimboV3 must positively hold mint authority. Both directions are
+ *      asserted — a one-sided "gained V3" check would not notice an unintended revoke
+ *      elsewhere. See `_phusdMinterCandidates`, `_phase7_wiringAssertions` and
+ *      `VerifyPromotionReady._verifyMintAuthorityInvariance`.
+ *
+ *      The V2 revoke is ORDERED, not incidental: it comes after `setDesiredAPY(0)` and after
+ *      the `totalStaked() == 0` gate, never before either. `PhlimboV2._claimRewards` mints
+ *      with a BARE, REVERTING `phUSD.mint` (`PhlimboV2.sol:495`) — V3's non-reverting bank
+ *      (`PhlimboV3.sol:913`) was added to V3 only — so revoking while any position still
+ *      carried pending phUSD would make that user's `withdraw` revert and freeze their
+ *      principal. With `totalStaked == 0` no position exists to reach the mint, and with
+ *      `desiredAPYBps == 0` a user who stakes into V2 AFTER the cutover accrues zero pending
+ *      phUSD and can still exit cleanly. The revoke does not trap late arrivals.
+ *
+ *      The three OTHER `setMinter` occurrences in this file (`dispatcher.setMinter(...)`)
+ *      remain what they always were: an unrelated function on `ATokenDispatcherV2`, nothing
+ *      to do with phUSD.
  *    * Each hook keeps its `ratio`, `recipient` and `mintDebt` across the swap, so a tuned
  *      ratio cannot be silently reset to a constructor default. That matters most at index
  *      7, where `NudgeRatchetMintDebtHook`'s DEFAULT_RATIO is 100 while the other two hook
@@ -109,7 +168,13 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
  *   4b  New `Uniboost` x3 (indices 1/2/3) + `replaceDispatcher(1/2/3)`.
  *   4c  Drain index 7 into the stream, settle the ratchet hook's debt, new `NudgeRatchet`,
  *       `replaceDispatcher(7)`.
- *   5   New `StableYieldAccumulator`, rewire strategies / burner / Pauser, deactivate old.
+ *   4e  (story 076) New `PhlimboV3` + phUSD mint grant, new `MigratorV2V3`, migrate the V2
+ *       user base in chunks, wind V2 down (APY->0, revoke migrator), gate on
+ *       `totalStaked()==0`, revoke V2's phUSD mint authority. RUNS IMMEDIATELY BEFORE
+ *       PHASE 5 so Phase 5 can point the fresh accumulator at V3 in one place, rather than
+ *       mirroring V2 and correcting afterwards.
+ *   5   New `StableYieldAccumulator` (pointed at the Phase 4e `PhlimboV3`), rewire
+ *       strategies / burner / Pauser, deactivate old.
  *   4d  Retire the old batch-minter (`setPauser(OWNER)` + `pause()`). RUNS AFTER PHASE 5 —
  *       see `_phase4d_retireOldBatchMinter` for why.
  *   6   Staker migration x3, in the order story 073 proved on-chain.
@@ -126,9 +191,15 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
  *
  *   The broadcast npm key MUST end with `&& node scripts/patch-mainnet-addresses-promotion-ready.js`.
  *
- *   PREREQUISITE for both: `node scripts/snapshot-depletion-stakers.js` must have written
- *   `scripts/snapshots/depletion-stakers-latest.json`. Phase 6 reads its user lists from
- *   there; `migrate` takes an explicit array and the stakers keep no on-chain enumeration.
+ *   PREREQUISITE for both, TWO snapshots — `npm run promotion-ready:snapshot` runs both:
+ *     * `node scripts/snapshot-depletion-stakers.js` -> `scripts/snapshots/depletion-stakers-latest.json`
+ *       Phase 6 reads its user lists from there; `migrate` takes an explicit array and the
+ *       stakers keep no on-chain enumeration.
+ *     * `node scripts/snapshot-phlimbo-v2-stakers.js` -> `scripts/snapshots/phlimbo-v2-snapshot-latest.json`
+ *       (story 076) Phase 4e seeds `MigratorV2V3` from there. PhlimboV2 exposes no staker
+ *       enumeration either, and unlike the V1->V2 migration this list is ADDRESSES ONLY —
+ *       `MigratorV2V3` reads every position live. Phase 0 validates the file's `phlimboV2`
+ *       field, its `blockNumber` and its age.
  */
 contract DeployMainnetPromotionReady is Script, StdCheats {
     // =====================================================================
@@ -294,6 +365,57 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     ///         freeze before moving the budget — and its docblock says sizing was left OPEN.
     uint256 public constant SWEEP_HEADROOM_BPS = 100;
 
+    /// @notice Story 076. Users migrated per `MigratorV2V3.migrate` call.
+    ///
+    ///         `migrate` walks `[cursor, min(cursor + maxIterations, len))` and each user
+    ///         costs a V2 `withdraw` (with reward settlement and a phUSD mint) plus a V3
+    ///         `stake`, plus up to three reward forwards. The try/catch inside `migrate`
+    ///         absorbs REVERTS but NOT gas exhaustion: under the 63/64 rule a starving
+    ///         `migrateOne` can eat the remainder of the pass and every subsequent user in
+    ///         that call is skipped (`MigratorV2V3.sol:74-88`). A small chunk is the
+    ///         mitigation the migrator's own docs prescribe, and `skipCurrent()` is the
+    ///         owner backstop if one index stalls outright.
+    ///
+    ///         25 keeps a single `migrate` transaction comfortably inside a block gas limit
+    ///         with headroom for the worst-case per-user path, at the cost of more (cheap)
+    ///         transactions during the Ledger session. Erring small is deliberate: an
+    ///         over-large chunk fails SILENTLY as a wall of skips, whereas an over-small one
+    ///         merely costs another signature.
+    uint256 public constant MIGRATE_CHUNK = 25;
+
+    /// @notice Story 076. Upper bound on `migrate` CALLS in one Phase 4e run, across all
+    ///         passes. Purely a runaway-loop guard for a script that must terminate: at
+    ///         `MIGRATE_CHUNK == 25` this covers 5,000 user-slots, orders of magnitude above
+    ///         the live V2 user base. Exceeding it aborts loudly rather than spinning.
+    uint256 public constant MAX_MIGRATE_CALLS = 200;
+
+    /// @notice Story 076. How many times Phase 4e may reseed and re-run the whole pass
+    ///         before giving up on the `totalStaked() == 0` completeness gate.
+    ///
+    ///         Why more than one pass is needed at all: V2's `stake` is ungated and V2 is
+    ///         deliberately NOT paused, so a user can stake into V2 at an index the cursor
+    ///         has already passed. `seedUsers` is reseedable once `migrateIterator == -1`
+    ///         (`MigratorV2V3.sol:145`), so the same list can simply be re-walked — a user
+    ///         who has since exited reads `amount == 0` and is skipped for free.
+    ///
+    ///         3 is enough because the incentive to stake into V2 is gone by then: the
+    ///         wind-down sets `desiredAPYBps = 0` BEFORE the gate. It is bounded rather
+    ///         than open-ended because an unbounded retry against a genuinely stuck position
+    ///         (dust below `MINIMUM_STAKE`, or one that reverts every time) would spin
+    ///         forever instead of surfacing the finding.
+    uint256 public constant MAX_MIGRATION_PASSES = 3;
+
+    /// @notice Story 076. Maximum age of `phlimbo-v2-snapshot-latest.json`, checked in
+    ///         Phase 0 against `block.timestamp`.
+    ///
+    ///         Phase 4e absorbs a user who stakes DURING the pass (it reseeds and re-runs).
+    ///         What it cannot absorb is a user whose FIRST EVER `Staked` event postdates the
+    ///         snapshot's event scan: they are absent from the seed list entirely, `migrate`
+    ///         never visits them, and their position holds `totalStaked()` above 0 — failing
+    ///         the completeness gate. Only a fresh scan closes that window. Mirrors the
+    ///         24-hour discipline `scripts/check-phlimbo-snapshot-age.js` applies off-chain.
+    uint256 public constant MAX_V2_SNAPSHOT_AGE = 24 hours;
+
     // Dispatcher indices.
     uint256 public constant IDX_EYE = 1;
     uint256 public constant IDX_SCX = 2;
@@ -319,10 +441,26 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     address public migratorEYE;
     address public migratorSCX;
     address public migratorFLX;
+    /// @dev Story 076, Phase 4e. `PhlimboV3` is PERMANENT and gets a `mainnet-addresses.ts`
+    ///      key; `MigratorV2V3` is a TRANSIENT orchestrator and deliberately gets none,
+    ///      following story 072's precedent for the three `NFTStakerMigrator` instances. It
+    ///      still gets a progress-file record so a resume leg can find it.
+    address public newPhlimboV3;
+    address public migratorV2V3;
 
     // Phase 0 readings retained for Phase 7's conservation assertions.
     uint256 public bptAtPhase0;
     bool public kenduWhitelisted;
+
+    /// @dev PHLIMBO V2 MIGRATION BASELINE (story 076), persisted under `baselines` exactly as
+    ///      story 074 does for `bptAtCutover`, and for the identical reason (audit run-22
+    ///      L-02). Phase 7 asserts `phlimboV3.totalStaked()` conserves what V2 held before
+    ///      the migration. Re-deriving that from a live read of V2 on a resume leg is
+    ///      worthless: by then V2 is empty by construction (the completeness gate demands
+    ///      it), so the assertion would collapse to `>= 0` and pass no matter where the
+    ///      position went. Write-once and monotonic, mirroring `bptAtPhase0`.
+    uint256 public phlimboV2StakedAtCutover;
+    bool public phlimboBaselineFromProgressFile;
 
     /// @dev The BPT cutover baseline as recovered from the progress file's top-level
     ///      `baselines` block, and whether it was actually present there. Kept separate from
@@ -354,6 +492,9 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
 
     string constant PROGRESS_FILE = "server/deployments/progress.promotion-ready.1.json";
     string constant SNAPSHOT_FILE = "scripts/snapshots/depletion-stakers-latest.json";
+    /// @dev Story 076. Written by `scripts/snapshot-phlimbo-v2-stakers.js`. ADDRESS LIST
+    ///      ONLY — `MigratorV2V3` reads every position live, so no amount is seeded.
+    string constant SNAPSHOT_V2_FILE = "scripts/snapshots/phlimbo-v2-snapshot-latest.json";
     uint256 constant CHAIN_ID = 1;
     string constant NETWORK_NAME = "mainnet";
 
@@ -396,6 +537,15 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
             DEPLETION_WINDOW_MONTHS >= 1 && DEPLETION_WINDOW_MONTHS <= 120, "depletion window out of range (1..120)"
         );
         require(SWEEP_HEADROOM_BPS > 0 && SWEEP_HEADROOM_BPS < 10000, "sweep headroom out of range");
+        // Story 076, Phase 4e. Zero is not a neutral placeholder for any of these:
+        // MIGRATE_CHUNK==0 is rejected by `migrate` itself ("maxIterations==0") and would
+        // abort the cutover mid-session; MAX_MIGRATE_CALLS or MAX_MIGRATION_PASSES at 0
+        // would silently skip the migration entirely and then fail the completeness gate
+        // with a misleading message.
+        require(MIGRATE_CHUNK > 0 && MIGRATE_CHUNK <= 100, "MIGRATE_CHUNK out of range (1..100)");
+        require(MAX_MIGRATE_CALLS > 0, "MAX_MIGRATE_CALLS must be > 0");
+        require(MAX_MIGRATION_PASSES > 0 && MAX_MIGRATION_PASSES <= 10, "MAX_MIGRATION_PASSES out of range (1..10)");
+        require(MAX_V2_SNAPSHOT_AGE > 0, "MAX_V2_SNAPSHOT_AGE must be > 0");
 
         isPreview = vm.envOr("PREVIEW_MODE", false);
         _loadProgressFile();
@@ -418,6 +568,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         _phase4a_pooler();
         _phase4b_uniboosts();
         _phase4c_ratchet();
+        // Story 076. Sequenced IMMEDIATELY BEFORE Phase 5 on purpose: with PhlimboV3 already
+        // deployed, Phase 5's `sya.setPhlimbo(...)` can name it directly. Running this AFTER
+        // Phase 5 would leave a window in which a freshly deployed accumulator is wired to a
+        // Phlimbo that is about to be retired, then corrected — strictly worse.
+        _phase4e_phlimboV3Cutover();
         _phase5_stableYieldAccumulator();
         // Sequenced after Phase 5 on purpose — see the function's NatSpec.
         _phase4d_retireOldBatchMinter();
@@ -575,12 +730,126 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         // ---- phUSD mint-authority baseline (story 075). Record only; never abort. ----
         _snapshotPhusdMinterSet();
 
+        // ---- PhlimboV3 cutover preconditions (story 076, Phase 4e). ----
+        _phase0_phlimboV3Preconditions();
+
         // ---- The three V1 depletion stakers. ----
         _logV1Staker("V1 StakerEYE", V1_STAKER_EYE, IDX_EYE);
         _logV1Staker("V1 StakerSCX", V1_STAKER_SCX, IDX_SCX);
         _logV1Staker("V1 StakerFLX", V1_STAKER_FLX, IDX_FLX);
 
         console.log("Phase 0 preconditions: PASS");
+    }
+
+    // =====================================================================
+    //  PHASE 0 — PhlimboV3 cutover preconditions (story 076)
+    // =====================================================================
+
+    /// @dev Everything Phase 4e depends on, read and asserted before any mutation.
+    ///
+    ///      Deliberately NOT asserted here: that PhlimboV2 is unpaused. It is asserted at the
+    ///      top of Phase 4e instead, where the failure message can name the migration it
+    ///      breaks — and where a resume leg that has already completed the migration skips it
+    ///      rather than aborting on a V2 that was legitimately paused afterwards.
+    function _phase0_phlimboV3Preconditions() internal {
+        console.log("--- PhlimboV3 cutover preconditions (story 076) ---");
+
+        // phUSD's OWNER is the one who may call `setMinter`. Story 072 never needed this
+        // because it made no such call; Phase 4e makes two, so it is now load-bearing.
+        require(IOwnable(PHUSD).owner() == OWNER, "phUSD.owner != OWNER - Phase 4e cannot setMinter");
+        require(IOwnable(PHLIMBO_V2).owner() == OWNER, "PhlimboV2.owner != OWNER");
+
+        IPhlimboV2Like v2 = IPhlimboV2Like(PHLIMBO_V2);
+        uint256 liveStaked = v2.totalStaked();
+        address v2Reward = address(v2.rewardToken());
+        require(v2Reward != address(0), "PhlimboV2.rewardToken is zero");
+        require(v2.depletionDuration() > 0, "PhlimboV2.depletionDuration is zero - PhlimboV3 ctor would revert");
+        require(address(v2.phUSD()) == PHUSD, "PhlimboV2.phUSD != the phUSD constant");
+
+        console.log("  V2 desiredAPYBps:     ", v2.desiredAPYBps());
+        console.log("  V2 depletionDuration: ", v2.depletionDuration());
+        console.log("  V2 rewardToken:       ", v2Reward);
+        console.log("  V2 totalStaked (live):", liveStaked);
+        console.log("  V2 pauser:            ", v2.pauser());
+        console.log("  V2 migrator:          ", v2.migrator());
+        console.log("  V2 paused:            ", v2.paused());
+        // Recorded explicitly rather than left to the mask: bit 19 of the candidate set is
+        // PHLIMBO_V2, and whether it is SET at Phase 0 decides whether step 14's revoke is a
+        // real revoke or a no-op. As of 2026-08-04 it reads FALSE on mainnet (baseline mask
+        // 270080 = the five mint-debt hooks plus OWNER), which is consistent: V2's
+        // desiredAPYBps is already 0, so accPhUSDPerShare never advances, no position carries
+        // pending phUSD, and V2's bare reverting `phUSD.mint` is unreachable. The revoke is
+        // kept regardless — it is idempotent, and it must not silently become a no-op if V2
+        // is ever re-granted before the Ledger session.
+        {
+            (bool okMint, bool v2CanMint, uint256 v2Ver) = _readPhusdMinter(PHLIMBO_V2);
+            console.log("  V2 holds phUSD mint:  ", okMint && v2CanMint && v2Ver == phusdMintVersionAtPhase0);
+        }
+
+        // WRITE-ONCE MIGRATION BASELINE, same discipline as story 074's `bptAtCutover`.
+        // Monotonic: take the LARGER of the persisted and live readings so a resume leg run
+        // against an already-emptied V2 can never downgrade a real baseline to 0.
+        phlimboV2StakedAtCutover = phlimboV2StakedAtCutover > liveStaked ? phlimboV2StakedAtCutover : liveStaked;
+        console.log("  V2 migration baseline:", phlimboV2StakedAtCutover);
+
+        // A resume that has already run the migration MUST arrive carrying the baseline.
+        // Falling back to the emptied live reading is exactly the vacuity audit run-22's L-02
+        // is about, so refuse rather than proceed with an assertion that cannot fail.
+        require(
+            !_isConfigured("p4e_migrate") || phlimboBaselineFromProgressFile,
+            "RESUME ABORT: p4e_migrate is already configured but the progress file carries no baselines.phlimboV2StakedAtCutover - restore that block verbatim (hand-trimming must NEVER remove it); re-deriving from the emptied PhlimboV2 makes the Phase 7 stake-conservation assertion vacuous"
+        );
+
+        // On a FRESH leg, PhlimboV3 must not yet exist and must not already hold mint
+        // authority. `newPhlimboV3` is only non-zero when a progress file named it.
+        if (newPhlimboV3 == address(0)) {
+            require(phlimboV2StakedAtCutover > 0, "PhlimboV2 holds no stake - nothing to migrate; investigate before running Phase 4e");
+        } else {
+            (bool okV3, bool v3CanMint, uint256 v3Version) = _readPhusdMinter(newPhlimboV3);
+            console.log("  resumed PhlimboV3:    ", newPhlimboV3);
+            console.log("  resumed V3 canMint:   ", okV3 && v3CanMint && v3Version == phusdMintVersionAtPhase0);
+        }
+
+        // The V2 staker snapshot Phase 4e seeds from.
+        _validateV2Snapshot();
+    }
+
+    /// @dev Validates `phlimbo-v2-snapshot-latest.json` BEFORE anything is mutated, so a
+    ///      stale or wrong-target file aborts the session at Phase 0 rather than halfway
+    ///      through a Ledger signing run. `vm.readFile` itself reverts when the file is
+    ///      absent, which is the intended fail-loud behaviour — the file is a documented
+    ///      prerequisite of both npm keys.
+    function _validateV2Snapshot() internal view {
+        string memory json = vm.readFile(SNAPSHOT_V2_FILE);
+
+        address snapTarget = vm.parseJsonAddress(json, ".phlimboV2");
+        require(
+            snapTarget == PHLIMBO_V2,
+            "V2 staker snapshot names a different phlimbo than PHLIMBO_V2 - seeding it would migrate the wrong user base"
+        );
+
+        uint256 snapBlock = vm.parseJsonUint(json, ".blockNumber");
+        require(snapBlock > 0, "V2 staker snapshot has blockNumber 0");
+
+        // Age gate. See MAX_V2_SNAPSHOT_AGE for why a stale scan is not recoverable by the
+        // reseed loop. `unixTimestamp` is numeric precisely so this comparison is possible;
+        // the sibling ISO `timestamp` field cannot be parsed in Solidity.
+        uint256 snapTime = vm.parseJsonUint(json, ".unixTimestamp");
+        require(snapTime > 0, "V2 staker snapshot has no unixTimestamp");
+        require(
+            block.timestamp >= snapTime,
+            "V2 staker snapshot is timestamped in the future - the clock or the file is wrong"
+        );
+        require(
+            block.timestamp - snapTime <= MAX_V2_SNAPSHOT_AGE,
+            "V2 staker snapshot is STALE - re-run `npm run promotion-ready:snapshot`. A user whose first Staked event postdates the scan is absent from the seed list, is never migrated, and will fail Phase 4e's totalStaked()==0 gate"
+        );
+
+        address[] memory users = vm.parseJsonAddressArray(json, ".users");
+        require(users.length > 0, "V2 staker snapshot carries an empty users[] - seedUsers would revert 'Empty users'");
+        console.log("  V2 snapshot users:    ", users.length);
+        console.log("  V2 snapshot block:    ", snapBlock);
+        console.log("  V2 snapshot age (s):  ", block.timestamp - snapTime);
     }
 
     function _requireSlot(uint256 idx, address expectedOld, address expectedNew, string memory label) internal view {
@@ -608,9 +877,25 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     ///         deliberately absent: on a fresh leg they are still `address(0)` when this
     ///         snapshot is taken, so they cannot carry a meaningful "before" reading. The
     ///         verifier covers them with a stronger ABSOLUTE assertion instead — none of the
-    ///         14 newly deployed contracts may hold phUSD mint authority at all.
+    ///         newly deployed contracts may hold phUSD mint authority, with the ONE declared
+    ///         exception `PhlimboV3` (story 076), which is asserted POSITIVELY instead.
+    ///
+    ///         STORY 076 APPENDED `PHLIMBO_V2` AT INDEX 19. Phase 4e revokes its phUSD mint
+    ///         authority, and an address absent from this set cannot have its removal
+    ///         expressed in the mask at all — the revoke would then be verified nowhere.
+    ///         Appending is safe by the append-only rule above: bits 0..18 keep their exact
+    ///         prior meaning, so a progress file written before story 076 still decodes
+    ///         correctly (its bit 19 simply reads 0, which the delta check tolerates because
+    ///         it asserts the baseline's OWN bit 19 was cleared, not that it was ever set).
+    ///
+    ///         PhlimboV3 is deliberately NOT appended here, and this is the one place the
+    ///         story-076 plan had to bend to the code: this function is `pure` over
+    ///         compile-time constants, and PhlimboV3's address is a runtime CREATE. It is
+    ///         covered instead by the positive assertion in `_phase7_wiringAssertions` and by
+    ///         its explicit exclusion from the verifier's `_requireNotPhusdMinter` sweep —
+    ///         which together give exactly the two-sided delta the plan asked for.
     function _phusdMinterCandidates() internal pure returns (address[] memory set) {
-        set = new address[](19);
+        set = new address[](20);
         uint256 i;
         set[i++] = NFT_MINTER_V2;
         set[i++] = OLD_BATCH_MINTER;
@@ -631,7 +916,26 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         set[i++] = V1_STAKER_SCX;
         set[i++] = V1_STAKER_FLX;
         set[i++] = OWNER;
-        require(i == 19, "phUSD minter candidate count drifted");
+        // --- Appended by story 076. Bit 19. See the NatSpec above before touching. ---
+        set[i++] = PHLIMBO_V2;
+        require(i == 20, "phUSD minter candidate count drifted");
+    }
+
+    /// @notice Bit index of `PHLIMBO_V2` inside `_phusdMinterCandidates()`. The one bit the
+    ///         cutover is EXPECTED to clear, and the only one it may.
+    /// @dev    Kept as a named constant so the delta assertion in `_phase7_wiringAssertions`
+    ///         and in `VerifyPromotionReady` cannot drift apart from the array above.
+    uint256 public constant PHUSD_MINTER_BIT_PHLIMBO_V2 = 19;
+
+    /// @dev Guards the constant above against a silent reorder of the candidate array. A
+    ///      wrong bit index would make the two-sided delta assert the wrong thing while still
+    ///      passing, which is the worst possible failure mode for a control of this kind.
+    function _requirePhlimboV2BitIndex() internal pure {
+        address[] memory set = _phusdMinterCandidates();
+        require(
+            set[PHUSD_MINTER_BIT_PHLIMBO_V2] == PHLIMBO_V2,
+            "PHUSD_MINTER_BIT_PHLIMBO_V2 no longer indexes PHLIMBO_V2 - the candidate set was reordered, which also invalidates every persisted mask"
+        );
     }
 
     /// @dev Reads phUSD's authorization for one address via staticcall rather than a typed
@@ -1312,6 +1616,323 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
     //  PHASE 5 — StableYieldAccumulator
     // =====================================================================
 
+    // =====================================================================
+    //  PHASE 4e — PhlimboV3 cutover and V2 user-base migration (story 076)
+    // =====================================================================
+
+    /// @dev THE STEP STORY 072 NEVER CONTEMPLATED. Its Phase 5 pointed the fresh accumulator
+    ///      straight back at PhlimboV2, leaving a "promotion-ready" stack wired to a Phlimbo
+    ///      with no promotional-reward machinery at all.
+    ///
+    ///      ORDER IS LOAD-BEARING. Read this before reordering anything:
+    ///
+    ///        1..5  Deploy and arm V3 (APY, pauser, phUSD mint grant) BEFORE the migrator
+    ///              exists, so a half-armed V3 can never receive a position.
+    ///        6..7  Deploy MigratorV2V3 and set it on BOTH sides. A HALF-MET PAIR SILENTLY
+    ///              SKIPS EVERY USER (`MigratorV2V3.sol:46-53`) — the pass completes, the
+    ///              events all read `Error("Not authorized")`, and nothing reverts.
+    ///        8..9  Seed and walk the pass in chunks, reseeding for stragglers.
+    ///        10    Conservation, against the WRITE-ONCE Phase 0 baseline.
+    ///        11    Wind V2 down: `setDesiredAPY(0)` x2. MUST precede step 14.
+    ///        12    Revoke V2's migrator role.
+    ///        13    THE COMPLETENESS GATE: `totalStaked() == 0`. MUST precede step 14.
+    ///        14    Revoke V2's phUSD mint authority. Safe ONLY after 11 and 13 — see the
+    ///              file header's amended `setMinter` section for the freeze-the-principal
+    ///              failure this ordering avoids.
+    ///
+    ///      NOT DONE ANYWHERE IN HERE, both deliberate and both asserted in Phase 7:
+    ///        * NO `phlimboV2.pause()`. Pausing breaks the migration while APPEARING to
+    ///          succeed. This is the inverse of Phase 6. See the file header.
+    ///        * NO `phlimboV3.startPromotion(...)`. `promoToken == address(0)` is a designed
+    ///          state; arming a promotion mid-Ledger-session would commit live funds to a
+    ///          running depletion clock for no benefit.
+    ///
+    ///      Every step is `_isConfigured`-gated on its own key, so a resumed leg is
+    ///      idempotent and never re-runs a landed transaction.
+    function _phase4e_phlimboV3Cutover() internal {
+        console.log("\n=== Phase 4e: PhlimboV3 cutover + V2 migration (story 076) ===");
+        _requirePhlimboV2BitIndex();
+
+        IPhlimboV2Like v2 = IPhlimboV2Like(PHLIMBO_V2);
+
+        // ---- 1. Deploy PhlimboV3, mirroring V2's live config. ----
+        // `depletionDuration` and `rewardToken` are read LIVE off V2 rather than hardcoded,
+        // matching `_mirrorTokenConfig`/`_mirrorStrategy`'s house style: a retune on V2
+        // between planning and broadcast must carry over, not be silently reverted.
+        if (_isDeployed("PhlimboV3")) {
+            newPhlimboV3 = deployments["PhlimboV3"].addr;
+            console.log("  PhlimboV3 already deployed at:", newPhlimboV3);
+        } else {
+            address v2Reward = address(v2.rewardToken());
+            uint256 v2Duration = v2.depletionDuration();
+            // Constructor-set, so no separate `setDepletionDuration` call is needed (and a
+            // second call would only re-emit and recompute an identical rate).
+            require(v2Duration > 0, "PhlimboV3 ctor requires depletionDuration > 0");
+            uint256 g = gasleft();
+            PhlimboV3 v3 = new PhlimboV3(PHUSD, v2Reward, v2Duration);
+            newPhlimboV3 = address(v3);
+            _trackDeployment("PhlimboV3", newPhlimboV3, g - gasleft());
+            console.log("  PhlimboV3 deployed at:", newPhlimboV3);
+            console.log("    phUSD / rewardToken / depletionDuration:", PHUSD, v2Reward, v2Duration);
+        }
+        require(IOwnable(newPhlimboV3).owner() == OWNER, "PhlimboV3 owner != OWNER (msg.sender was not the Ledger key)");
+        // A fresh V3 must arrive with no promotion armed and no roles set. Asserting it here
+        // rather than only in Phase 7 catches a wrong-address resume immediately.
+        require(PhlimboV3(newPhlimboV3).promoToken() == IERC20(address(0)), "PhlimboV3 arrived with a promo token set");
+
+        // ---- 2/3. Mirror V2's APY. TWO-STEP preview -> commit. ----
+        if (!_isConfigured("p4e_v3_apy")) {
+            uint256 targetBps = v2.desiredAPYBps();
+            _setDesiredAPYTwoStep(newPhlimboV3, targetBps, "PhlimboV3");
+            _trackConfig("p4e_v3_apy");
+        }
+
+        // ---- 4. Pauser wiring, both directions. ----
+        if (!_isConfigured("p4e_v3_pauser")) {
+            PhlimboV3(newPhlimboV3).setPauser(PAUSER);
+            Pauser(PAUSER).register(newPhlimboV3);
+            _trackConfig("p4e_v3_pauser");
+            console.log("  PhlimboV3 pauser set + registered with the global Pauser");
+        }
+
+        // ---- 5. THE INVARIANT-BREAKING CALL. ----
+        // Story 072's header claimed "ZERO phUSD.setMinter calls in this entire script" and
+        // that mint authority was byte-identical BY CONSTRUCTION. Story 076 makes that false
+        // on purpose: PhlimboV3 mints the phUSD reward leg (`PhlimboV3.sol:913`), so it MUST
+        // hold mint authority. The claim is now an asserted two-sided DELTA, not invariance —
+        // see the amended header section and Phase 7.
+        //
+        // THE FAILURE THIS PREVENTS IS SILENT. V3 pays that leg with
+        // `try phUSD.mint(beneficiary, amount) {} catch { ...bank... }` (audit-09 M-01). If
+        // the grant were forgotten NOTHING would revert: every staker would silently accrue
+        // an unpayable phUSD entitlement while the stable leg kept paying, surfacing only as
+        // user complaints. Hence the POSITIVE Phase 7 assertion.
+        if (!_isConfigured("p4e_v3_mintGrant")) {
+            IFlaxAdmin(PHUSD).setMinter(newPhlimboV3, true);
+            _trackConfig("p4e_v3_mintGrant");
+            console.log("  phUSD.setMinter(PhlimboV3, true) - mint authority GRANTED");
+        }
+
+        // ---- 6. Deploy MigratorV2V3. ----
+        // NO phUSD mint role goes to the migrator, unlike its V1->V2 predecessor: V2 itself
+        // mints the pending phUSD rewards during `withdraw` (`MigratorV2V3.sol:54-56`).
+        if (_isDeployed("MigratorV2V3")) {
+            migratorV2V3 = deployments["MigratorV2V3"].addr;
+            console.log("  MigratorV2V3 already deployed at:", migratorV2V3);
+        } else {
+            uint256 g = gasleft();
+            MigratorV2V3 m = new MigratorV2V3(PHLIMBO_V2, newPhlimboV3, PHUSD, address(v2.rewardToken()));
+            migratorV2V3 = address(m);
+            _trackDeployment("MigratorV2V3", migratorV2V3, g - gasleft());
+            console.log("  MigratorV2V3 deployed at:", migratorV2V3);
+        }
+        require(IOwnable(migratorV2V3).owner() == OWNER, "MigratorV2V3 owner != OWNER");
+
+        // ---- 7. BOTH sides of the migrator pair. A half-met pair skips every user. ----
+        if (!_isConfigured("p4e_setMigrator")) {
+            v2.setMigrator(migratorV2V3);
+            PhlimboV3(newPhlimboV3).setMigrator(migratorV2V3);
+            // Read both back immediately: this is the single wiring mistake that produces a
+            // pass which completes successfully with nothing migrated.
+            require(v2.migrator() == migratorV2V3, "PhlimboV2.setMigrator did not land");
+            require(PhlimboV3(newPhlimboV3).migrator() == migratorV2V3, "PhlimboV3.setMigrator did not land");
+            _trackConfig("p4e_setMigrator");
+            console.log("  migrator role set on BOTH V2 and V3, both read back");
+        }
+
+        // ---- 8/9/10. Seed, migrate, conserve. ----
+        if (!_isConfigured("p4e_migrate")) {
+            // The migration cannot run against a paused V2, and would not fail loudly if it
+            // did. Checked here (rather than Phase 0) so a resume leg that has already
+            // completed the migration is not blocked by a V2 paused afterwards.
+            require(
+                !v2.paused(),
+                "PhlimboV2 is PAUSED - its withdraw is whenNotPaused, so the migrator cannot act and every user would be SKIPPED by a pass that still reports success. Unpause V2; do NOT pause it for this migration (MigratorV2V3.sol:22-24)"
+            );
+            _runV2ToV3Migration();
+            _trackConfig("p4e_migrate");
+        }
+
+        // ---- 11. Wind V2 down. NOT a pause. TWO-STEP, like every APY set. ----
+        if (!_isConfigured("p4e_v2_apyZero")) {
+            _setDesiredAPYTwoStep(PHLIMBO_V2, 0, "PhlimboV2");
+            _trackConfig("p4e_v2_apyZero");
+        }
+
+        // ---- 12. Revoke the migrator role now the pass is done. ----
+        if (!_isConfigured("p4e_v2_revokeMigrator")) {
+            v2.setMigrator(address(0));
+            require(v2.migrator() == address(0), "PhlimboV2 migrator revoke did not land");
+            _trackConfig("p4e_v2_revokeMigrator");
+            console.log("  PhlimboV2.setMigrator(0) - migrator role revoked");
+        }
+
+        // ---- 13. THE COMPLETENESS GATE. ----
+        // Owner decision (2026-08-03): a complete migration of the user base is the mark of a
+        // successful cutover; there should be no stragglers. An incomplete migration FAILS
+        // the cutover here, loudly — it is never downgraded to a skip-the-revoke branch.
+        //
+        // The tension is real and deliberate: `migrate` skips sub-MINIMUM_STAKE dust and any
+        // reverting position, so a residual non-zero totalStaked is a POSSIBLE outcome. That
+        // is a genuine finding about the live user base and is the owner's call, not the
+        // executor's. `_runV2ToV3Migration` has already printed the decoded skip reasons.
+        require(
+            v2.totalStaked() == 0,
+            "PHASE 4e INCOMPLETE: PhlimboV2 still holds stake after the migration passes. The decoded UserMigrationSkipped reasons are printed above - an empty reason is sub-MINIMUM_STAKE dust, a non-empty one is revert data. STOP and report; do NOT relax this gate"
+        );
+        console.log("  completeness gate: PhlimboV2.totalStaked() == 0");
+
+        // ---- 14. Revoke V2's phUSD mint authority. AFTER 11 and AFTER 13, never before. ----
+        // Safe only because of those two: with totalStaked == 0 there is no position whose
+        // `_claimRewards` could reach the bare, REVERTING `phUSD.mint` at PhlimboV2.sol:495
+        // (it early-returns on `amount == 0`), and with desiredAPYBps == 0 the emission rate
+        // is 0 so a user who stakes into V2 after the cutover accrues zero pending phUSD and
+        // can still exit cleanly. The revoke does not trap late arrivals.
+        if (!_isConfigured("p4e_v2_mintRevoke")) {
+            IFlaxAdmin(PHUSD).setMinter(PHLIMBO_V2, false);
+            _trackConfig("p4e_v2_mintRevoke");
+            console.log("  phUSD.setMinter(PhlimboV2, false) - mint authority REVOKED");
+        }
+
+        console.log("  Phase 4e complete. V2 wound down and mint-revoked; NOT paused. No promotion armed.");
+    }
+
+    /// @dev `setDesiredAPY` is a two-step preview->commit on BOTH V2 and V3
+    ///      (`PhlimboV3.sol:261-280`, `PhlimboV2.sol:171-189`): the first call only emits
+    ///      `IntendedSetAPY` and records `pendingAPYBps`/`pendingAPYBlockNumber`; the value
+    ///      commits only on a SECOND call with the IDENTICAL bps within 100 blocks. A script
+    ///      that calls it once has silently done nothing.
+    ///
+    ///      The read-back is the point. Under a `--slow` Ledger broadcast the two calls are
+    ///      separate transactions in separate blocks; 100 blocks is generous but not
+    ///      infinite, and a missed commit must fail the cutover rather than leave a Phlimbo
+    ///      emitting at the wrong rate.
+    ///
+    ///      THE VALUE READ-BACK ALONE IS NOT ENOUGH, and this bit is easy to get wrong. When
+    ///      `bps == 0` — which is BOTH real cases here, since PhlimboV2's live `desiredAPYBps`
+    ///      currently reads 0 and the V2 wind-down targets 0 — `desiredAPYBps() == 0` is
+    ///      trivially true on a fresh V3 and on a V2 that never moved, so it would pass even
+    ///      if the commit never ran and the contract were left latched mid-preview. The
+    ///      `apySetInProgress` check is what makes this non-vacuous: the preview SETS that
+    ///      latch and only the commit branch clears it (`PhlimboV3.sol:261-280`).
+    function _setDesiredAPYTwoStep(address phlimbo, uint256 bps, string memory label) internal {
+        IPhlimboAPYLike p = IPhlimboAPYLike(phlimbo);
+        p.setDesiredAPY(bps); // preview  -> apySetInProgress = true
+        p.setDesiredAPY(bps); // commit   -> apySetInProgress = false
+        require(
+            p.desiredAPYBps() == bps,
+            string.concat(label, ": setDesiredAPY did not COMMIT - the two-step preview/commit window was missed")
+        );
+        require(
+            !p.apySetInProgress(),
+            string.concat(
+                label,
+                ": setDesiredAPY is still latched mid-preview - the second (commit) call did not take the commit branch. This is the failure a zero-valued read-back cannot see"
+            )
+        );
+        console.log(string.concat("  ", label, " desiredAPYBps committed:"), bps);
+    }
+
+    /// @dev Seeds and walks the migration, reseeding for stragglers until the completeness
+    ///      gate can be satisfied or the pass budget is exhausted.
+    ///
+    ///      WHY EVENTS ARE READ AND NOT JUST THE CURSOR. `migrate` completes even when wholly
+    ///      misconfigured: an unwired `setMigrator` or a paused Phlimbo yields a pass full of
+    ///      skips whose reasons decode to `Error(string)`, with `migrateIterator == -1` and no
+    ///      revert anywhere (`MigratorV2V3.sol:68-73`). The migrator's own docs are explicit
+    ///      that "the owner MUST read the UserMigrationSkipped events after every pass before
+    ///      trusting it". The cursor alone proves nothing.
+    function _runV2ToV3Migration() internal {
+        IPhlimboV2Like v2 = IPhlimboV2Like(PHLIMBO_V2);
+        MigratorV2V3 migrator = MigratorV2V3(migratorV2V3);
+        address[] memory users = _loadV2SnapshotUsers();
+
+        uint256 migrateCalls;
+        uint256 totalSkips;
+
+        for (uint256 pass = 0; pass < MAX_MIGRATION_PASSES; pass++) {
+            if (v2.totalStaked() == 0) break;
+
+            // Reseedable ONLY between passes: `!seeded || migrateIterator == -1`
+            // (`MigratorV2V3.sol:145`). Reseeding replaces the list wholesale and resets the
+            // cursor, so a user who exited in the meantime simply reads `amount == 0` and is
+            // skipped for free on the re-walk.
+            migrator.seedUsers(users);
+            require(migrator.userCount() == users.length, "seedUsers landed a different user count than the snapshot");
+            console.log("  pass seeded with users:", users.length);
+
+            vm.recordLogs();
+            while (migrator.migrateIterator() >= 0) {
+                require(migrateCalls < MAX_MIGRATE_CALLS, "MAX_MIGRATE_CALLS exhausted - the migration is not converging; investigate before re-running");
+                migrator.migrate(MIGRATE_CHUNK);
+                migrateCalls++;
+            }
+            totalSkips += _reportMigrationSkips();
+
+            console.log("  pass complete. V2 totalStaked now:", v2.totalStaked());
+            console.log("             V3 totalStaked now:    ", PhlimboV3(newPhlimboV3).totalStaked());
+        }
+
+        console.log("  migrate() calls:", migrateCalls);
+        console.log("  total UserMigrationSkipped events:", totalSkips);
+
+        // ---- Conservation, against the WRITE-ONCE Phase 0 baseline. ----
+        // Never against a live re-read of a V2 the gate has by then emptied — that is the
+        // identical defect class story 074 remediated for the BPT position (audit L-02).
+        //
+        // `>=` rather than `==` because V3 legitimately accumulates more than the baseline:
+        // a user may stake into V3 directly between the baseline read and this assertion,
+        // and a straggler who staked into V2 mid-pass is migrated on top. It can never
+        // legitimately hold LESS, which is the direction that would mean value went missing.
+        uint256 v3Staked = PhlimboV3(newPhlimboV3).totalStaked();
+        require(
+            v3Staked >= phlimboV2StakedAtCutover,
+            "CONSERVATION FAILED: PhlimboV3.totalStaked is below the pre-migration PhlimboV2 baseline - stake went somewhere other than V3"
+        );
+        console.log("  conservation OK. baseline / V3 totalStaked:", phlimboV2StakedAtCutover, v3Staked);
+    }
+
+    /// @dev Decodes and logs every `UserMigrationSkipped` emitted by the migrator during the
+    ///      pass just walked, distinguishing the two very different meanings of `reason`:
+    ///        * EMPTY   -> nothing was attempted; the live position was below V3's
+    ///                     MINIMUM_STAKE and `stake` would have rejected it (audit-08 M-02
+    ///                     vector 1a). The position stays in V2 and stays the user's.
+    ///        * NON-EMPTY -> the whole iteration reverted atomically; `reason` is the raw
+    ///                     ABI-encoded revert data. `Error(string)` here almost always means
+    ///                     MISCONFIGURATION ("Not authorized" = a missing setMigrator,
+    ///                     "Pausable: paused" = someone paused V2), not a bad position.
+    /// @return skipCount how many skip events this pass produced.
+    function _reportMigrationSkips() internal returns (uint256 skipCount) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topic = keccak256("UserMigrationSkipped(address,uint256,bytes)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != migratorV2V3) continue;
+            if (logs[i].topics.length == 0 || logs[i].topics[0] != topic) continue;
+            skipCount++;
+            address user = address(uint160(uint256(logs[i].topics[1])));
+            (uint256 amount, bytes memory reason) = abi.decode(logs[i].data, (uint256, bytes));
+            if (reason.length == 0) {
+                console.log("  SKIP (dust, nothing attempted):", user, amount);
+            } else {
+                console.log("  SKIP (REVERTED, decode the reason):", user, amount);
+                console.logBytes(reason);
+            }
+        }
+        if (skipCount > 0) {
+            console.log("  *** THIS PASS SKIPPED", skipCount, "USER(S). A non-zero skip count is never routine. ***");
+            console.log("  *** Non-empty reasons are usually MISCONFIGURATION, not bad positions. ***");
+        } else {
+            console.log("  no UserMigrationSkipped events this pass");
+        }
+    }
+
+    /// @dev Address list only — `MigratorV2V3` reads every position live, so there is nothing
+    ///      else worth seeding. Phase 0 has already validated the file's target, block and age.
+    function _loadV2SnapshotUsers() internal view returns (address[] memory users) {
+        string memory json = vm.readFile(SNAPSHOT_V2_FILE);
+        users = vm.parseJsonAddressArray(json, ".users");
+    }
+
     function _phase5_stableYieldAccumulator() internal {
         console.log("\n=== Phase 5: StableYieldAccumulator ===");
 
@@ -1342,7 +1963,18 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
             // one-directional — `setNudgeAddress` / `setNudgeSplit` / `setNudgeStreamer` can
             // each re-create an unregistered pair afterwards with no check (NatSpec `:446-449`).
             sya.setRewardToken(old.rewardToken());
-            sya.setPhlimbo(old.phlimbo());
+            // STORY 076 — THE CORE OF THE FIX. This used to read `old.phlimbo()`, which
+            // resolves to PHLIMBO_V2: story 072 deployed a brand-new accumulator and pointed
+            // it straight back at the Phlimbo with no promotional-reward machinery, which is
+            // the blindspot story 076 exists to close. Phase 4e has already deployed and
+            // fully migrated PhlimboV3 by the time we get here, so it can be named directly
+            // rather than mirroring V2 and correcting afterwards. This one line is what
+            // actually stops the yield funnel feeding V2.
+            require(newPhlimboV3 != address(0), "Phase 5 reached with no PhlimboV3 - Phase 4e must run first");
+            sya.setPhlimbo(newPhlimboV3);
+            // MUST STAY AFTER `setPhlimbo`: `approvePhlimbo` approves whichever phlimbo is
+            // CURRENTLY set (`RewireSYAToPhlimboV2.s.sol:27`). Reversing these two would
+            // approve the old target and leave the new one unable to pull.
             sya.approvePhlimbo(type(uint256).max); // collectReward pulls via transferFrom
             sya.setNFTMinter(old.nftMinter()); // claim()'s burn gate
             sya.setDiscountRate(old.getDiscountRate());
@@ -1732,7 +2364,94 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         );
         console.log("  retiring contracts drained; BPT fully on the new pooler");
 
+        _phase7_phlimboV3Assertions();
+
         console.log("Phase 7: ALL WIRING ASSERTIONS PASS");
+    }
+
+    /// @dev Story 076's half of Phase 7. Every assertion here is `view`, which is what lets
+    ///      `VerifyPromotionReady` re-run the whole set against LIVE post-broadcast state by
+    ///      inheritance alone — see that file's header. Nothing in here may mutate or need a
+    ///      cheatcode.
+    function _phase7_phlimboV3Assertions() internal view {
+        require(newPhlimboV3 != address(0), "Phase 7: no PhlimboV3 address resolved");
+        require(migratorV2V3 != address(0), "Phase 7: no MigratorV2V3 address resolved");
+
+        PhlimboV3 v3 = PhlimboV3(newPhlimboV3);
+        IPhlimboV2Like v2 = IPhlimboV2Like(PHLIMBO_V2);
+        MigratorV2V3 migrator = MigratorV2V3(migratorV2V3);
+
+        // ---- V3 identity and roles. ----
+        require(IOwnable(newPhlimboV3).owner() == OWNER, "PhlimboV3.owner != OWNER");
+        require(v3.pauser() == PAUSER, "PhlimboV3.pauser != the global Pauser");
+        require(Pauser(PAUSER).isRegistered(newPhlimboV3), "PhlimboV3 not registered with Pauser");
+        require(address(v3.phUSD()) == PHUSD, "PhlimboV3.phUSD != phUSD");
+        require(address(v3.rewardToken()) == address(v2.rewardToken()), "PhlimboV3.rewardToken != V2's");
+        require(v3.depletionDuration() > 0, "PhlimboV3.depletionDuration is 0");
+
+        // ---- THE SILENT-FAILURE GUARD, asserted POSITIVELY. ----
+        // `PhlimboV3._claimRewards` banks a failed phUSD mint instead of reverting
+        // (`:913`, audit-09 M-01), so a forgotten grant produces no error anywhere — every
+        // staker just silently accrues an unpayable entitlement. Nothing else in this script
+        // would catch it.
+        (bool okV3, bool v3CanMint, uint256 v3Version) = _readPhusdMinter(newPhlimboV3);
+        require(okV3, "phUSD minter read failed for PhlimboV3");
+        require(
+            v3CanMint && v3Version == IFlaxAdmin(PHUSD).mintVersion(),
+            "PhlimboV3 does NOT hold phUSD mint authority - its reward mints will silently bank as unpayable instead of reverting"
+        );
+
+        // ---- The no-promotion negative. ----
+        // A promotion is a separate, later, deliberate owner action with its own funding and
+        // its own depletion clock. This script must never have armed one.
+        require(v3.promoToken() == IERC20(address(0)), "PhlimboV3 has a promo token set - this cutover arms NO promotion");
+        require(uint256(v3.promoPhase()) == 0, "PhlimboV3.promoPhase != None - this cutover arms NO promotion");
+
+        // ---- Migrator, both sides, at their post-pass values. ----
+        require(v3.migrator() == migratorV2V3, "PhlimboV3.migrator != MigratorV2V3");
+        require(v2.migrator() == address(0), "PhlimboV2.migrator was not revoked after the pass");
+        require(migrator.seeded(), "MigratorV2V3 was never seeded");
+        require(migrator.migrateIterator() == -1, "MigratorV2V3 pass did not complete (migrateIterator != -1)");
+        require(address(migrator.phlimboV2()) == PHLIMBO_V2, "MigratorV2V3.phlimboV2 wrong");
+        require(address(migrator.phlimboV3()) == newPhlimboV3, "MigratorV2V3.phlimboV3 wrong");
+
+        // ---- V2 wound down, NOT paused. ----
+        require(v2.desiredAPYBps() == 0, "PhlimboV2.desiredAPYBps != 0 - the wind-down did not commit");
+        require(v2.totalStaked() == 0, "PhlimboV2 still holds stake - the migration was incomplete");
+        (bool okV2, bool v2CanMint, uint256 v2Version) = _readPhusdMinter(PHLIMBO_V2);
+        require(okV2, "phUSD minter read failed for PhlimboV2");
+        require(
+            !v2CanMint || v2Version != IFlaxAdmin(PHUSD).mintVersion(),
+            "PhlimboV2 still holds phUSD mint authority - the revoke did not land"
+        );
+
+        // ---- Conservation, against the write-once baseline (never a live re-read). ----
+        require(
+            v3.totalStaked() >= phlimboV2StakedAtCutover,
+            "PhlimboV3.totalStaked is below the pre-migration PhlimboV2 baseline"
+        );
+
+        // ---- The accumulator actually points at V3. This is the whole point of story 076. ----
+        require(ISYALike(newSYA).phlimbo() == newPhlimboV3, "new SYA.phlimbo != PhlimboV3 - the yield funnel still feeds V2");
+        // The allowance is on the SYA's REWARD TOKEN (USDC), not on phUSD:
+        // `approvePhlimbo` approves `rewardToken` (`StableYieldAccumulator.sol:473`) and
+        // `Phlimbo.collectReward` pulls exactly that with `rewardToken.safeTransferFrom`.
+        // Reading it off the SYA rather than off a constant keeps this honest if the
+        // accumulator's reward token is ever retuned.
+        address syaReward = ISYALike(newSYA).rewardToken();
+        require(
+            IERC20(syaReward).allowance(newSYA, newPhlimboV3) > 0,
+            "new SYA has no rewardToken allowance for PhlimboV3 - collectReward pulls via transferFrom and would revert"
+        );
+        // And the two sides must agree on WHICH token, or `collectReward` would approve one
+        // token and pull another.
+        require(
+            syaReward == address(PhlimboV3(newPhlimboV3).rewardToken()),
+            "new SYA.rewardToken != PhlimboV3.rewardToken - collectReward would approve one token and pull another"
+        );
+
+        console.log("  PhlimboV3: owned/paused-registered, MINTS phUSD, no promo armed, SYA repointed");
+        console.log("  PhlimboV2: APY 0, totalStaked 0, migrator revoked, mint authority revoked, NOT paused");
     }
 
     function _assertSlot(NFTMinterV2 minter, uint256 idx, address expected) internal view {
@@ -1775,6 +2494,98 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         _probeBatchMint();
         _probeArrayLengthMismatch();
         _probeBptRecovery();
+        _probePhlimboV3StakeClaim();
+        _probePhlimboV3Solvency();
+    }
+
+    /// @dev STORY 076'S HEADLINE PROBE: a stake -> warp -> claim round trip on PhlimboV3
+    ///      proving the phUSD reward leg ACTUALLY PAYS.
+    ///
+    ///      This exists because that leg cannot fail loudly. `_claimRewards` mints with
+    ///      `try phUSD.mint(beneficiary, amount) {} catch { ...bank into unclaimablePhUSDOf... }`
+    ///      (`PhlimboV3.sol:913`, audit-09 M-01). Without mint authority the claim STILL
+    ///      SUCCEEDS: the user's pending simply lands in the bank instead of their wallet,
+    ///      nothing reverts, and the fault surfaces weeks later as user complaints. Phase 7
+    ///      asserts the grant exists; this asserts it WORKS end to end.
+    ///
+    ///      The assertion is therefore two-sided and specific: the wallet balance must rise,
+    ///      AND `unclaimablePhUSDOf` must stay at zero. Checking only the first would pass on
+    ///      a claim that paid nothing but banked everything.
+    ///
+    ///      A PROBE APY MAY BE ARMED HERE, AND ONLY HERE. PhlimboV2's live `desiredAPYBps`
+    ///      reads 0 today, so Phase 4e faithfully mirrors 0 onto V3 and NOTHING accrues — the
+    ///      probe would have nothing to claim and would prove nothing about the mint grant.
+    ///      Since Phase 8 is PREVIEW-ONLY fork state (it already deals a million KENDU, warps
+    ///      a day and mints NFTs), the probe arms a temporary non-zero APY under the owner
+    ///      prank purely to make the reward leg observable. This CANNOT leak into a
+    ///      broadcast: `_phase8_previewSmokeTests` is only reachable from the `isPreview`
+    ///      branch of `run()`, and it runs strictly AFTER Phase 7's assertions.
+    function _probePhlimboV3StakeClaim() internal {
+        console.log("--- PhlimboV3 stake -> claim round trip (phUSD mint leg) ---");
+        PhlimboV3 v3 = PhlimboV3(newPhlimboV3);
+        address staker = address(0xC0FFEE);
+        uint256 amount = v3.MINIMUM_STAKE() * 1000;
+
+        // Preview-only: give the pool something to emit, if the mirrored APY is 0.
+        if (v3.desiredAPYBps() == 0) {
+            console.log("  (preview only) mirrored APY is 0 - arming a probe APY so the reward leg is observable");
+            vm.startPrank(OWNER);
+            _setDesiredAPYTwoStep(newPhlimboV3, 1000, "PhlimboV3 (PROBE APY, preview only)");
+            vm.stopPrank();
+        }
+
+        deal(PHUSD, staker, amount);
+        vm.startPrank(staker);
+        IERC20(PHUSD).approve(newPhlimboV3, amount);
+        v3.stake(amount, staker);
+        vm.stopPrank();
+
+        // Accrual is `totalStaked * desiredAPYBps / 10000 / SECONDS_PER_YEAR` per second, so
+        // a meaningful window is needed before pending is non-dust.
+        vm.warp(block.timestamp + 30 days);
+        uint256 pending = v3.pendingPhUSD(staker);
+        console.log("  pendingPhUSD after 30d:", pending);
+        require(pending > 0, "PhlimboV3 accrued NO pending phUSD in 30 days - desiredAPYBps did not commit, or totalStaked is 0");
+
+        uint256 before = IERC20(PHUSD).balanceOf(staker);
+        vm.prank(staker);
+        v3.claim(staker);
+        uint256 paid = IERC20(PHUSD).balanceOf(staker) - before;
+        uint256 banked = v3.unclaimablePhUSDOf(staker);
+        console.log("  phUSD actually delivered:", paid);
+        console.log("  phUSD banked as unclaimable:", banked);
+        require(
+            banked == 0,
+            "PhlimboV3 BANKED the phUSD reward instead of paying it - the mint reverted and was swallowed by the try/catch at PhlimboV3.sol:913. The mint grant is missing or inert"
+        );
+        require(paid > 0, "PhlimboV3 claim delivered no phUSD despite non-zero pending");
+        console.log("  VERDICT: the phUSD mint leg pays - the grant is live, not merely recorded");
+    }
+
+    /// @dev `lib/phlimbo-ea/SolvencyDetermination.md` section 1: staked principal is held 1:1
+    ///      and is never used to pay any reward stream (phUSD rewards are freshly minted,
+    ///      section 2; the stable stream is separately pre-funded, section 3). So the
+    ///      post-migration state satisfies solvency iff:
+    ///
+    ///          phUSD.balanceOf(phlimboV3) >= phlimboV3.totalStaked()
+    ///
+    ///      That probe is cheap — two live reads — so per the story's Implementation Notes it
+    ///      is included here rather than left as prose. The `>=` (not `==`) is deliberate:
+    ///      section 3's floor-division dust and forfeited rewards accumulate as a surplus
+    ///      favouring the protocol.
+    ///
+    ///      Section 2's condition — that the contract holds an ACTIVE mint privilege at the
+    ///      current `mintVersion` — is asserted in Phase 7 and exercised end to end by
+    ///      `_probePhlimboV3StakeClaim`. Section 4 is vacuous here: no promotion is armed.
+    function _probePhlimboV3Solvency() internal view {
+        console.log("--- PhlimboV3 solvency (SolvencyDetermination.md) ---");
+        PhlimboV3 v3 = PhlimboV3(newPhlimboV3);
+        uint256 held = IERC20(PHUSD).balanceOf(newPhlimboV3);
+        uint256 staked = v3.totalStaked();
+        console.log("  phUSD held / totalStaked:", held, staked);
+        require(held >= staked, "SOLVENCY (section 1): PhlimboV3 holds less phUSD than totalStaked");
+        require(v3.promoToken() == IERC20(address(0)), "SOLVENCY (section 4): a promo stream exists but none was armed");
+        console.log("  section 1 principal invariant holds; section 4 vacuous (no promotion armed)");
     }
 
     /// @dev THE BLOCKING PREFLIGHT. `nft-staking:031` made `collectNudge` credit
@@ -1996,6 +2807,8 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         migratorEYE = deployments["NFTStakerMigratorEYE"].addr;
         migratorSCX = deployments["NFTStakerMigratorSCX"].addr;
         migratorFLX = deployments["NFTStakerMigratorFLX"].addr;
+        newPhlimboV3 = deployments["PhlimboV3"].addr;
+        migratorV2V3 = deployments["MigratorV2V3"].addr;
     }
 
     /// @dev Recovers the top-level `baselines` block. Guarded by `keyExistsJson` so a progress
@@ -2031,12 +2844,27 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
             phusdMinterBaselineRecorded = true;
             console.log("Loaded persisted phUSD minter mask:", phusdMinterMaskAtPhase0);
         }
+        // Story 076: a third SIBLING key inside the same `baselines` object, independently
+        // guarded so a file written before story 076 still parses. Same trust argument as
+        // `bptAtCutover`: it is a READ of pre-existing chain state taken at Phase 0 before
+        // this session dispatched anything, so no crash can falsify it.
+        if (vm.keyExistsJson(json, ".baselines.phlimboV2StakedAtCutover")) {
+            // Decimal STRING for the same reason as bptAtCutover: the Node patcher reads and
+            // rewrites this file through JS `JSON.parse`, which cannot round-trip a
+            // large-integer literal losslessly.
+            phlimboV2StakedAtCutover = vm.parseUint(vm.parseJsonString(json, ".baselines.phlimboV2StakedAtCutover"));
+            phlimboBaselineFromProgressFile = true;
+            console.log("Loaded persisted PhlimboV2 migration baseline:", phlimboV2StakedAtCutover);
+        }
     }
 
     /// @dev Every key the progress file can carry — deployments first, then the config-step
     ///      flags. Used for both parsing and (implicitly) the write path's ordering.
     function _allProgressKeys() internal pure returns (string[] memory names) {
-        names = new string[](60);
+        // Sized with headroom above the `require(i == 60)` below (story 076 raised the count
+        // from 50 to 60, which exactly filled the previous allocation). Only `i` entries are
+        // ever read — `all` is built from `i + j`, not from this length.
+        names = new string[](70);
         uint256 i;
         // Deployments (address-bearing).
         names[i++] = "NudgeStreamer";
@@ -2053,6 +2881,12 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         names[i++] = "NFTStakerMigratorEYE";
         names[i++] = "NFTStakerMigratorSCX";
         names[i++] = "NFTStakerMigratorFLX";
+        // Story 076, Phase 4e. `PhlimboV3` is permanent and gets a `mainnet-addresses.ts`
+        // key; `MigratorV2V3` is a transient orchestrator and gets none, following story
+        // 072's precedent for the three NFTStakerMigrator instances. Both are recorded here
+        // regardless, so a resume leg can find them.
+        names[i++] = "PhlimboV3";
+        names[i++] = "MigratorV2V3";
         // The five repointed hooks: recorded at their EXISTING addresses so the patch script
         // can round-trip them by name. Not deployments; nothing is created for these.
         names[i++] = "UniboostHookEYE";
@@ -2099,7 +2933,18 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         names[i++] = "sya_burner";
         names[i++] = "sya_pauser";
         names[i++] = "sya_deactivate";
-        require(i == 50, "progress key count drifted");
+        // Story 076, Phase 4e config-step flags. Order matches the phase body.
+        names[i++] = "p4e_v3_apy";
+        names[i++] = "p4e_v3_pauser";
+        names[i++] = "p4e_v3_mintGrant";
+        names[i++] = "p4e_setMigrator";
+        names[i++] = "p4e_migrate";
+        names[i++] = "p4e_v2_apyZero";
+        names[i++] = "p4e_v2_revokeMigrator";
+        names[i++] = "p4e_v2_mintRevoke";
+        // Bumped by story 076: +2 deployment records (PhlimboV3, MigratorV2V3) and +8 Phase
+        // 4e config flags. 50 -> 60.
+        require(i == 60, "progress key count drifted");
         // Per-token Uniboost + staker flags.
         string[3] memory labels = ["EYE", "SCX", "FLX"];
         string[5] memory ubSteps = ["_pull", "_config", "_rescue", "_repointHook", "_replace"];
@@ -2212,6 +3057,16 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
             json = string.concat(json, ', "phusdMinterMask": "', vm.toString(phusdMinterMaskAtPhase0), '"');
             json = string.concat(json, ', "phusdMintVersion": "', vm.toString(phusdMintVersionAtPhase0), '"');
         }
+        // Story 076: another SIBLING key. `bptAtCutover` and the story-075 pair above are
+        // untouched. `phlimboV2StakedAtCutover` is already the monotonic maximum of the
+        // persisted and live readings (see `_phase0_phlimboV3Preconditions`), so re-emitting
+        // it here can never shrink the recorded baseline. Written whenever it is non-zero:
+        // a zero baseline carries no information and Phase 0 rejects it on a fresh leg.
+        if (phlimboV2StakedAtCutover > 0) {
+            json = string.concat(
+                json, ', "phlimboV2StakedAtCutover": "', vm.toString(phlimboV2StakedAtCutover), '"'
+            );
+        }
         json = string.concat(json, "},");
         json = string.concat(json, '"contracts": {');
         for (uint256 i = 0; i < contractNames.length; i++) {
@@ -2252,8 +3107,14 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         console.log("V2 StakerSCX:             ", v2StakerSCX);
         console.log("V2 StakerFLX:             ", v2StakerFLX);
         console.log("Migrators (transient):    ", migratorEYE, migratorSCX, migratorFLX);
+        console.log("PhlimboV3 (story 076):    ", newPhlimboV3);
+        console.log("MigratorV2V3 (transient): ", migratorV2V3);
         console.log("-------------------------------------------------");
-        console.log("Hooks REPOINTED, not redeployed - addresses unchanged, zero phUSD.setMinter calls.");
+        console.log("Hooks REPOINTED, not redeployed - addresses unchanged.");
+        console.log("phUSD minter-set DELTA (story 076): +PhlimboV3, -PhlimboV2. Nothing else moved.");
+        console.log("PhlimboV2 is wound down (APY 0) and mint-revoked, but deliberately NOT PAUSED.");
+        console.log("A late V2 staker still exits cleanly: APY 0 means zero pending phUSD accrues.");
+        console.log("NO promotion is armed on PhlimboV3 - startPromotion is a separate owner action.");
         console.log("Streams: USDC 10d, phUSD 30d, Kendu 30d (phUSD/Kendu funded MANUALLY by the owner).");
         console.log("=================================================");
     }
@@ -2387,4 +3248,42 @@ interface IStrategyAdmin {
 interface INFTMinterAdmin {
     function setAuthorizedBurner(address burner, bool authorized) external;
     function authorizedBurners(address burner) external view returns (bool);
+}
+
+/// @dev Story 076. phUSD's owner-only mint-authority admin surface plus the global version
+///      counter. `setMinter` does NOT bump `mintVersion` (`FlaxToken.sol:44-51`) — only
+///      `revokeAllMintPrivileges` does (`:88-90`) — which is why the cutover expects the
+///      version to be unchanged while the membership mask loses exactly one bit.
+interface IFlaxAdmin {
+    function setMinter(address minter, bool canMint) external;
+    function mintVersion() external view returns (uint256);
+}
+
+/// @dev Story 076. PhlimboV2's read/admin surface. Declared locally rather than importing
+///      the submodule's own `interfaces/IPhlimboV2.sol` because that interface omits the three
+///      Ownable/Pausable members Phase 0 and Phase 7 need (`owner`, `pauser`, `paused`) and
+///      declaring the union here keeps every selector this script relies on in one place,
+///      matching the house style of the interfaces above.
+interface IPhlimboV2Like {
+    function phUSD() external view returns (address);
+    function rewardToken() external view returns (address);
+    function desiredAPYBps() external view returns (uint256);
+    function depletionDuration() external view returns (uint256);
+    function totalStaked() external view returns (uint256);
+    function migrator() external view returns (address);
+    function pauser() external view returns (address);
+    function paused() external view returns (bool);
+    function userInfo(address user) external view returns (uint256 amount, uint256 phUSDDebt, uint256 stableDebt);
+    function setMigrator(address newMigrator) external;
+}
+
+/// @dev Story 076. The two-step APY setter, identical on V2 and V3, so one helper drives
+///      both. See `_setDesiredAPYTwoStep`.
+interface IPhlimboAPYLike {
+    function setDesiredAPY(uint256 bps) external;
+    function desiredAPYBps() external view returns (uint256);
+    /// @dev The preview/commit latch. True after a preview, cleared by the commit — which is
+    ///      what makes it a non-vacuous proof that the commit branch actually ran, even when
+    ///      the target value is 0 and the value read-back proves nothing.
+    function apySetInProgress() external view returns (bool);
 }

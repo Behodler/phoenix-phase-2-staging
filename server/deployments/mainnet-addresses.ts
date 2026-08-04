@@ -34,8 +34,14 @@ export const mainnetAddresses: ContractAddresses = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
   PhusdStableMinter: "0x94855ACA13952D81507C92D3CdBb2e25D3bbE60C",
-  // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol
+  // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol.
+  // STAYS the V2 address after the promotion-ready cutover (story 076): V2 continues to
+  // exist, wound down and mint-revoked but NOT paused. PhlimboV3 is the separate key below.
   PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
+  // Story 076 (2026-08-04): PLACEHOLDER. PhlimboV3 is deployed by the promotion-ready
+  // cutover's Phase 4e and filled from the progress file by
+  // scripts/patch-mainnet-addresses-promotion-ready.js. Zero until that broadcast lands.
+  PhlimboV3: "0x0000000000000000000000000000000000000000",
   StableYieldAccumulator: "0x3C690EC3B2524104dE269bf0F9baa7f045eF8270",
   DepositView: "0x0725722b50287f2285b873f534d5848e76c15251",
   // Story 055 migration (executed 2026-06-10: MigrateStableStakerMainnet run txs 1-20 +

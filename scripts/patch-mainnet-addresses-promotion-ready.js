@@ -23,9 +23,13 @@
  *
  * WHAT IT TOUCHES
  *   FILL (update:false — overwrite ONLY a zero-address placeholder, abort on any other
- *   value): `NudgeStreamer` and `Kendu`. Both were added as zero placeholders by story
- *   073 so the hand-maintained key-set matched the regenerated `ContractAddresses`
- *   interface; this story is the one that fills them.
+ *   value): `NudgeStreamer`, `Kendu` and `PhlimboV3`. The first two were added as zero
+ *   placeholders by story 073 so the hand-maintained key-set matched the regenerated
+ *   `ContractAddresses` interface; this story is the one that fills them. `PhlimboV3` was
+ *   added the same way by story 076 and is filled by the same broadcast (Phase 4e).
+ *
+ *   `PhlimboEA` is NOT in either list and must never be repointed here: it is the V2
+ *   address, and V2 continues to exist post-cutover. PhlimboV3 sits alongside it.
  *
  *   REPOINT (update:true — overwrite whatever is there): every key whose live contract is
  *   replaced or re-verified by the cutover.
@@ -40,11 +44,14 @@
  * WHAT IT NEVER DOES
  *   Add or remove a key. `mainnet-addresses.ts` is hand-maintained and never regenerated;
  *   its key-set must exactly equal the `ContractAddresses` interface in `addresses.ts`
- *   (currently 57 == 57), which is the `tsc --strict` drift guard. That equality is
- *   re-checked below AFTER patching, and a mismatch is a non-zero exit.
+ *   (58 == 58 after story 076 added `PhlimboV3` to BOTH files), which is the `tsc --strict`
+ *   drift guard. That equality is re-checked below AFTER patching, and a mismatch is a
+ *   non-zero exit. Adding a key means adding it to both files in the same commit.
  *
  *   The three `NFTStakerMigrator` instances are transient orchestrators and deliberately
- *   have no interface key, so they are absent from FIELDS by design.
+ *   have no interface key, so they are absent from FIELDS by design. Story 076's
+ *   `MigratorV2V3` is the same kind of thing and is absent for the same reason — it has a
+ *   progress-file record (a resume leg needs its address) but no `mainnet-addresses.ts` key.
  *
  * KENDU IS TOLERATED-MISSING, NOT CONDITIONAL IN PRACTICE. The Foundry script records a
  * `Kendu` progress entry whenever `isNudgeToken(KENDU)` reads true after Phase 2, and
@@ -83,6 +90,11 @@ const FIELDS = [
     // ---- FILL: zero placeholders added by story 073 ----
     { tsField: 'NudgeStreamer', progressKey: 'NudgeStreamer', update: false },
     { tsField: 'Kendu', progressKey: 'Kendu', update: false, optional: true },
+    // Story 076: PhlimboV3, added as a zero placeholder alongside `PhlimboEA` (which stays
+    // the V2 address). update:false because this cutover is the ONE that creates it -- a
+    // non-zero existing value means someone else already wrote it and is a collision, not
+    // something to overwrite. MANDATORY, not optional: Phase 4e deploys it unconditionally.
+    { tsField: 'PhlimboV3', progressKey: 'PhlimboV3', update: false },
 
     // ---- REPOINT: contracts redeployed by this cutover ----
     { tsField: 'BatchNFTMinter', progressKey: 'BatchNFTMinter', update: true }, // now a BatchNFTMinterMultiToken
@@ -217,7 +229,7 @@ function run() {
     // stale "not yet deployed" note on a live address is exactly the prose drift this story
     // exists to stop. Only comment lines that mention PLACEHOLDER are removed, and only the
     // contiguous block immediately preceding a key this run filled.
-    for (const key of ['NudgeStreamer', 'Kendu']) {
+    for (const key of ['NudgeStreamer', 'Kendu', 'PhlimboV3']) {
         const re = new RegExp(`((?:^[ \\t]*//[^\\n]*\\n)+)(?=[ \\t]*${key}:)`, 'm');
         const m = source.match(re);
         if (m && /placeholder/i.test(m[1])) {
@@ -236,7 +248,10 @@ function run() {
                 `// replaced by BatchNFTMinterMultiToken (USDC/phUSD/Kendu); all four donors redeployed\n` +
                 `// (BalancerPoolerV2 idx 4, Uniboost x3 idx 1/2/3, NudgeRatchet idx 7); StableYieldAccumulator\n` +
                 `// replaced; the three depletion stakers migrated to NFTStakerDepletionV2. The five mint-debt\n` +
-                `// hooks were REPOINTED, not redeployed — their addresses are unchanged. Patched from\n` +
+                `// hooks were REPOINTED, not redeployed — their addresses are unchanged. Story 076 added\n` +
+                `// Phase 4e: PhlimboV3 deployed and the PhlimboV2 user base migrated into it via a transient\n` +
+                `// MigratorV2V3 (no key of its own); PhlimboEA STILL POINTS AT V2, which is wound down to\n` +
+                `// APY 0 and phUSD-mint-revoked but deliberately NOT paused. Patched from\n` +
                 `// progress.promotion-ready.1.json by name.\n`
         );
     }
