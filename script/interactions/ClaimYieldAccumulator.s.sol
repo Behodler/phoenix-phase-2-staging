@@ -5,7 +5,7 @@ import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "./AddressLoader.sol";
 import "../../src/mocks/MockRewardToken.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 
 /**
  * @title ClaimYieldAccumulator
@@ -35,7 +35,7 @@ contract ClaimYieldAccumulator is Script {
         // Note: In the simplified architecture, collectReward updates internal reward accounting
         // Amount to collect (100 USDC = 100 * 10^6)
         uint256 amountToCollect = 100 * 10**6;
-        PhlimboEA(phlimbo).collectReward(amountToCollect);
+        PhlimboV3(phlimbo).collectReward(amountToCollect);
         console.log("Injected rewards via collectReward");
 
         vm.stopBroadcast();

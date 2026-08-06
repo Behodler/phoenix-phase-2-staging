@@ -5,7 +5,7 @@ import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "./AddressLoader.sol";
 import "../../src/mocks/MockPhUSD.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 
 /**
  * @title StakeOnPhlimbo
@@ -36,11 +36,11 @@ contract StakeOnPhlimbo is Script {
         console.log("Approved phUSD for Phlimbo");
 
         // Step 2: Stake phUSD (recipient is user)
-        PhlimboEA(phlimbo).stake(stakeAmount, user);
+        PhlimboV3(phlimbo).stake(stakeAmount, user);
         console.log("Staked successfully");
 
         // Query staked amount
-        (uint256 stakedAmount,,) = PhlimboEA(phlimbo).userInfo(user);
+        (uint256 stakedAmount,,,) = PhlimboV3(phlimbo).userInfo(user);
         console.log("Total staked:", stakedAmount);
 
         vm.stopBroadcast();

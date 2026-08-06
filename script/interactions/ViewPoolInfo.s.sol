@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "./AddressLoader.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 
 /**
  * @title ViewPoolInfo
@@ -21,23 +21,23 @@ contract ViewPoolInfo is Script {
         console.log("\n=== Phlimbo Pool Information ===");
 
         // Total staked
-        uint256 totalStaked = PhlimboEA(phlimbo).totalStaked();
+        uint256 totalStaked = PhlimboV3(phlimbo).totalStaked();
         console.log("Total phUSD staked:", totalStaked);
 
         // Desired APY
-        uint256 desiredAPY = PhlimboEA(phlimbo).desiredAPYBps();
+        uint256 desiredAPY = PhlimboV3(phlimbo).desiredAPYBps();
         console.log("Desired APY (bps):", desiredAPY);
         console.log("Desired APY (%): ", desiredAPY / 100);
 
         // Current emission rates (Linear Depletion Model)
-        uint256 phUSDPerSecond = PhlimboEA(phlimbo).phUSDPerSecond();
-        uint256 rewardPerSecond = PhlimboEA(phlimbo).rewardPerSecond();
+        uint256 phUSDPerSecond = PhlimboV3(phlimbo).phUSDPerSecond();
+        uint256 rewardPerSecond = PhlimboV3(phlimbo).rewardPerSecond();
         console.log("phUSD emission per second:", phUSDPerSecond);
         console.log("Stablecoin reward per second:", rewardPerSecond);
 
         // Linear depletion state
-        uint256 rewardBalance = PhlimboEA(phlimbo).rewardBalance();
-        uint256 depletionDuration = PhlimboEA(phlimbo).depletionDuration();
+        uint256 rewardBalance = PhlimboV3(phlimbo).rewardBalance();
+        uint256 depletionDuration = PhlimboV3(phlimbo).depletionDuration();
         console.log("Reward balance remaining:", rewardBalance);
         console.log("Depletion duration (seconds):", depletionDuration);
 
@@ -48,11 +48,11 @@ contract ViewPoolInfo is Script {
         console.log("Estimated stablecoin per day:", stablePerDay);
 
         // Last reward time
-        uint256 lastRewardTime = PhlimboEA(phlimbo).lastRewardTime();
+        uint256 lastRewardTime = PhlimboV3(phlimbo).lastRewardTime();
         console.log("Last reward update:", lastRewardTime);
 
         // Check if paused
-        bool isPaused = PhlimboEA(phlimbo).paused();
+        bool isPaused = PhlimboV3(phlimbo).paused();
         console.log("Contract paused:", isPaused ? "YES" : "NO");
 
         console.log("====================================\n");

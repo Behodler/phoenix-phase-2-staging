@@ -6,7 +6,7 @@ import "@forge-std/console.sol";
 import "./AddressLoader.sol";
 import "../../src/mocks/MockPhUSD.sol";
 import "../../src/mocks/MockRewardToken.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 
 /**
  * @title ClaimPhlimboRewards
@@ -35,8 +35,9 @@ contract ClaimPhlimboRewards is Script {
 
         vm.startBroadcast(deployerKey);
 
-        // Claim rewards (withdraw with 0 amount claims without unstaking)
-        PhlimboEA(phlimbo).withdraw(0);
+        // Claim rewards without unstaking. Story 079: V3 exposes a first-class `claim(user)`,
+        // so this no longer has to go through the `withdraw(0)` trick the V1 ABI forced.
+        PhlimboV3(phlimbo).claim(user);
         console.log("Claimed rewards");
 
         vm.stopBroadcast();

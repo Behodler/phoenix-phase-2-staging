@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "./AddressLoader.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 
 /**
  * @title PauseContract
@@ -23,7 +23,7 @@ contract PauseContract is Script {
         console.log("Phlimbo address:", phlimbo);
 
         // Check current pause state
-        bool isPaused = PhlimboEA(phlimbo).paused();
+        bool isPaused = PhlimboV3(phlimbo).paused();
         console.log("Currently paused:", isPaused ? "YES" : "NO");
 
         vm.startBroadcast(deployerKey);
@@ -31,19 +31,19 @@ contract PauseContract is Script {
         if (isPaused) {
             // Unpause
             console.log("Unpausing contract...");
-            PhlimboEA(phlimbo).unpause();
+            PhlimboV3(phlimbo).unpause();
             console.log("Contract unpaused");
         } else {
             // Pause
             console.log("Pausing contract...");
-            PhlimboEA(phlimbo).pause();
+            PhlimboV3(phlimbo).pause();
             console.log("Contract paused");
         }
 
         vm.stopBroadcast();
 
         // Verify new state
-        bool newState = PhlimboEA(phlimbo).paused();
+        bool newState = PhlimboV3(phlimbo).paused();
         console.log("Now paused:", newState ? "YES" : "NO");
 
         console.log("=== Pause State Updated ===\n");

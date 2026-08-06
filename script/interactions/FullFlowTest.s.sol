@@ -7,7 +7,7 @@ import "./AddressLoader.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../../src/mocks/MockPhUSD.sol";
 import "../../src/mocks/MockRewardToken.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 import "@phUSD-stable-minter/PhusdStableMinter.sol";
 
 /**
@@ -26,7 +26,7 @@ contract FullFlowTest is Script {
     MockPhUSD phUSD;
     MockRewardToken usdc;
     PhusdStableMinter minter;
-    PhlimboEA phlimbo;
+    PhlimboV3 phlimbo;
 
     // Users
     address user1;
@@ -66,7 +66,7 @@ contract FullFlowTest is Script {
         phUSD = MockPhUSD(AddressLoader.getPhUSD());
         usdc = MockRewardToken(AddressLoader.getUSDC());
         minter = PhusdStableMinter(AddressLoader.getMinter());
-        phlimbo = PhlimboEA(AddressLoader.getPhlimbo());
+        phlimbo = PhlimboV3(AddressLoader.getPhlimbo());
     }
 
     function _loadUsers() internal {
@@ -188,14 +188,15 @@ contract FullFlowTest is Script {
         uint256 u1USDCBefore = usdc.balanceOf(user1);
         uint256 u2USDCBefore = usdc.balanceOf(user2);
 
-        // User1 claims (withdraw 0 to just claim rewards)
+        // User1 claims. Story 079: V3 has a first-class `claim(user)`, replacing the
+        // `withdraw(0)` trick the V1 ABI forced.
         vm.startBroadcast(user1Key);
-        phlimbo.withdraw(0);
+        phlimbo.claim(user1);
         vm.stopBroadcast();
 
         // User2 claims
         vm.startBroadcast(user2Key);
-        phlimbo.withdraw(0);
+        phlimbo.claim(user2);
         vm.stopBroadcast();
 
         console.log("\n--- After Claiming Phlimbo Rewards ---");

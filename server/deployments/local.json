@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-08-03T22:47:12.730Z",
+  "extractedAt": "2026-08-06T22:30:08.613Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -148,7 +148,7 @@
       "address": "0x4A679253410272dd5232B3Ff7cF5dbB88f295319",
       "deployed": true,
       "configured": true,
-      "deployGas": 1569900,
+      "deployGas": 1938590,
       "configGas": 0
     },
     "StableYieldAccumulator": {
@@ -190,14 +190,14 @@
       "address": "0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB",
       "deployed": true,
       "configured": true,
-      "deployGas": 2735182,
+      "deployGas": 2735196,
       "configGas": 0
     },
     "UniboostEYE": {
       "address": "0xdbC43Ba45381e02825b14322cDdd15eC4B3164E6",
       "deployed": true,
       "configured": true,
-      "deployGas": 2465598,
+      "deployGas": 2465599,
       "configGas": 0
     },
     "UniboostSCX": {
@@ -218,7 +218,7 @@
       "address": "0x21dF544947ba3E8b3c32561399E88B52Dc8b2823",
       "deployed": true,
       "configured": true,
-      "deployGas": 2803126,
+      "deployGas": 2803127,
       "configGas": 0
     },
     "GatherWBTC": {
@@ -281,7 +281,7 @@
       "address": "0xc96304e3c037f81dA488ed9dEa1D8F2a48278a75",
       "deployed": true,
       "configured": true,
-      "deployGas": 2394227,
+      "deployGas": 2394228,
       "configGas": 0
     },
     "NudgeStreamer": {
@@ -372,35 +372,21 @@
       "address": "0xdF46e54aAadC1d55198A4a8b4674D7a4c927097A",
       "deployed": true,
       "configured": true,
-      "deployGas": 3040782,
+      "deployGas": 3040780,
       "configGas": 0
     },
-    "DepositView": {
-      "address": "0xc0Bb1650A8eA5dDF81998f17B5319afD656f4c11",
+    "PhlimboV3": {
+      "address": "0xC32609C91d6B6b51D48f2611308FEf121B02041f",
       "deployed": true,
       "configured": true,
-      "deployGas": 0,
+      "deployGas": 3085762,
       "configGas": 0
     },
     "ViewRouter": {
-      "address": "0x5322471a7E37Ac2B8902cFcba84d266b37D811A0",
+      "address": "0x2d13826359803522cCe7a4Cfa2c1b582303DD0B4",
       "deployed": true,
       "configured": true,
-      "deployGas": 516248,
-      "configGas": 0
-    },
-    "DepositPageView": {
-      "address": "0x90c84237fDdf091b1E63f369AF122EB46000bc70",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 592433,
-      "configGas": 0
-    },
-    "MintPageView": {
-      "address": "0x103A3b128991781EE2c8db0454cA99d67b257923",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 2177846,
+      "deployGas": 516280,
       "configGas": 0
     }
   }

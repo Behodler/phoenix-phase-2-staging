@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "./AddressLoader.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 
 /**
  * @title ViewPendingRewards
@@ -23,18 +23,18 @@ contract ViewPendingRewards is Script {
         console.log("User:", user);
 
         // Get pending rewards (separate functions for each token)
-        uint256 pendingPhUSDReward = PhlimboEA(phlimbo).pendingPhUSD(user);
-        uint256 pendingStableReward = PhlimboEA(phlimbo).pendingStable(user);
+        uint256 pendingPhUSDReward = PhlimboV3(phlimbo).pendingPhUSD(user);
+        uint256 pendingStableReward = PhlimboV3(phlimbo).pendingStable(user);
 
         console.log("Pending phUSD rewards:", pendingPhUSDReward);
         console.log("Pending stablecoin rewards:", pendingStableReward);
 
         // Get user staking info
-        (uint256 stakedAmount,,) = PhlimboEA(phlimbo).userInfo(user);
+        (uint256 stakedAmount,,,) = PhlimboV3(phlimbo).userInfo(user);
         console.log("Staked amount:", stakedAmount);
 
         // Get pool info
-        uint256 totalStaked = PhlimboEA(phlimbo).totalStaked();
+        uint256 totalStaked = PhlimboV3(phlimbo).totalStaked();
         console.log("Total pool staked:", totalStaked);
 
         if (totalStaked > 0) {

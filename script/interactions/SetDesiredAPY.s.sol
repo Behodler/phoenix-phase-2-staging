@@ -3,7 +3,8 @@ pragma solidity ^0.8.19;
 
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
+import "./AddressLoader.sol";
 
 /**
  * @title SetDesiredAPY
@@ -20,8 +21,6 @@ import "@phlimbo-ea/Phlimbo.sol";
  *   - DESIRED_APY_BPS: (optional) Override the default APY (default: 500 = 5%)
  */
 contract SetDesiredAPY is Script {
-    // Anvil PhlimboEA address (default Anvil deployment)
-    address constant ANVIL_PHLIMBO = 0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6;
 
     function run() external {
         // Determine network and get appropriate addresses
@@ -38,7 +37,7 @@ contract SetDesiredAPY is Script {
         console.log("New APY: %s.%s%s%%", newAPY / 100, (newAPY % 100) / 10, newAPY % 10);
 
         // Check current state before making changes
-        PhlimboEA p = PhlimboEA(phlimbo);
+        PhlimboV3 p = PhlimboV3(phlimbo);
         uint256 currentAPY = p.desiredAPYBps();
         bool inProgress = p.apySetInProgress();
         uint256 pendingAPY = p.pendingAPYBps();
@@ -104,9 +103,11 @@ contract SetDesiredAPY is Script {
             return override_;
         }
 
-        // Select based on chain ID
+        // Select based on chain ID. Story 079: resolved from the extracted deployment file
+        // rather than a hardcoded literal, which had drifted to a codeless address — and
+        // resolves to the LIVE PhlimboV3, not the wound-down V2 incumbent.
         if (block.chainid == 31337) {
-            return ANVIL_PHLIMBO;
+            return AddressLoader.getPhlimboV3();
         } else if (block.chainid == 1) {
             revert("Mainnet Phlimbo address not configured - set PHLIMBO_ADDRESS env var");
         } else {

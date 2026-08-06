@@ -5,7 +5,7 @@ import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "./AddressLoader.sol";
 import "../../src/mocks/MockPhUSD.sol";
-import "@phlimbo-ea/Phlimbo.sol";
+import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 
 /**
  * @title WithdrawFromPhlimbo
@@ -31,21 +31,23 @@ contract WithdrawFromPhlimbo is Script {
 
         // Check balances before
         uint256 phUSDBefore = MockPhUSD(phUSD).balanceOf(user);
-        (uint256 stakedBefore,,) = PhlimboEA(phlimbo).userInfo(user);
+        (uint256 stakedBefore,,,) = PhlimboV3(phlimbo).userInfo(user);
         console.log("phUSD balance before:", phUSDBefore);
         console.log("Staked amount before:", stakedBefore);
 
         vm.startBroadcast(deployerKey);
 
-        // Withdraw phUSD (also claims rewards automatically)
-        PhlimboEA(phlimbo).withdraw(withdrawAmount);
+        // Withdraw phUSD (also claims rewards automatically).
+        // Story 079: V3's withdraw takes an explicit `user`, gated on
+        // `msg.sender == user || msg.sender == migrator`. Self-service, so pass `user`.
+        PhlimboV3(phlimbo).withdraw(withdrawAmount, user);
         console.log("Withdrawn successfully");
 
         vm.stopBroadcast();
 
         // Check balances after
         uint256 phUSDAfter = MockPhUSD(phUSD).balanceOf(user);
-        (uint256 stakedAfter,,) = PhlimboEA(phlimbo).userInfo(user);
+        (uint256 stakedAfter,,,) = PhlimboV3(phlimbo).userInfo(user);
 
         console.log("phUSD balance after:", phUSDAfter);
         console.log("Staked amount after:", stakedAfter);

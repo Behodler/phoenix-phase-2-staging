@@ -5,6 +5,66 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-07
+
+Story-078. The read side of the PhlimboV3 cutover. **This is the first published release since
+0.12.0** — 0.13.0 was version-bumped in the repo but never pushed to the registry, so a consumer
+upgrading from 0.12.0 receives both releases' contents at once. The 0.13.0 notes below therefore
+apply to this upgrade too.
+
+Strictly additive across both releases: no ABI export was removed, and no existing ABI's content
+changed.
+
+### Added
+- `depositPageViewV3Abi` — `IPageView` implementation for the deposit page, typed against
+  `IPhlimboV3`.
+
+### UI-breaking note (not an ABI change)
+**`DepositPageViewV3` is NOT a drop-in re-cast of `DepositPageView`, and the failure is silent.**
+`PhlimboV3.userInfo` returns a **4**-tuple (`amount`, `phUSDDebt`, `stableDebt`, `promoDebt`)
+where V1/V2 returned 3. Solidity's decoder tolerates extra trailing returndata for static types,
+so pointing the old V1-typed page at a V3 farm does **not** revert — it returns
+undefined-by-accident data carrying none of the promo fields. Field count grows 7 → 23.
+
+Resolve the page through the router, never through a hardcoded address:
+`address impl = await router.pages(keccak256("deposit"))`. This package deliberately ships **no
+addresses** (`wagmi.config.ts` declares no `deployments:`), because a second address-resolution
+path competing with `ViewRouter` is exactly how the mainnet deposit page sat on a stale view
+unnoticed for months.
+
+Two scaling traps in the returned array, both inherited unchanged from the predecessor so that
+existing consumers are not silently broken by `1e18`:
+- field 1 `phUSDRewardsPerSecond` is **RAW** (phUSD wei/second, not PRECISION-scaled)
+- field 2 `stableRewardsPerSecond` and field 13 `promoRewardPerSecond` are **PRECISION-scaled**
+
+Also note `pendingX` is **not** the user's entitlement: V3 banks a failed transfer or mint per
+user and `pendingX` then reads zero by design. True entitlement is `pendingX + bank` — read
+fields 20/21/22 (`unclaimablePromo` / `unclaimableStable` / `unclaimablePhUSD`) or a banked user
+will be told they have nothing.
+
+## [0.13.0] - 2026-08-04
+
+Story-076. Phase 4e of the mainnet promotion-ready cutover: a new `PhlimboV3` farm and the
+one-shot migration of the `PhlimboV2` user base into it. **Never published to the registry** —
+see the 0.14.0 note above.
+
+### Added
+- `phlimboV3Abi` — the post-cutover farm. Adds a single rotating promotional reward slot
+  (`promoPhase` is `0 = None`, `1 = Active`, `2 = Flushing`), staker enumeration
+  (`stakerCount` / `stakerAt`), and non-reverting reward settlement with per-user banks
+  (`claimUnclaimablePromo` / `claimUnclaimableStable` / `claimUnclaimablePhUSD`).
+- `migratorV2V3Abi` — the transient V2→V3 migrator. Included for **event decoding**, not for
+  calling: a misconfigured pass completes without reverting, and `UserMigrationSkipped` carries
+  the raw revert data that tells a genuinely bad position apart from a wiring mistake.
+
+### UI-breaking note (not an ABI change)
+`stake`, `withdraw` and `claim` all take an explicit `user` argument on V3, gated on
+`msg.sender == user || msg.sender == migrator`. The V1 shapes (`withdraw(uint256)`,
+`claim()`, and the `withdraw(0)`-to-claim idiom) are gone; V3 exposes a first-class
+`claim(address)`. While `promoPhase == Flushing` the contract is paused and `pendingPromo` is
+frozen — read the promo phase and the paused flag together, or a UI shows a stalled counter with
+no explanation.
+
 ## [0.12.0] - 2026-08-01
 
 Story-072 mainnet promotion-ready cutover. ABIs regenerated against the pinned upstream tips
