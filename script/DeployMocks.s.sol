@@ -197,6 +197,33 @@ contract DeployMocks is Script {
     uint256 constant LOCAL_PROMO_KENDU_AMOUNT = 10_000 * 10 ** 18; // 10,000 Kendu (18dp)
     uint256 constant LOCAL_PROMO_DURATION = 1 days;
 
+    // ---- Script-audit run-26, L-03 (`pps26l3`): the arming above is now TOGGLEABLE ----
+    //
+    // The arming block immediately above is admissible and stays exactly as it was — deliberate,
+    // argued, and sequenced dead last for a load-bearing reason. The run-26 finding is the
+    // INVERSE: because it was unconditional, the DORMANT promo state — the one mainnet actually
+    // ships on day one — was the single state this script could never produce, so no local run
+    // could ever rehearse it.
+    /// @dev LOCAL-ONLY toggle for the Kendu promotion (script-audit run-26, L-03). Default TRUE:
+    ///      an unqualified `npm run dev` arms the promotion, because the armed state is the one a
+    ///      UI developer needs most of the time (every V3 promo field reads zero when dormant, which
+    ///      is indistinguishable from a broken binding). Set LOCAL_PROMO_KENDU=false to boot the
+    ///      DORMANT chain instead — the state mainnet actually ships on day one, and the one state
+    ///      this script could previously never produce.
+    bool internal armKenduPromo;
+
+    // ---- Script-audit run-26, L-01 (`pps26l1`): the index the Phase 7.6 swap rehearsal moves ----
+    //
+    // Index 1 (`uniboostEYE`). The Uniboost swap is the shape mainnet repeats three times
+    // (indices 1/2/3), it is the lowest-blast-radius index on the local chain, and its hook's
+    // `scale` is IMMUTABLE, which is what makes the prime-token assertion meaningful. Index 7
+    // (`NudgeRatchet`) would additionally exercise the `hookTypeId()` guard and the non-default
+    // `DEFAULT_RATIO == 100`, but swapping it means re-wiring `RatchetNFTStaker`,
+    // `RatchetBatchNFTMinter`, the nudge streamer and the target APY on the exact chain the UI is
+    // about to be tested against. Those two index-7 claims are instead pinned by cheap STATIC
+    // assertions at the end of the phase, which regression-gates them without a swap.
+    uint256 constant REHEARSAL_SWAP_INDEX = 1;
+
     // Deployment addresses
     MockPhUSD public phUSD;
     MockRewardToken public rewardToken; // USDC - the consolidated reward token
@@ -363,6 +390,17 @@ contract DeployMocks is Script {
         console.log("Deploying Phase 2 contracts to Anvil...");
         console.log("Deployer:", deployer);
         console.log("Chain ID:", block.chainid);
+
+        // Script-audit run-26, L-03. Resolved ONCE, here, and logged loudly next to the deployer
+        // and chain-id lines so a developer reading the transcript knows which leg they got
+        // without scrolling to Phase 7.4. Assigning a CONTRACT FIELD rather than a `run()` local
+        // is deliberate: `run()` is at its stack-depth ceiling.
+        armKenduPromo = vm.envOr("LOCAL_PROMO_KENDU", true);
+        console.log("LOCAL_PROMO_KENDU (Kendu promo armed on PhlimboV3):", armKenduPromo);
+        if (!armKenduPromo) {
+            console.log("  -> DORMANT leg selected: PhlimboV3 will ship with promoToken == address(0),");
+            console.log("     which is the day-one mainnet shape. Unset the var for the armed leg.");
+        }
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -1224,6 +1262,14 @@ contract DeployMocks is Script {
         console.log("SYA.setNudgeStreamer ->", address(nudgeStreamer));
         require(stableYieldAccumulator.nudgeStreamer() == address(nudgeStreamer), "SYA nudgeStreamer not wired");
 
+        // ====== PHASE 7.6: dispatcher-swap cutover rehearsal (script-audit run-26, L-01) ======
+        // The local chain rehearsed the cutover's END STATE but never its MECHANICS: before this
+        // phase, `hook.pull()`, `hook.setDispatcher()` and `replaceDispatcher()` executed ZERO
+        // times locally, so the one cutover ordering whose wrong direction is SILENT rather than
+        // loud was also the only one the local mirror never executed. A separate internal helper,
+        // not inline: `run()` is at its stack-depth ceiling.
+        _rehearseDispatcherSwap(deployer);
+
         // ====== PHASE 8: Pauser Registration ======
         console.log("\n=== Phase 8: Pauser Registration ===");
         console.log("CRITICAL: setPauser() must be called BEFORE register()");
@@ -1500,6 +1546,17 @@ contract DeployMocks is Script {
         _trackDeployment("UsdcYield", address(0), 0);
         _markConfigured("UsdcYield", 0);
 
+        // ====== TERMINAL: residual-privilege sweep (script-audit run-26, L-04) ======
+        // THE LAST STATEMENT BEFORE `stopBroadcast`, deliberately. The script grants the deployer
+        // phUSD mint authority three times (`_seedNudgeStream`, `_seedPhlimboV2Position`,
+        // `_seedV1Position`) and, before this, never revoked it — while correctly revoking
+        // PhlimboV2's grant in the same run. No malicious-owner vector is asserted: this is a mock
+        // token on chain 31337 whose deployer key is published in Foundry's own documentation. The
+        // cost is purely rehearsal fidelity — "revoke the operational key's temporary grant" is
+        // exactly the kind of step that is easy to forget on a Ledger broadcast, and it was the one
+        // step the local mirror never exercised.
+        _sweepResidualPrivileges(deployer);
+
         vm.stopBroadcast();
 
         // ====== Write Progress File ======
@@ -1568,6 +1625,18 @@ contract DeployMocks is Script {
         console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
         console.log("  - NFTMinter registered with Global Pauser");
+        console.log("");
+        console.log("Local rehearsal toggles + sweeps (script-audit run-26):");
+        console.log("  - LOCAL_PROMO_KENDU (Kendu promo armed on PhlimboV3):", armKenduPromo);
+        if (armKenduPromo) {
+            console.log("    ARMED leg: promoToken == MockKendu, promoPhase == Active");
+            console.log("    Set LOCAL_PROMO_KENDU=false to boot the DORMANT (day-one mainnet) chain");
+        } else {
+            console.log("    DORMANT leg: promoToken == address(0) - the day-one mainnet shape");
+            console.log("    Unset LOCAL_PROMO_KENDU (or set it true) to boot the ARMED chain");
+        }
+        console.log("  - Phase 7.6: index-1 dispatcher swap rehearsed (pull -> setDispatcher -> setHook -> replaceDispatcher)");
+        console.log("  - Terminal sweep: deployer phUSD mint authority REVOKED, end-state ACL asserted");
     }
 
     // =====================================================================
@@ -1668,6 +1737,216 @@ contract DeployMocks is Script {
         dispatcher.setRecipient(batchMinter);
         dispatcher.setDonationSplit(50);
         dispatcher.setNudgeStreamer(address(nudgeStreamer));
+    }
+
+    // =====================================================================
+    // Script-audit run-26, L-01: dispatcher-swap cutover rehearsal (Phase 7.6)
+    // =====================================================================
+
+    /// @dev Performs ONE genuine dispatcher swap on index 1 (`uniboostEYE`) in the exact
+    ///      fail-closed order the mainnet cutover mandates, with the same assertions.
+    ///
+    ///      THE ORDERING CONTRACT (`DeployMainnetPromotionReady.s.sol:146-158`), per index:
+    ///
+    ///          hook.pull() -> hook.setDispatcher(new) -> new.setHook(hook) -> replaceDispatcher(idx, new)
+    ///
+    ///      During the window between `setDispatcher` and `replaceDispatcher` the OLD dispatcher is
+    ///      still on the index but the hook now rejects it (`onDispatch` is gated
+    ///      `if (msg.sender != dispatcher) revert OnlyDispatcher()`), so mints on that index REVERT.
+    ///      That is the correct failure direction. The reverse order would put the new dispatcher
+    ///      live on the index while it still carried the fresh `DefaultDispatchHook` its constructor
+    ///      gave it, so mints would SUCCEED while accruing no mint debt — a silent value leak.
+    ///      Never do that.
+    ///
+    ///      THIS PHASE MAKES NO CLAIM THAT THE MAINNET ORDERING IS WRONG. The run-26 finding is
+    ///      that `dev` could not tell you either way, because `setDispatcher`, `replaceDispatcher`
+    ///      and `hook.pull()` executed ZERO times on the local chain.
+    ///
+    ///      The hook is REUSED, not redeployed, and no new `phUSD.setMinter` grant is issued —
+    ///      hook reuse is the whole point of the exercise, and it is what makes the immutable-scale
+    ///      prime-token assertion load-bearing rather than decorative.
+    function _rehearseDispatcherSwap(address deployer) internal {
+        console.log("\n=== Phase 7.6: Dispatcher-swap cutover rehearsal (script-audit run-26, L-01) ===");
+
+        UniboostMintDebtHook hook = uniboostHookEYE;
+        address oldUb = address(uniboostEYE);
+        uint256 idx = nftMinterV2.dispatcherToIndex(oldUb);
+        require(idx == REHEARSAL_SWAP_INDEX, "rehearsal: UniboostEYE is not on the expected dispatcher index");
+
+        // ---- 0. NON-VACUITY FIRST. ----
+        // `pull()` is a NO-OP at zero debt, so a conservation assertion taken across a pull on an
+        // empty ledger is trivially true and proves nothing. Drive a real mint through index 1 so
+        // the ledger is non-zero at pull time, then gate on it below.
+        _accrueIndex1MintDebt(deployer, idx);
+
+        // ---- 1. Snapshot everything the swap must preserve. ----
+        uint256 mintDebtBefore = hook.mintDebt();
+        require(
+            mintDebtBefore > 0,
+            "VACUOUS REHEARSAL: uniboost hook mintDebt is zero at pull time, so the conservation assertion below would prove NOTHING - do NOT relax this gate, fix the accrual"
+        );
+        address recipientBefore = hook.recipient();
+        uint8 ratioBefore = hook.ratio();
+        uint256 recipientPhusdBefore = phUSD.balanceOf(recipientBefore);
+        (, uint256 priceBefore, uint256 growthBefore, bool disabledBefore) = nftMinterV2.configs(idx);
+
+        // ---- 2. pull(), then MINT-DEBT CONSERVATION. ----
+        // Non-vacuous by construction: `mintDebtBefore` was just gated above as strictly positive,
+        // so the recipient's phUSD balance MUST move by exactly that amount.
+        hook.pull();
+        require(hook.mintDebt() == 0, "uniboost hook mintDebt != 0 after pull");
+        require(
+            phUSD.balanceOf(recipientBefore) - recipientPhusdBefore == mintDebtBefore,
+            "CONSERVATION FAILED: the phUSD realised by hook.pull() does not equal the mint debt it retired - do NOT relax this gate"
+        );
+        console.log("  hook.pull() realised NON-ZERO mint debt (phUSD wei):", mintDebtBefore);
+
+        // ---- 3. The replacement, built with the SAME constructor arguments as the incumbent. ----
+        Uniboost newUb = new Uniboost(address(rewardToken), address(uniRouter), poolEYE, address(eyeToken), deployer);
+        console.log("  replacement UniboostEYE deployed at:", address(newUb));
+        _wireUniboost(newUb, "UniboostEYE(replacement)");
+
+        // The hook's `scale` is IMMUTABLE (`10 ** (18 - primeDecimals)`), so a replacement under a
+        // reused hook MUST carry the same 6-decimal prime or every future mint inflates the debt by
+        // 1e12. Assert BEFORE repointing, mirroring DeployMainnetPromotionReady.s.sol:1475-1479.
+        require(
+            newUb.primeToken() == address(rewardToken),
+            "replacement Uniboost is not USDC-primed (the reused hook's scale is IMMUTABLE)"
+        );
+        require(rewardToken.decimals() == 6, "USDC (MockRewardToken) decimals != 6");
+
+        // ---- 4. Repoint, in the fail-closed order and no other. ----
+        hook.setDispatcher(address(newUb));
+        newUb.setHook(IDispatchHook(address(hook)));
+
+        // ---- 5. THE INTERMEDIATE-WINDOW ASSERTION. ----
+        // Asserted STRUCTURALLY rather than by a live probe: a reverting call issued while
+        // `vm.startBroadcast` is active is recorded into the broadcast bundle and would fail
+        // `deploy:local`. This mismatch IS the property that makes a mint on the index revert
+        // `OnlyDispatcher()`, and asserting it is deterministic.
+        require(hook.dispatcher() == address(newUb), "intermediate window: hook did not repoint to the new dispatcher");
+        (address midDispatcher,,,) = nftMinterV2.configs(idx);
+        require(
+            midDispatcher == oldUb,
+            "intermediate window: the index already moved - the fail-closed window was never entered"
+        );
+        console.log("  intermediate window OK: hook -> NEW dispatcher while the index still carries the OLD one");
+        console.log("    a mint on this index right now would revert OnlyDispatcher(). That is the correct direction.");
+
+        // ---- 7. Replace, then read the whole config back. ----
+        // `replaceDispatcher` touches NEITHER price NOR growthBasisPoints NOR disabled — which is
+        // exactly the claim these assertions pin.
+        nftMinterV2.replaceDispatcher(idx, address(newUb));
+        (address d, uint256 price, uint256 growth, bool disabled) = nftMinterV2.configs(idx);
+        require(d == address(newUb), "configs(idx).dispatcher != the replacement Uniboost");
+        require(price == priceBefore && growth == growthBefore, "configs(idx) price/growth not preserved");
+        require(disabled == disabledBefore, "configs(idx) disabled flag not preserved");
+        require(price < 1e12, "index price is not 6-decimal-shaped");
+        console.log("  replaceDispatcher OK; price/growth preserved:", price, growth);
+
+        // ---- 8. Post-swap invariants. ----
+        require(address(newUb.hook()) == address(hook), "replacement dispatcher is not carrying the REUSED hook");
+        require(hook.recipient() == recipientBefore, "hook recipient changed across the swap");
+        require(hook.ratio() == ratioBefore, "hook ratio changed across the swap");
+        require(nftMinterV2.dispatcherToIndex(address(newUb)) == idx, "dispatcherToIndex did not move to the replacement");
+        require(nftMinterV2.dispatcherToIndex(oldUb) == 0, "dispatcherToIndex still resolves the RETIRED dispatcher");
+
+        // ---- 9. Finalise, so the local chain ends FULLY WORKING (the UI is tested against it). ----
+        // The full `_finalizeUniboost` recipe, not a subset: the dispatcher's own `recipient` (the
+        // DONATION recipient) is a different field from the hook's `recipient`, and a fresh
+        // Uniboost arrives with it unset, which would silently disable the donation branch.
+        _finalizeUniboost(newUb, hook, address(batchNFTMinter), deployer);
+
+        // ---- 10. The address book must name the dispatcher that is actually LIVE on the index. ----
+        // `deployments[...]` is edited in place rather than re-`_trackDeployment`ed: the latter also
+        // pushes onto `contractNames`, which would emit a DUPLICATE key into the progress-file JSON.
+        // The key is reused, so no new `_markConfigured` entry is required.
+        uniboostEYE = newUb;
+        deployments["UniboostEYE"].addr = address(newUb);
+        require(deployments["UniboostEYE"].addr == address(newUb), "UniboostEYE address key did not repoint");
+        console.log("  UniboostEYE address key repointed to the live index-1 dispatcher:", address(newUb));
+
+        _pinNudgeRatchetStaticClaims();
+
+        console.log("  Phase 7.6 complete: setDispatcher / setHook / replaceDispatcher / pull all EXECUTED locally.");
+    }
+
+    /// @dev Makes `uniboostHookEYE.mintDebt()` strictly positive by driving one real mint through
+    ///      the index, so the conservation assertion in `_rehearseDispatcherSwap` is non-vacuous.
+    ///      The mint routes prime USDC through the Uniboost donation branch, so it doubles as a
+    ///      live smoke test that the incumbent dispatcher is still fully wired at this point.
+    function _accrueIndex1MintDebt(address deployer, uint256 idx) internal {
+        // 2x the current price: `getPrice` grows 0.1% per mint, and the surplus costs nothing on a
+        // mock token. `approve` overwrites rather than adds, so no stale allowance accumulates.
+        uint256 budget = nftMinterV2.getPrice(idx) * 2;
+        rewardToken.mint(deployer, budget);
+        rewardToken.approve(address(nftMinterV2), budget);
+        require(nftMinterV2.mint(idx, deployer), "rehearsal: index-1 mint returned false");
+        console.log("  accrued mint debt via one real index-1 mint; hook.mintDebt() now:", uniboostHookEYE.mintDebt());
+    }
+
+    /// @dev The two claims an index-7 swap would have exercised, pinned STATICALLY instead.
+    ///      Swapping index 7 would mean re-wiring `RatchetNFTStaker`, `RatchetBatchNFTMinter`, the
+    ///      nudge streamer and the target APY on the exact chain the UI is about to be tested
+    ///      against; blast radius won. These two assertions regression-gate the claims without a
+    ///      swap, so a hook or ratio drift on index 7 still fails the run loudly.
+    function _pinNudgeRatchetStaticClaims() internal view {
+        require(
+            nudgeRatchetHook.hookTypeId() == keccak256("NudgeRatchetMintDebtHook.v1"),
+            "index-7 hook typeId drifted: NudgeRatchet._dispatch would revert on every mint"
+        );
+        require(nudgeRatchetHook.ratio() == 100, "index-7 hook ratio is not the non-default DEFAULT_RATIO of 100");
+    }
+
+    // =====================================================================
+    // Script-audit run-26, L-04: terminal residual-privilege sweep
+    // =====================================================================
+
+    /// @dev Revokes the deployer's phUSD mint authority and then asserts the WHOLE expected
+    ///      end-state ACL declaratively, so a future grant that forgets to clean up fails the run
+    ///      rather than silently surviving into `local-addresses.ts`.
+    ///
+    ///      SAFE ONLY AS THE LAST STATEMENT BEFORE `stopBroadcast`. The last deployer-as-minter
+    ///      phUSD mint in the whole run is `_seedPhlimboV2Position`, at the START of Phase 7.4;
+    ///      everything after that mints through `PhusdStableMinter` (its own grant) or through
+    ///      contracts holding their own. `_armLocalKenduPromotion` mints MockKendu, whose `mint` is
+    ///      permissionless. A revoke placed before `_seedPhlimboV2Position` would break it.
+    function _sweepResidualPrivileges(address deployer) internal {
+        console.log("\n=== Terminal: residual-privilege sweep (script-audit run-26, L-04) ===");
+
+        phUSD.setMinter(deployer, false);
+        console.log("  phUSD.setMinter(deployer, false) - mint authority REVOKED");
+
+        // The expected end-state ACL, as a table. Any drift names its own offender.
+        _requireLiveMinter(deployer, false, "deployer");
+        _requireLiveMinter(address(phlimbo), false, "PhlimboV2");
+        _requireLiveMinter(address(phlimboV3), true, "PhlimboV3");
+        _requireLiveMinter(address(minter), true, "PhusdStableMinter");
+        _requireLiveMinter(address(stableStaker), true, "StableStaker");
+        _requireLiveMinter(address(balancerPoolerHook), true, "BalancerPoolerMintDebtHook");
+        _requireLiveMinter(address(nudgeRatchetHook), true, "NudgeRatchetMintDebtHook");
+        _requireLiveMinter(address(uniboostHookEYE), true, "UniboostHookEYE");
+        _requireLiveMinter(address(uniboostHookSCX), true, "UniboostHookSCX");
+        _requireLiveMinter(address(uniboostHookFLX), true, "UniboostHookFLX");
+
+        console.log("  end-state phUSD ACL asserted: deployer + PhlimboV2 OUT, V3 + minter + staker + 5 hooks IN");
+    }
+
+    /// @dev Asserts one row of the end-state phUSD ACL, using the TWO-FIELD idiom. Checking
+    ///      `canMint` alone is wrong: `revokeAllMintPrivileges` bumps `mintVersion`, and a minter
+    ///      carrying a stale version is refused at mint time despite `canMint == true`
+    ///      (MockPhUSD.sol:47-58).
+    function _requireLiveMinter(address who, bool expected, string memory label) internal view {
+        MockPhUSD.MinterInfo memory info = phUSD.authorizedMinters(who);
+        bool isLiveMinter = info.canMint && info.mintVersion == phUSD.mintVersion();
+        require(
+            isLiveMinter == expected,
+            string.concat(
+                "RESIDUAL PRIVILEGE SWEEP FAILED: ",
+                label,
+                " has the wrong phUSD minter status - do NOT relax this gate, fix the grant"
+            )
+        );
     }
 
     // =====================================================================
@@ -1887,7 +2166,20 @@ contract DeployMocks is Script {
         // the promo first would drag that path into a migration mainnet runs with the slot
         // dormant, so the rehearsal would stop rehearsing the thing it exists to rehearse. It
         // also keeps the `promoToken == address(0)` assertion on the fresh V3 above meaningful.
-        _armLocalKenduPromotion(deployer, v3);
+        //
+        // SCRIPT-AUDIT RUN-26, L-03: the CALL SITE is gated, the helper is not. The arming itself
+        // is admissible and its four post-condition `require`s stay exactly as they were; the
+        // finding was that the DORMANT leg — mainnet's day-one shape — was unreachable. Both legs
+        // now assert, so neither is a silent no-op.
+        if (armKenduPromo) {
+            _armLocalKenduPromotion(deployer, v3);
+        } else {
+            // Dormant leg: assert the negative, mirroring what story 076 asserts for mainnet.
+            require(v3.promoToken() == IERC20(address(0)), "dormant leg: promoToken is not the zero address");
+            require(v3.promoRewardBalance() == 0, "dormant leg: promoRewardBalance is not zero");
+            console.log("  LOCAL-ONLY: Kendu promotion NOT armed (LOCAL_PROMO_KENDU=false) - DORMANT leg");
+            console.log("    this is the day-one mainnet shape: promoToken == address(0)");
+        }
     }
 
     /// @dev LOCAL-ONLY. Arms the Kendu promotion described at `LOCAL_PROMO_KENDU_AMOUNT`. There
