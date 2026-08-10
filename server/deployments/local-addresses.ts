@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-08-06T22:30:08.731Z
+// Generated from local.json on 2026-08-10T06:56:40.163Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -31,7 +31,7 @@ export const anvilAddresses: ContractAddresses = {
   BurnRecorder: "0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E",
   BalancerRouter: "0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690",
   NFTMinter: "0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB",
-  UniboostEYE: "0xdbC43Ba45381e02825b14322cDdd15eC4B3164E6",
+  UniboostEYE: "0xdB05A386810c809aD5a77422eb189D36c7f24402",
   UniboostSCX: "0x04C89607413713Ec9775E14b954286519d836FEf",
   UniboostFLX: "0x4C4a2f8c81640e47606d3fd77B353E87Ba015584",
   BalancerPooler: "0x21dF544947ba3E8b3c32561399E88B52Dc8b2823",
@@ -58,7 +58,7 @@ export const anvilAddresses: ContractAddresses = {
   RatchetBatchNFTMinter: "0x975Ab64F4901Af5f0C96636deA0b9de3419D0c2F",
   StableStaker: "0xdF46e54aAadC1d55198A4a8b4674D7a4c927097A",
   PhlimboV3: "0xC32609C91d6B6b51D48f2611308FEf121B02041f",
-  ViewRouter: "0x2d13826359803522cCe7a4Cfa2c1b582303DD0B4",
+  ViewRouter: "0x25C0a2F0A077F537Bd11897F04946794c2f6f1Ef",
 };
 
 export type AnvilContractName = keyof ContractAddresses;
