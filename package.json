@@ -13,7 +13,7 @@
     "generate:ts-anvil": "node server/generate-ts-addresses.js 31337",
     "//serve-and-dev": "Story 003 — API server + local dev orchestration",
     "serve": "node server/index.js",
-    "dev": "npm run clean:local && npm run start:anvil & sleep 3 && npm run deploy:local && ./simulate-yield.sh && npm run extract:addresses && npm run generate:ts-anvil && npm run serve",
+    "dev": "npm run clean:local && npm run start:anvil & sleep 3 && LOCAL_PROMO_KENDU=true npm run deploy:local && ./simulate-yield.sh && npm run extract:addresses && npm run generate:ts-anvil && npm run serve",
     "//local-test-flows": "Story 005 (full-flow), Story 023 (nft-flow), Story 045.5 (nudge-payout, balancer-donation) — end-to-end local test runs",
     "test:full-flow": "forge script script/interactions/FullFlowTest.s.sol:FullFlowTest --rpc-url http://localhost:8545 --broadcast",
     "test:nft-flow": "npm run clean:local && anvil --host 0.0.0.0 --port 8545 --chain-id 31337 & sleep 3 && npm run deploy:local && forge script script/interactions/TestNFTMintAndClaimFlow.s.sol:TestNFTMintAndClaimFlow --rpc-url http://localhost:8545 --broadcast && kill %1",

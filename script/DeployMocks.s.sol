@@ -1630,9 +1630,12 @@ contract DeployMocks is Script {
         console.log("  - LOCAL_PROMO_KENDU (Kendu promo armed on PhlimboV3):", armKenduPromo);
         if (armKenduPromo) {
             console.log("    ARMED leg: promoToken == MockKendu, promoPhase == Active");
+            console.log("    ARMED leg: nudge streams registered + seeded for USDC / phUSD / Kendu");
             console.log("    Set LOCAL_PROMO_KENDU=false to boot the DORMANT (day-one mainnet) chain");
         } else {
             console.log("    DORMANT leg: promoToken == address(0) - the day-one mainnet shape");
+            console.log("    DORMANT leg: nudge stream registered for USDC ONLY; phUSD / Kendu");
+            console.log("      whitelisted-but-unregistered and unfunded (day-one mainnet shape)");
             console.log("    Unset LOCAL_PROMO_KENDU (or set it true) to boot the ARMED chain");
         }
         console.log("  - Phase 7.6: index-1 dispatcher swap rehearsed (pull -> setDispatcher -> setHook -> replaceDispatcher)");
@@ -1969,10 +1972,16 @@ contract DeployMocks is Script {
     ///        3. `registerStream` per token.
     ///        4. `setNudgeStreamer` on the batch minter and, later, on all six donors.
     ///
-    ///      Local divergence from mainnet, deliberate (story 073 user decision): mainnet registers
-    ///      a stream for USDC ONLY, leaving phUSD and Kendu whitelisted-but-unregistered with
-    ///      permanently zero rewards. All three are registered here so the UI can render three
-    ///      non-zero reward slots. Do not read local behaviour as a prediction of mainnet's.
+    ///      Local divergence from mainnet, deliberate (story 073 user decision), NOW GATED ON
+    ///      `LOCAL_PROMO_KENDU`: mainnet registers a stream for USDC ONLY, leaving phUSD and Kendu
+    ///      whitelisted-but-unregistered with permanently zero rewards.
+    ///        * armed leg (`LOCAL_PROMO_KENDU` unset/true): all three streams registered and the
+    ///          two donorless ones seeded, so the UI renders three non-zero reward slots.
+    ///        * dormant leg (`LOCAL_PROMO_KENDU=false`): USDC only — the day-one mainnet shape, so
+    ///          the UI can be reviewed against the status quo it will actually ship into.
+    ///      The WHITELIST stays three-wide on both legs; that too is the mainnet shape, and
+    ///      `getNudgeTokens()` (the `minRewards` ordering contract) must not vary by leg.
+    ///      Do not read the armed leg's behaviour as a prediction of mainnet's.
     function _deployStreamerAndBatchMinter(address deployer) internal {
         uint256 gasBefore = gasleft();
         nudgeStreamer = new NudgeStreamer(deployer);
@@ -2030,16 +2039,26 @@ contract DeployMocks is Script {
         // Streams must exist before any donor is pointed at the streamer, or the first donation
         // reverts. `LOCAL_STREAM_DURATION` is 6 hours by deliberate local divergence.
         nudgeStreamer.registerStream(address(batchNFTMinter), address(rewardToken), LOCAL_STREAM_DURATION);
-        nudgeStreamer.registerStream(address(batchNFTMinter), address(phUSD), LOCAL_STREAM_DURATION);
-        nudgeStreamer.registerStream(address(batchNFTMinter), address(mockKendu), LOCAL_STREAM_DURATION);
-        console.log("NudgeStreamer streams registered for USDC / phUSD / Kendu, duration:", LOCAL_STREAM_DURATION);
+        console.log("NudgeStreamer stream registered for USDC, duration:", LOCAL_STREAM_DURATION);
 
-        // Seed the two donorless streams. USDC is funded by real donors (Uniboost, the ratchet, the
-        // pooler, SYA); phUSD and Kendu have none, so without this the UI renders two permanently
-        // empty reward slots and the three-stream divergence buys nothing. `collectNudge` requires
-        // a registered stream, hence its position after the registerStream block.
-        _seedNudgeStream(deployer, address(phUSD), LOCAL_PHUSD_NUDGE_SEED);
-        _seedNudgeStream(deployer, address(mockKendu), LOCAL_KENDU_NUDGE_SEED);
+        if (armKenduPromo) {
+            nudgeStreamer.registerStream(address(batchNFTMinter), address(phUSD), LOCAL_STREAM_DURATION);
+            nudgeStreamer.registerStream(address(batchNFTMinter), address(mockKendu), LOCAL_STREAM_DURATION);
+            console.log("NudgeStreamer streams registered for phUSD / Kendu (armed leg)");
+
+            // Seed the two donorless streams. USDC is funded by real donors (Uniboost, the ratchet,
+            // the pooler, SYA); phUSD and Kendu have none, so without this the UI renders two
+            // permanently empty reward slots and the three-stream divergence buys nothing.
+            // `collectNudge` requires a registered stream, hence its position after registerStream.
+            _seedNudgeStream(deployer, address(phUSD), LOCAL_PHUSD_NUDGE_SEED);
+            _seedNudgeStream(deployer, address(mockKendu), LOCAL_KENDU_NUDGE_SEED);
+        } else {
+            // DORMANT leg: phUSD and Kendu stay whitelisted but UNREGISTERED and UNFUNDED, exactly
+            // as on day-one mainnet. `batchMint` still quotes them (zero pending), so this is the
+            // configuration the UI must render gracefully.
+            console.log("LOCAL-ONLY: phUSD / Kendu streams NOT registered or seeded (LOCAL_PROMO_KENDU=false)");
+            console.log("  -> whitelisted-but-unregistered, the day-one mainnet shape");
+        }
 
         // Last: the batch minter learns to flush its own accrued stream inside batchMint.
         batchNFTMinter.setNudgeStreamer(address(nudgeStreamer));

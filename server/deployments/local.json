@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-08-10T06:56:39.936Z",
+  "extractedAt": "2026-08-10T21:51:16.628Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -358,7 +358,7 @@
       "address": "0x2c8ED11fd7A058096F2e5828799c68BE88744E2F",
       "deployed": true,
       "configured": true,
-      "deployGas": 2418141,
+      "deployGas": 2418144,
       "configGas": 0
     },
     "RatchetBatchNFTMinter": {
@@ -372,21 +372,21 @@
       "address": "0xdF46e54aAadC1d55198A4a8b4674D7a4c927097A",
       "deployed": true,
       "configured": true,
-      "deployGas": 3040819,
+      "deployGas": 3040824,
       "configGas": 0
     },
     "PhlimboV3": {
       "address": "0xC32609C91d6B6b51D48f2611308FEf121B02041f",
       "deployed": true,
       "configured": true,
-      "deployGas": 3085780,
+      "deployGas": 3085787,
       "configGas": 0
     },
     "ViewRouter": {
       "address": "0x25C0a2F0A077F537Bd11897F04946794c2f6f1Ef",
       "deployed": true,
       "configured": true,
-      "deployGas": 516301,
+      "deployGas": 516302,
       "configGas": 0
     }
   }
