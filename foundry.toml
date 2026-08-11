@@ -5,6 +5,22 @@ libs = ["lib"]
 optimizer = true
 optimizer_runs = 10000
 via_ir = true
+
+# Story 072 cutover crash, 2026-08-11. This is the LOCAL EVM execution ceiling for
+# `forge test` / `forge script` bodies. It is NOT the gas limit of any broadcast
+# transaction: forge derives those from a live `eth_estimateGas` scaled by
+# `--gas-estimate-multiplier`, and mainnet would reject a tx above the ~45M block gas
+# limit anyway. Raising it here cannot make a transaction more expensive — an EOA pays
+# `gasUsed`, never `gasLimit`.
+#
+# Why it had to move: `DeployMainnetPromotionReady`'s progress-file serialiser rebuilds
+# the entire JSON by repeated `string.concat` on every one of ~78 tracker calls, all
+# inside one `run()` frame where EVM memory is never reclaimed. Cumulative memory reaches
+# ~24MB and the QUADRATIC memory-expansion charge (N**2/512) crossed the 2**30 default
+# mid-Phase-4b, surfacing as a bare `EvmError: MemoryOOG` that reads like a contract
+# revert. `memory_limit` is NOT the binding constraint (verified: raised to 8GiB, still
+# failed); the gas ceiling is.
+gas_limit = 9223372036854775807
 fs_permissions = [
     { access = "read-write", path = "./server/deployments" },
     { access = "read-write", path = "./script/migration-inputs" },

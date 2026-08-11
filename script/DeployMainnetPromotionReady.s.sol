@@ -3273,7 +3273,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         deployments[name] = ContractDeployment({
             name: name, addr: addr, deployed: true, configured: false, deployGas: gas, configGas: 0
         });
-        if (!isPreview) _writeProgressFileWithStatus("in_progress");
+        _prDirtyName = name;
+        // Called on BOTH paths on purpose — see `_writeProgressFileWithStatus`, which is where
+        // the preview/broadcast split now lives. Gating the CALL here is what let the story-072
+        // MemoryOOG reach a Ledger session unseen.
+        _writeProgressFileWithStatus("in_progress");
     }
 
     function _trackConfig(string memory name) internal {
@@ -3281,7 +3285,9 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         deployments[name] = ContractDeployment({
             name: name, addr: address(0), deployed: true, configured: true, deployGas: 0, configGas: 0
         });
-        if (!isPreview) _writeProgressFileWithStatus("in_progress");
+        _prDirtyName = name;
+        // Called on BOTH paths on purpose — see `_trackDeployment`.
+        _writeProgressFileWithStatus("in_progress");
     }
 
     /// @dev Records an address the cutover did not create — the five repointed hooks, and the
@@ -3291,6 +3297,7 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         _pushNameIfNew(name);
         deployments[name] =
             ContractDeployment({name: name, addr: addr, deployed: true, configured: true, deployGas: 0, configGas: 0});
+        _prDirtyName = name;
     }
 
     function _pushNameIfNew(string memory name) internal {
@@ -3300,58 +3307,166 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         contractNames.push(name);
     }
 
-    function _writeProgressFileWithStatus(string memory status) internal {
-        // Record the non-deployed addresses the patcher needs before serialising.
-        _recordAddress("UniboostHookEYE", HOOK_EYE);
-        _recordAddress("UniboostHookSCX", HOOK_SCX);
-        _recordAddress("UniboostHookFLX", HOOK_FLX);
-        _recordAddress("BalancerPoolerMintDebtHook", HOOK_POOLER);
-        _recordAddress("NudgeRatchetMintDebtHook", HOOK_RATCHET);
-        if (kenduWhitelisted) _recordAddress("Kendu", KENDU);
+    // =====================================================================
+    //  Progress-file serialisation — story 072 MemoryOOG remediation
+    // =====================================================================
+    //
+    // THIS USED TO BE A `string.concat` CHAIN AND IT STOPPED THE CUTOVER DEAD.
+    //
+    // The old body rebuilt the ENTIRE JSON with repeated `string.concat` — ~6 per contract entry,
+    // each one allocating a fresh copy — on every one of the ~186 tracker calls, all inside a
+    // single `run()` frame where EVM memory is never reclaimed. Cost was O(writes x entries^2) in
+    // bytes: roughly 500MB by the end. The quadratic memory-expansion charge (N**2/512) blew the
+    // local gas ceiling mid-Phase-4b and, once that was raised, the 128MiB `memory_limit` in
+    // Phase 6. It surfaced as a bare `EvmError: MemoryOOG` that reads exactly like a contract
+    // revert, on a step (`replaceDispatcher`) that was entirely innocent.
+    //
+    // The replacement accumulates in Foundry's Rust-side serialiser instead of EVM memory. The
+    // saving comes from NOT re-emitting all ~98 entries per write: the serialiser's state persists
+    // for the whole run keyed by object key, so each write emits only the entry that actually
+    // changed and gets the whole accumulated object back. Cost drops to O(writes x entries) —
+    // ~10MB, comfortably inside both stock ceilings.
+    //
+    // The exact cheatcode behaviours this depends on are PINNED IN A TEST, deliberately, because
+    // they are Foundry's semantics rather than ours and a silent change would corrupt a mainnet
+    // resume record: see test/ProgressSerializerSemantics.t.sol (child-JSON-embeds-as-object,
+    // state-persists, re-emit-updates-in-place, baselines-stay-strings, omitted-key-stays-absent).
+    //
+    // The emitted SHAPE is byte-for-byte equivalent to the old builder's, and must stay that way —
+    // four consumers parse this file: `_loadProgressFile` below, `VerifyPromotionReady`,
+    // `patch-mainnet-addresses-promotion-ready.js`, and the documented manual-trim procedure.
 
-        string memory json = "{";
-        json = string.concat(json, '"chainId": ', vm.toString(CHAIN_ID), ",");
-        json = string.concat(json, '"networkName": "', NETWORK_NAME, '",');
-        json = string.concat(json, '"deploymentStatus": "', status, '",');
-        // Top-level sibling of `contracts`, deliberately NOT a ContractDeployment record: the
-        // Node patcher walks `.contracts.<Name>` by name (patch-mainnet-addresses-
-        // promotion-ready.js:82-105) and a baseline is not a contract. Written as a decimal
-        // STRING so JS `JSON.parse` round-trips all 23 digits. `bptAtPhase0` is already the
-        // monotonic maximum of the persisted and live readings (see `_phase0_preconditions`),
-        // so re-emitting it here can never shrink the recorded baseline.
-        json = string.concat(json, '"baselines": {"bptAtCutover": "', vm.toString(bptAtPhase0), '"');
-        // Story 075: appended as a SIBLING key. `bptAtCutover` above is untouched — story 074
-        // owns it. Omitted entirely when phUSD's minter set was unreadable, so the verifier
-        // fails loudly on the absent baseline instead of asserting against a fabricated 0.
-        if (phusdMinterBaselineRecorded) {
-            json = string.concat(json, ', "phusdMinterMask": "', vm.toString(phusdMinterMaskAtPhase0), '"');
-            json = string.concat(json, ', "phusdMintVersion": "', vm.toString(phusdMintVersionAtPhase0), '"');
+    /// @dev Foundry serialiser object keys. Namespaced so they cannot collide with any other
+    ///      `vm.serialize*` user in the same run.
+    string internal constant PR_ROOT = "pr.root";
+    string internal constant PR_CONTRACTS = "pr.contracts";
+    string internal constant PR_BASELINES = "pr.baselines";
+
+    /// @dev Entries in `contractNames[0 .. _prSerializedUpTo)` are already present in the
+    ///      persisted `PR_CONTRACTS` object. Everything from there up is new since the last write.
+    uint256 internal _prSerializedUpTo;
+    /// @dev Name of the entry whose record was last MUTATED. Needed because a mutation is not
+    ///      always an append — `_trackDeployment` writes an entry, and a later `_trackConfig` on
+    ///      the same name flips `configured` on an entry already inside the serialised range.
+    string internal _prDirtyName;
+    bool internal _prRootSeeded;
+    bool internal _prFixedAddressesSeeded;
+    bool internal _prKenduSeeded;
+
+    /// @dev Emits ONE contract entry and returns the whole accumulated `contracts` object.
+    function _prSerializeEntry(string memory name) internal returns (string memory contractsJson) {
+        ContractDeployment memory d = deployments[name];
+        string memory k = string.concat("pr.e.", name);
+        vm.serializeAddress(k, "address", d.addr);
+        vm.serializeBool(k, "deployed", d.deployed);
+        vm.serializeBool(k, "configured", d.configured);
+        vm.serializeUint(k, "deployGas", d.deployGas);
+        string memory entry = vm.serializeUint(k, "configGas", d.configGas);
+        contractsJson = vm.serializeString(PR_CONTRACTS, name, entry);
+    }
+
+    function _writeProgressFileWithStatus(string memory status) internal {
+        // Record the non-deployed addresses the patcher needs before serialising. Seeded ONCE:
+        // they are compile-time constants, and re-recording them every write would clobber
+        // `_prDirtyName` and force a redundant re-emit of six entries per write.
+        if (!_prFixedAddressesSeeded) {
+            _recordAddress("UniboostHookEYE", HOOK_EYE);
+            _recordAddress("UniboostHookSCX", HOOK_SCX);
+            _recordAddress("UniboostHookFLX", HOOK_FLX);
+            _recordAddress("BalancerPoolerMintDebtHook", HOOK_POOLER);
+            _recordAddress("NudgeRatchetMintDebtHook", HOOK_RATCHET);
+            _prFixedAddressesSeeded = true;
         }
-        // Story 076: another SIBLING key. `bptAtCutover` and the story-075 pair above are
-        // untouched. `phlimboV2StakedAtCutover` is already the monotonic maximum of the
-        // persisted and live readings (see `_phase0_phlimboV3Preconditions`), so re-emitting
-        // it here can never shrink the recorded baseline. Written whenever it is non-zero:
-        // a zero baseline carries no information and Phase 0 rejects it on a fresh leg.
+        // Kendu is conditional and the condition flips mid-run, so it gets its own latch rather
+        // than riding on the block above.
+        if (kenduWhitelisted && !_prKenduSeeded) {
+            _recordAddress("Kendu", KENDU);
+            _prKenduSeeded = true;
+        }
+
+        // --- contracts -------------------------------------------------------------------
+        uint256 len = contractNames.length;
+        string memory contractsJson;
+        for (uint256 i = _prSerializedUpTo; i < len; i++) {
+            contractsJson = _prSerializeEntry(contractNames[i]);
+        }
+        _prSerializedUpTo = len;
+        // Re-emit the mutated entry. Idempotent when it was already covered by the append loop
+        // above, and REQUIRED when it was not (see `_prDirtyName`). Also guarantees we always
+        // hold a current `contractsJson` even on a write where nothing was appended.
+        {
+            string memory dirty = bytes(_prDirtyName).length > 0 ? _prDirtyName : contractNames[len - 1];
+            contractsJson = _prSerializeEntry(dirty);
+            _prDirtyName = "";
+        }
+
+        // --- baselines -------------------------------------------------------------------
+        // Every baseline is emitted as a decimal STRING, never a JSON number. `bptAtCutover` is 23
+        // digits and would silently lose precision in the Node patcher's `JSON.parse` as a number
+        // (it exceeds Number.MAX_SAFE_INTEGER by ~6 orders of magnitude), and `_loadProgressFile`
+        // reads all four through `vm.parseUint(vm.parseJsonString(...))`. Pinned by
+        // test_baselinesRoundTripAsStringsNotNumbers.
+        //
+        // `bptAtPhase0` and `phlimboV2StakedAtCutover` are already the monotonic maxima of the
+        // persisted and live readings (see `_phase0_preconditions` / `_phase0_phlimboV3Precon-
+        // ditions`), so re-emitting them here can never shrink a recorded baseline.
+        string memory baselinesJson = vm.serializeString(PR_BASELINES, "bptAtCutover", vm.toString(bptAtPhase0));
+        // Omitted ENTIRELY when phUSD's minter set was unreadable, so the verifier fails loudly on
+        // the absent baseline instead of asserting against a fabricated 0. Absence and zero are
+        // NOT interchangeable — pinned by test_omittedKeyIsAbsentNotZero.
+        if (phusdMinterBaselineRecorded) {
+            vm.serializeString(PR_BASELINES, "phusdMinterMask", vm.toString(phusdMinterMaskAtPhase0));
+            baselinesJson =
+                vm.serializeString(PR_BASELINES, "phusdMintVersion", vm.toString(phusdMintVersionAtPhase0));
+        }
+        // Written whenever non-zero: a zero baseline carries no information and Phase 0 rejects it
+        // on a fresh leg.
         if (phlimboV2StakedAtCutover > 0) {
-            json = string.concat(
-                json, ', "phlimboV2StakedAtCutover": "', vm.toString(phlimboV2StakedAtCutover), '"'
+            baselinesJson = vm.serializeString(
+                PR_BASELINES, "phlimboV2StakedAtCutover", vm.toString(phlimboV2StakedAtCutover)
             );
         }
-        json = string.concat(json, "},");
-        json = string.concat(json, '"contracts": {');
-        for (uint256 i = 0; i < contractNames.length; i++) {
-            string memory name = contractNames[i];
-            ContractDeployment memory d = deployments[name];
-            if (i > 0) json = string.concat(json, ",");
-            json = string.concat(json, '"', name, '": {');
-            json = string.concat(json, '"address": "', vm.toString(d.addr), '",');
-            json = string.concat(json, '"deployed": ', d.deployed ? "true" : "false", ",");
-            json = string.concat(json, '"configured": ', d.configured ? "true" : "false", ",");
-            json = string.concat(json, '"deployGas": ', vm.toString(d.deployGas), ",");
-            json = string.concat(json, '"configGas": ', vm.toString(d.configGas));
-            json = string.concat(json, "}");
+
+        // --- root ------------------------------------------------------------------------
+        // chainId/networkName are constants: seeded once so they cost one full-root materialisation
+        // in total rather than one per write.
+        if (!_prRootSeeded) {
+            vm.serializeUint(PR_ROOT, "chainId", CHAIN_ID);
+            vm.serializeString(PR_ROOT, "networkName", NETWORK_NAME);
+            _prRootSeeded = true;
         }
-        json = string.concat(json, "}}");
+        vm.serializeString(PR_ROOT, "deploymentStatus", status);
+        vm.serializeString(PR_ROOT, "baselines", baselinesJson);
+        string memory json = vm.serializeString(PR_ROOT, "contracts", contractsJson);
+        // THE PREVIEW SPLIT LIVES HERE, NOT AT THE CALL SITES, AND THAT PLACEMENT IS THE WHOLE
+        // POINT. Preview still SERIALISES — it only declines to WRITE.
+        //
+        // The safety property `:dry` must preserve is "no progress file, because a preview CREATE
+        // address is fork-local fiction that would poison the patcher". That property is about the
+        // FILE, not about the serialisation work. Story 072's broadcast died here with
+        // `EvmError: MemoryOOG` (see the block above this function for the mechanism and the fix).
+        // The serialisation is now cheap, but this split stays where it is: cheap is not free, and
+        // the POINT is that `:dry` and `:broadcast` execute the same code here.
+        //
+        // Because the old code gated the CALL on `!isPreview`, `:dry` executed this function ZERO
+        // times against the broadcast path's 78 — so the verification gate was structurally blind
+        // to the one failure that stopped the cutover, and stayed green across every re-run while
+        // the broadcast failed identically each time. Serialising unconditionally makes `:dry` pay
+        // the identical memory cost and fail first, on a laptop, instead of mid-Ledger-session.
+        //
+        // Do NOT "optimise" this back by skipping the concat work under preview.
+        //
+        // The `bytes(json).length` console.log is LOAD-BEARING, not decoration. This profile runs
+        // `via_ir` at `optimizer_runs = 10000`; a `json` that were dead on this branch could be
+        // sunk into the write branch, and the preview would quietly stop paying the memory cost
+        // this guard exists to expose — reintroducing the exact blind spot, invisibly. Consuming
+        // it in a `console.log` (an external staticcall the optimiser must preserve) forces the
+        // string to be materialised on the preview path too. It also mirrors the broadcast path's
+        // per-call log line, so the two runs stay comparable line for line.
+        if (isPreview) {
+            console.log("Progress serialised (preview: NOT written); bytes:", bytes(json).length);
+            return;
+        }
         vm.writeFile(PROGRESS_FILE, json);
         console.log("Progress file updated:", PROGRESS_FILE);
     }
