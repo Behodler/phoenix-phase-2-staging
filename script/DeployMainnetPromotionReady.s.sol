@@ -720,11 +720,11 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         console.log("  live maxTout (WAD):              ", IPoolerLike(OLD_POOLER).maxTout());
 
         // ---- The five hooks: wiring + outstanding debt. ----
-        _logHook("UniboostHookEYE", HOOK_EYE, OLD_UNIBOOST_EYE, V1_STAKER_EYE);
-        _logHook("UniboostHookSCX", HOOK_SCX, OLD_UNIBOOST_SCX, V1_STAKER_SCX);
-        _logHook("UniboostHookFLX", HOOK_FLX, OLD_UNIBOOST_FLX, V1_STAKER_FLX);
-        _logHook("BalancerPoolerHook", HOOK_POOLER, OLD_POOLER, NFT_STAKER);
-        _logHook("NudgeRatchetHook", HOOK_RATCHET, OLD_DELAY_RELEASE, RATCHET_NFT_STAKER);
+        _logHook("UniboostHookEYE", HOOK_EYE, OLD_UNIBOOST_EYE, newUniboostEYE, V1_STAKER_EYE);
+        _logHook("UniboostHookSCX", HOOK_SCX, OLD_UNIBOOST_SCX, newUniboostSCX, V1_STAKER_SCX);
+        _logHook("UniboostHookFLX", HOOK_FLX, OLD_UNIBOOST_FLX, newUniboostFLX, V1_STAKER_FLX);
+        _logHook("BalancerPoolerHook", HOOK_POOLER, OLD_POOLER, newPooler, NFT_STAKER);
+        _logHook("NudgeRatchetHook", HOOK_RATCHET, OLD_DELAY_RELEASE, newRatchet, RATCHET_NFT_STAKER);
 
         // ---- Stranded value. Recorded, never hardcoded. ----
         // WRITE-ONCE BPT CUTOVER BASELINE (audit run-22, L-02).
@@ -1065,12 +1065,27 @@ contract DeployMainnetPromotionReady is Script, StdCheats {
         console.log("  mintVersion:    ", globalVersion);
     }
 
-    function _logHook(string memory label, address hook, address expectedDispatcher, address expectedRecipient)
-        internal
-        view
-    {
+    /// @dev RESUME-AWARE on the dispatcher, exactly like `_requireSlot`. The `*_repointHook`
+    ///      steps in Phases 4a/4b/4c call `hook.setDispatcher(new)`, so on a resume leg whose
+    ///      crash landed AFTER those steps the hook legitimately names the REPLACEMENT, not the
+    ///      pre-cutover dispatcher. Asserting `== expectedOldDispatcher` absolutely (as this did
+    ///      before) made every resume past tx 27 abort in Phase 0 with "dispatcher drifted" even
+    ///      though the chain was in the correct post-repoint state. The recipient stays an
+    ///      absolute assertion: it is only ever moved by Phase 6's `st_*_repointHook`, which is
+    ///      gated separately, and a drifted recipient really would be a problem.
+    function _logHook(
+        string memory label,
+        address hook,
+        address expectedOldDispatcher,
+        address expectedNewDispatcher,
+        address expectedRecipient
+    ) internal view {
         IMintDebtHookLike h = IMintDebtHookLike(hook);
-        require(h.dispatcher() == expectedDispatcher, string.concat(label, ": dispatcher drifted"));
+        address d = h.dispatcher();
+        require(
+            d == expectedOldDispatcher || (expectedNewDispatcher != address(0) && d == expectedNewDispatcher),
+            string.concat(label, ": dispatcher drifted")
+        );
         require(h.recipient() == expectedRecipient, string.concat(label, ": recipient drifted"));
         // `pull()` reverts `RecipientUnset` on a zero recipient; the require above already
         // proves it is set, so the settle in Phases 4a/4b/4c cannot fail that way.

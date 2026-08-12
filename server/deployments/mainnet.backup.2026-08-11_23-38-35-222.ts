@@ -47,8 +47,11 @@ export const mainnetAddresses: ContractAddresses = {
   // STAYS the V2 address after the promotion-ready cutover (story 076): V2 continues to
   // exist, wound down and mint-revoked but NOT paused. PhlimboV3 is the separate key below.
   PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
-  PhlimboV3: "0x8D3A8E3ba43DEb8C7e2110DF437a92243523b6ca",
-  StableYieldAccumulator: "0x0cD353bfda674D04823B2826ffafB83B560D21B6",
+  // Story 076 (2026-08-04): PLACEHOLDER. PhlimboV3 is deployed by the promotion-ready
+  // cutover's Phase 4e and filled from the progress file by
+  // scripts/patch-mainnet-addresses-promotion-ready.js. Zero until that broadcast lands.
+  PhlimboV3: "0x0000000000000000000000000000000000000000",
+  StableYieldAccumulator: "0x3C690EC3B2524104dE269bf0F9baa7f045eF8270",
   // Story 055 migration (executed 2026-06-10: MigrateStableStakerMainnet run txs 1-20 +
   // ResumeStableStakerMigration run, all receipts 0x1). DOLA/USDC are plain
   // ERC4626YieldStrategy; USDe is ERC4626MarketYieldStrategy @ 30 bps (sUSDe cooldown
@@ -70,7 +73,9 @@ export const mainnetAddresses: ContractAddresses = {
   // External tokens
   USDS: "0xdC035D45d973E3EC169d2276DDab16f1e407384F",
   SCX: "0x1B8568FbB47708E9E9D31Ff303254f748805bF21",
-  Kendu: "0xaa95f26e30001251fb905d264Aa7b00eE9dF6C18",
+  // Story 073 (2026-07-29): PLACEHOLDER. MockKendu exists only on the local anvil chain (its
+  // extractor-derived key is `Kendu`). Story 072 owns the mainnet Kendu address, if any.
+  Kendu: "0x0000000000000000000000000000000000000000",
   Flax: "0x0cf758D4303295C43CD95e1232f0101ADb3DA9E8",
   WBTC: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
   EYE: "0x155ff1A85F440EE0A382eA949f24CE4E0b751c65",
@@ -102,15 +107,15 @@ export const mainnetAddresses: ContractAddresses = {
   BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
   BurnerFlax: "0xb63b57025e9bee5bbb66e4a5297ed0ca044d5ff7",
   */
-  UniboostEYE: "0x9cd4E3EB3B519C925a0000239990E27F9019f3B3",
-  UniboostSCX: "0x665919d494b4294C643e4f3FA96EaC729b943585",
-  UniboostFLX: "0xBda3314052Ae46b912F22B6202F2c66641eEd183",
+  UniboostEYE: "0x63f4aCE0304d795A458fc2567F2c4eFeB60970CA",
+  UniboostSCX: "0xea6bAa2170E60e9069646d689730533176c59a03",
+  UniboostFLX: "0xb490c48701eB44D59af4A530d75B4fd3E79B5ddD",
   UniboostHookEYE: "0x0F05c34d458dd8953864a56857a2bb67ecb22683",
   UniboostHookSCX: "0xfe4Ed16a8450c76768e1EB5FF8292806E2204a2A",
   UniboostHookFLX: "0x8F48E5431814FfaC9c35cf934Aa2556A946Fb33C",
-  UniboostStakerEYE: "0xE9067f37f6D0bb116233194690fb600Add8fD052",
-  UniboostStakerSCX: "0x541b912B5451FfE2c04D5Ea8D317081718683242",
-  UniboostStakerFLX: "0x17E25Cca844bC71c1E663E089fF11aFD266B5795",
+  UniboostStakerEYE: "0x66989bb99c1569bf2540f3bB16975801df05864B",
+  UniboostStakerSCX: "0x39e85E62d0Ccb83fb87fb525aA259F8f79A70637",
+  UniboostStakerFLX: "0x6E8cA0E37AadF35Df19F5064f279d9CC96a3403b",
   // Dedicated BatchNFTMinter per Uniboost NFT (EYE/SCX/FLX, dispatcher indices 1/2/3) so the UI
   // can batch-mint each in one tx. Nudge feature disabled (pure loopers). NOT yet deployed on
   // mainnet — the underlying Uniboost stack above is itself undeployed on mainnet. Left empty
@@ -121,7 +126,7 @@ export const mainnetAddresses: ContractAddresses = {
   // Story 056 (2026-06-04): index-4 dispatcher cut over to the Sky-PSM BalancerPoolerV2.
   // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
   // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).
-  BalancerPooler: "0x7f6874332c4629429d70D15f685A8230323F11F1",
+  BalancerPooler: "0x7f74388bc970de5e2822036a1ad06fccd156786b",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts
@@ -129,18 +134,20 @@ export const mainnetAddresses: ContractAddresses = {
   // `ViewRouter.pages(keccak256("<page>"))` — "deposit", "mint", … — not from this file.
   ViewRouter: "0xC17Ce1cE5ebB43fc0cfda9Fe8BbC849c0894631a",
   // NFT staking
-  BalancerPoolerMintDebtHook: "0x4A26ad83306a2F17155799fDD9449f77eb3F8bD7",
+  BalancerPoolerMintDebtHook: "0x4a26ad83306a2f17155799fdd9449f77eb3f8bd7",
   NFTStaker: "0xc8514f821a3d801fa8a8c435840a992a4365a13b",
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
-  NudgeStreamer: "0xF7e26179D6971985107AF66b078932D6484eBEAA",
-  BatchNFTMinter: "0x068395556b8c43eDf257DC54D109EA5910aE15c7",
+  // Story 073 (2026-07-29): PLACEHOLDER. The NudgeStreamer is deployed on the local anvil chain
+  // only; story 072 owns the mainnet deploy and will replace this with the broadcast address.
+  NudgeStreamer: "0x0000000000000000000000000000000000000000",
+  BatchNFTMinter: "0x86866e01a115C17892Ed04c548F2e8638851029d",
   // Stable Staking — deployed 2026-06-10 by ResumeStableStakerMigration (story 055).
   // Pools: DOLA 5 / USDC 7 / USDe 10 phUSD per day, 10% set-aside buffer.
   StableStaker: "0xbce8ABC09BaEDCabE93419bF875f6186e182079A",
   // NudgeRatchet dispatcher + its mint-debt hook — not yet deployed on mainnet (story 068).
   // Zero placeholders so this file still satisfies the ContractAddresses interface once the
   // local deploy added these fields. Patch by hand when they ship to mainnet.
-  NudgeRatchet: "0x7E3fB41FD3E99312FBa8bfc71E79e635d526AA40",
+  NudgeRatchet: "0xd4ea91f6096A75a1c34A3c25D7725dE1f5c49f68",
   NudgeRatchetMintDebtHook: "0x09AceB96337df1316e0D2d7EEEa44d754D1f8d05",
   // Dedicated NFTStaker for the NudgeRatchet NFT — not yet deployed on mainnet (story 068).
   RatchetNFTStaker: "0x299b0071def42d35eaf5ea24cc0a71cf10655a64",
