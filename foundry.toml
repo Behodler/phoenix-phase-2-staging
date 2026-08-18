@@ -38,7 +38,7 @@ remappings = [
     "@phlimbo-ea/=lib/phlimbo-ea/src/",
     "@phUSD-stable-minter/=lib/phUSD-stable-minter/src/",
     "@stable-yield-accumulator/=lib/stable-yield-accumulator/src/",
-    "@openzeppelin/contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/contracts/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "@forge-std/=lib/forge-std/src/",
     "@vault-interfaces/=lib/vault/src/interfaces/",
     "@vault/=lib/vault/src/",
@@ -77,13 +77,10 @@ remappings = [
     "lib/stable-yield-accumulator/lib/phlimbo-ea/=lib/phlimbo-ea/",
     # flax-token -> lib/flax-token-v2
     "lib/phUSD-stable-minter/lib/flax-token/=lib/flax-token-v2/",
-    "openzeppelin-contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/",
-    "erc4626-tests/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/erc4626-tests/",
-    "halmos-cheatcodes/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/lib/halmos-cheatcodes/src/",
+    "openzeppelin-contracts/=lib/openzeppelin-contracts/",
     "v4-core/=lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/src/",
     "v4-periphery/=lib/stable-yield-accumulator/lib/v4-periphery/",
     "@uniswap/v4-core/=lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/",
-    "lib/stable-yield-accumulator/lib/openzeppelin-contracts/=lib/stable-yield-accumulator/lib/openzeppelin-contracts/",
     "@flax-token/=lib/flax-token-v2/src/",
     "lib/nft-staking/:yield-claim-nft/=lib/yield-claim-nft/src/",
     "yield-claim-nft/=lib/yield-claim-nft/src/",
@@ -112,7 +109,24 @@ remappings = [
     "lib/stable-staker/lib/flax-token/=lib/flax-token-v2/",
     "lib/stable-staker/lib/pauser/=lib/pauser/",
     "lib/stable-staker/lib/reflax-yield-vault/=lib/vault/",
-    "lib/stable-staker/lib/openzeppelin-contracts/=lib/phUSD-stable-minter/lib/openzeppelin-contracts/"
+    # --- OpenZeppelin canonicalization (single top-level pin) -----------------
+    # OZ is pinned at lib/openzeppelin-contracts @ v5.6.1 (tag 5fd1781b). Every
+    # submodule vendors its OWN nested copy at a different commit (5.1.0 through
+    # assorted 5.6.1-era master snapshots). Redirect each onto the single
+    # top-level pin so there is exactly one physical EnumerableSet/SafeERC20/etc
+    # -> no "Identifier already declared". Defensive: no first-party source
+    # hard-codes a nested OZ path today, but the stable-staker entry previously
+    # here existed because a real collision was hit once. Submodules are never
+    # modified -- this is compiler-side path rewriting only.
+    "lib/phUSD-stable-minter/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/stable-staker/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/stable-yield-accumulator/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/vault/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/flax-token-v2/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/phlimbo-ea/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/yield-claim-nft/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/pauser/lib/immutable/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/nft-staking/lib/immutable/openzeppelin-contracts/=lib/openzeppelin-contracts/"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
