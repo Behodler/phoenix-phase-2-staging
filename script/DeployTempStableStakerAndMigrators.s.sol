@@ -4,9 +4,9 @@ pragma solidity ^0.8.20;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
-import {StableStaker} from "stable-staker/StableStaker.sol";
-import {StableStakerMigrator} from "stable-staker/StableStakerMigrator.sol";
-import {IStableStaker} from "stable-staker/interfaces/IStableStaker.sol";
+import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
+import {CrossVersionMigrator} from "stable-staker/CrossVersionMigrator.sol";
+import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
 import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -18,9 +18,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         Deploys:
  *           1. ysDolaV2  - fresh ERC4626YieldStrategy(owner, DOLA,  AUTODOLA_VAULT)
  *           2. ysUsdcV2  - fresh ERC4626YieldStrategy(owner, USDC,  AUTOUSDC_VAULT)
- *           3. tempStaker - fresh StableStaker(phUSD, owner) - used as a holding pen during the swap
- *           4. migrator1  - StableStakerMigrator(original → temp) - leg 1: drain original into temp
- *           5. migrator2  - StableStakerMigrator(temp → original) - leg 2: pour back into original
+ *           3. tempStaker - fresh StableStakerV1(phUSD, owner) - used as a holding pen during the swap
+ *           4. migrator1  - CrossVersionMigrator(original → temp) - leg 1: drain original into temp
+ *           5. migrator2  - CrossVersionMigrator(temp → original) - leg 2: pour back into original
  *
  *         Wires:
  *           - phUSD.setMinter(tempStaker, true)
@@ -128,9 +128,9 @@ contract DeployTempStableStakerAndMigrators is Script {
 
     ERC4626YieldStrategy   public ysDolaV2;
     ERC4626YieldStrategy   public ysUsdcV2;
-    StableStaker           public tempStaker;
-    StableStakerMigrator   public migrator1;
-    StableStakerMigrator   public migrator2;
+    StableStakerV1           public tempStaker;
+    CrossVersionMigrator   public migrator1;
+    CrossVersionMigrator   public migrator2;
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "DeployTempStableStakerAndMigrators: wrong chain - expected mainnet (1)");
@@ -186,21 +186,21 @@ contract DeployTempStableStakerAndMigrators is Script {
 
         // ---- Step 2: deploy temp staker and migrators ----
         console.log("--- deploying tempStaker ---");
-        tempStaker = new StableStaker(IFlaxStaker(PHUSD), OWNER_ADDRESS);
+        tempStaker = new StableStakerV1(IFlaxStaker(PHUSD), OWNER_ADDRESS);
         console.log("  tempStaker:  ", address(tempStaker));
 
         console.log("--- deploying migrator1 (original -> temp) ---");
-        migrator1 = new StableStakerMigrator(
-            IStableStaker(ORIGINAL_STABLE_STAKER),
-            IStableStaker(address(tempStaker)),
+        migrator1 = new CrossVersionMigrator(
+            IStableStakerMigratable(ORIGINAL_STABLE_STAKER),
+            IStableStakerMigratable(address(tempStaker)),
             OWNER_ADDRESS
         );
         console.log("  migrator1:   ", address(migrator1));
 
         console.log("--- deploying migrator2 (temp -> original) ---");
-        migrator2 = new StableStakerMigrator(
-            IStableStaker(address(tempStaker)),
-            IStableStaker(ORIGINAL_STABLE_STAKER),
+        migrator2 = new CrossVersionMigrator(
+            IStableStakerMigratable(address(tempStaker)),
+            IStableStakerMigratable(ORIGINAL_STABLE_STAKER),
             OWNER_ADDRESS
         );
         console.log("  migrator2:   ", address(migrator2));
@@ -325,7 +325,7 @@ contract DeployTempStableStakerAndMigrators is Script {
 
     /// @dev YS-09 idempotent addToken: addToken reverts "token exists" on a duplicate, so skip when
     ///      the token is already in the staker's registered set.
-    function _addTokenIdempotent(StableStaker staker, address token) internal {
+    function _addTokenIdempotent(StableStakerV1 staker, address token) internal {
         address[] memory registered = IStakerOwnable(address(staker)).getStakedTokens();
         for (uint256 i = 0; i < registered.length; i++) {
             if (registered[i] == token) {

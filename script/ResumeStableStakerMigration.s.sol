@@ -6,7 +6,7 @@ import "@forge-std/console.sol";
 
 import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
 import {ERC4626MarketYieldStrategy} from "@vault/concreteYieldStrategies/ERC4626MarketYieldStrategy.sol";
-import {StableStaker} from "stable-staker/StableStaker.sol";
+import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
 import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -136,7 +136,7 @@ contract ResumeStableStakerMigration is Script {
     uint256 public constant USDE_SLIPPAGE_BPS = 30;
 
     bool public isPreview;
-    StableStaker public stableStaker;
+    StableStakerV1 public stableStaker;
 
     function setUp() public view {
         require(block.chainid == 1, "Wrong chain ID - expected Mainnet (1)");
@@ -300,10 +300,10 @@ contract ResumeStableStakerMigration is Script {
 
         address existing = vm.envOr("EXISTING_STABLE_STAKER", address(0));
         if (existing == address(0)) {
-            stableStaker = new StableStaker(IFlaxStaker(PHUSD), OWNER_ADDRESS);
+            stableStaker = new StableStakerV1(IFlaxStaker(PHUSD), OWNER_ADDRESS);
             console.log("  StableStaker deployed:", address(stableStaker));
         } else {
-            stableStaker = StableStaker(existing);
+            stableStaker = StableStakerV1(existing);
             require(stableStaker.owner() == OWNER_ADDRESS, "F: existing staker owner mismatch");
             console.log("  StableStaker adopted (EXISTING_STABLE_STAKER):", existing);
         }

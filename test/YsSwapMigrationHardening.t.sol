@@ -2,9 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import {StableStaker} from "stable-staker/StableStaker.sol";
-import {StableStakerMigrator} from "stable-staker/StableStakerMigrator.sol";
-import {IStableStaker} from "stable-staker/interfaces/IStableStaker.sol";
+import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
+import {CrossVersionMigrator} from "stable-staker/CrossVersionMigrator.sol";
+import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
 import {IFlax} from "flax-token/IFlax.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
 import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
@@ -15,7 +15,7 @@ import {MockPhUSD} from "../src/mocks/MockPhUSD.sol";
 /**
  * @title YsSwapMigrationHardeningTest
  * @notice Story 062 (YS-09) hardening proof. Builds a self-contained local model of the YS-swap
- *         migration suite (real StableStaker + StableStakerMigrator + ERC4626YieldStrategy over a
+ *         migration suite (real StableStakerV1 + CrossVersionMigrator + ERC4626YieldStrategy over a
  *         mock ERC4626 vault) and exercises the two invariants the hardened scripts rely on:
  *
  *           (a) A re-run after a simulated mid-suite revert at `setYieldStrategy` is a no-op up to
@@ -42,10 +42,10 @@ contract YsSwapMigrationHardeningTest is Test {
     ERC4626YieldStrategy ysV1;
     ERC4626YieldStrategy ysV2;
 
-    StableStaker original;
-    StableStaker temp;
-    StableStakerMigrator migrator1; // original -> temp
-    StableStakerMigrator migrator2; // temp -> original
+    StableStakerV1 original;
+    StableStakerV1 temp;
+    CrossVersionMigrator migrator1; // original -> temp
+    CrossVersionMigrator migrator2; // temp -> original
 
     address owner = address(this);
     address pauserEOA = makeAddr("pauserEOA");
@@ -64,14 +64,14 @@ contract YsSwapMigrationHardeningTest is Test {
         ysV1 = new ERC4626YieldStrategy(owner, address(dola), address(vaultV1));
         ysV2 = new ERC4626YieldStrategy(owner, address(dola), address(vaultV2));
 
-        original = new StableStaker(IFlax(address(phusd)), owner);
-        temp = new StableStaker(IFlax(address(phusd)), owner);
+        original = new StableStakerV1(IFlax(address(phusd)), owner);
+        temp = new StableStakerV1(IFlax(address(phusd)), owner);
 
-        migrator1 = new StableStakerMigrator(
-            IStableStaker(address(original)), IStableStaker(address(temp)), owner
+        migrator1 = new CrossVersionMigrator(
+            IStableStakerMigratable(address(original)), IStableStakerMigratable(address(temp)), owner
         );
-        migrator2 = new StableStakerMigrator(
-            IStableStaker(address(temp)), IStableStaker(address(original)), owner
+        migrator2 = new CrossVersionMigrator(
+            IStableStakerMigratable(address(temp)), IStableStakerMigratable(address(original)), owner
         );
 
         // phUSD minter wiring so reward settle paths can mint.
@@ -272,11 +272,11 @@ contract YsSwapMigrationHardeningTest is Test {
     }
 
     // -------------------------------- helpers --------------------------------
-    function _poolState(StableStaker s, address token) internal view returns (uint8) {
+    function _poolState(StableStakerV1 s, address token) internal view returns (uint8) {
         return uint8(s.poolState(token));
     }
 
-    function _totalStaked(StableStaker s, address token) internal view returns (uint256) {
+    function _totalStaked(StableStakerV1 s, address token) internal view returns (uint256) {
         (, , , uint256 totalStaked) = s.poolInfo(token);
         return totalStaked;
     }

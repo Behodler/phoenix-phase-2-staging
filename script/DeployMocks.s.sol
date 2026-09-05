@@ -81,7 +81,7 @@ import {
     IUniswapV2RouterLike,
     IWETH9Like
 } from "./helpers/UniswapV2Deployer.sol";
-import {StableStaker} from "stable-staker/StableStaker.sol";
+import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
 // StableStaker's constructor takes the flax-token-v2 IFlax; alias to avoid an
 // identifier clash with phlimbo-ea's IFlax which is already in scope transitively.
 import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
@@ -357,7 +357,7 @@ contract DeployMocks is Script {
     NudgeStreamer public nudgeStreamer;
 
     // Stable Staking infrastructure (story 051)
-    StableStaker public stableStaker;
+    StableStakerV1 public stableStaker;
 
     // Story 045.5 Phase 7 — BalancerPoolerV2 donation-phase mocks
     // waUSDC mock = ERC4626 wrapper over the existing USDC `rewardToken`.
@@ -1081,7 +1081,7 @@ contract DeployMocks is Script {
         // 1. Deploy the MasterChef-style stable farm. phUSD (MockPhUSD) satisfies IFlax
         //    (exposes mint/setMinter); deployer is the initial owner.
         gasBefore = gasleft();
-        stableStaker = new StableStaker(IFlaxStaker(address(phUSD)), deployer);
+        stableStaker = new StableStakerV1(IFlaxStaker(address(phUSD)), deployer);
         _trackDeployment("StableStaker", address(stableStaker), gasBefore - gasleft());
         console.log("StableStaker deployed at:", address(stableStaker));
 

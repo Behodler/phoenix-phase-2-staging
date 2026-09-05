@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {StableStaker} from "stable-staker/StableStaker.sol";
+import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
 
 /**
  * @title ClaimWithdrawStableStaker
@@ -44,7 +44,7 @@ contract ClaimWithdrawStableStaker is Script {
         console.log("MockDola:", dolaAddr);
         console.log("MockPhUSD:", phusdAddr);
 
-        StableStaker staker = StableStaker(stakerAddr);
+        StableStakerV1 staker = StableStakerV1(stakerAddr);
         IERC20 dola = IERC20(dolaAddr);
         IERC20 phusd = IERC20(phusdAddr);
 

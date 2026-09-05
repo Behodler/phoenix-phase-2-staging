@@ -8,7 +8,7 @@ import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
 import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import {ERC4626MarketYieldStrategy} from "@vault/concreteYieldStrategies/ERC4626MarketYieldStrategy.sol";
 import {CurveAMMAdapter} from "@vault/AMMAdapters/CurveAMMAdapter.sol";
-import {StableStaker} from "stable-staker/StableStaker.sol";
+import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
 // StableStaker's constructor takes the flax-token-v2 IFlax; alias to avoid clashing with any
 // transitively-scoped IFlax (mirrors DeployMocks.s.sol).
 import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
@@ -237,7 +237,7 @@ contract MigrateStableStakerMainnet is Script {
     uint256 public receivedUsdc;
     uint256 public receivedUsde;
 
-    StableStaker public stableStaker;
+    StableStakerV1 public stableStaker;
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "Wrong chain ID - expected Mainnet (1)");
@@ -571,7 +571,7 @@ contract MigrateStableStakerMainnet is Script {
         console.log("=== PHASE F: deploy + wire StableStaker ===");
 
         // 1. deploy the MasterChef-style stable farm (deployer = initial owner).
-        stableStaker = new StableStaker(IFlaxStaker(PHUSD), OWNER_ADDRESS);
+        stableStaker = new StableStakerV1(IFlaxStaker(PHUSD), OWNER_ADDRESS);
         console.log("  StableStaker:", address(stableStaker));
 
         // 2. pauser wiring — setPauser BEFORE register (register validates pauser() == this).
