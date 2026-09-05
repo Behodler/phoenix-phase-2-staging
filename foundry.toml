@@ -21,17 +21,15 @@ fs_permissions = [
     { access = "read", path = "./script" },
 ]
 
-# Story 070: these legacy scripts are hard-wired to the V1 yield-claim-nft contracts
-# (BalancerPooler, NFTMigrator, V1 NFTMinter) that story-039 removed from the submodule.
-# They are historical mainnet/redeploy/interaction artifacts unrelated to the local mock
-# deploy this story touches; skip them from compilation rather than risk-rewriting V1
-# deployment history. (Their breakage predates this story — the submodule was bumped past
-# V1 removal without updating these consumers.)
-skip = [
-    "script/FixBalancerPoolerMainnet.s.sol",
-    "script/DeployMainnetNFTV2.s.sol",
-    "script/interactions/TestNFTMintAndClaimFlow.s.sol",
-]
+# Archived one-off scripts. `script/archives/` holds the historical mainnet
+# migration / interaction / redeploy scripts that were written as single-use
+# actions before `script/interactions/Temp.s.sol` existed as the scratchpad.
+# They are kept verbatim as references — they encode how past problems were
+# solved and are useful when planning new scripts — but they are pinned to
+# submodule interfaces that have since moved on, so they no longer compile.
+# Excluding the whole directory keeps `forge build` green without deleting the
+# history. Nothing outside the directory imports them.
+skip = ["script/archives/**"]
 
 auto_detect_remappings = false
 remappings = [

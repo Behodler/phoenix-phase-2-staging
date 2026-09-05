@@ -27,10 +27,10 @@ import "forge-std/Test.sol";
  *         No mainnet RPC required — runs under plain `forge test`.
  */
 contract VerifyPromotionReadyGuardsTest is Test {
-    string constant VERIFIER_SRC = "script/VerifyPromotionReady.s.sol";
+    string constant VERIFIER_SRC = "script/archives/VerifyPromotionReady.s.sol";
     /// @dev Story 078. The verifier inherits its progress-file parser from the cutover script,
     ///      so the two files must be read together to prove the parse/consume halves agree.
-    string constant DEPLOY_SRC = "script/DeployMainnetPromotionReady.s.sol";
+    string constant DEPLOY_SRC = "script/archives/DeployMainnetPromotionReady.s.sol";
 
     // -----------------------------------------------------------------
     //  Local model of the verifier's baseline-consumption guard.

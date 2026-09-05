@@ -33,8 +33,8 @@ import "forge-std/Test.sol";
  *         No mainnet RPC required — runs under plain `forge test`.
  */
 contract PhusdMinterDeltaGuardsTest is Test {
-    string constant VERIFIER_SRC = "script/VerifyPromotionReady.s.sol";
-    string constant DEPLOY_SRC = "script/DeployMainnetPromotionReady.s.sol";
+    string constant VERIFIER_SRC = "script/archives/VerifyPromotionReady.s.sol";
+    string constant DEPLOY_SRC = "script/archives/DeployMainnetPromotionReady.s.sol";
 
     /// @dev Mirrors `_phusdMinterCandidates()`'s index for `PHLIMBO_V2` (appended at 19 by
     ///      story 076). Kept in sync by `test_deployScriptDeclaresTheV2Bit` below.
