@@ -4,13 +4,17 @@ pragma solidity ^0.8.19;
 import "@forge-std/Script.sol";
 import "@forge-std/console.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
+import {StableStakerV2} from "stable-staker/StableStakerV2.sol";
 
 /**
  * @title StakeStableStaker
  * @notice Stake a fixed amount of the DOLA pool's token into the locally deployed
  *         StableStaker, as the first half of the story-051 config verification.
- * @dev Story 051. Companion to ClaimWithdrawStableStaker.s.sol. Reads the deployed
+ * @dev Story 051; retargeted onto StableStakerV2 by story 080, which renamed the address-book
+ *      key from `StableStaker` to `StableStakerV2` and left the local V1 untracked. The stake
+ *      leg itself is unchanged — `stake` has the same signature and the same semantics on both
+ *      versions; only the reward token behind it moved from phUSD to Antimatter.
+ *      Companion to ClaimWithdrawStableStaker.s.sol. Reads the deployed
  *      addresses from progress.31337.json (same pattern as TestNudgePayout.s.sol).
  *
  *      Verification flow (orchestrated by verify-stable-staker.sh):
@@ -40,22 +44,24 @@ contract StakeStableStaker is Script {
 
         // --- Load addresses from progress.json ---
         string memory progressJson = vm.readFile("server/deployments/progress.31337.json");
-        address stakerAddr = vm.parseJsonAddress(progressJson, ".contracts.StableStaker.address");
+        address stakerAddr = vm.parseJsonAddress(progressJson, ".contracts.StableStakerV2.address");
         address dolaAddr = vm.parseJsonAddress(progressJson, ".contracts.MockDola.address");
 
-        console.log("StableStaker:", stakerAddr);
+        console.log("StableStakerV2:", stakerAddr);
         console.log("MockDola:", dolaAddr);
 
-        StableStakerV1 staker = StableStakerV1(stakerAddr);
+        StableStakerV2 staker = StableStakerV2(stakerAddr);
         IERC20 dola = IERC20(dolaAddr);
 
-        // --- Sanity: pool is configured at 10 phUSD/day ---
-        (uint256 phusdPerSecond,,, uint256 totalStakedBefore) = staker.poolInfo(dolaAddr);
+        // --- Sanity: pool is configured at 10 Antimatter/day ---
+        // Field 0 of `PoolInfo` is `antimatterPerSecond` on V2 (it was `phusdPerSecond` on V1);
+        // the tuple shape is otherwise identical, so this positional read is unchanged.
+        (uint256 antimatterPerSecond,,, uint256 totalStakedBefore) = staker.poolInfo(dolaAddr);
         console.log("\n--- Pre-stake pool state ---");
-        console.log("DOLA pool phusdPerSecond:", phusdPerSecond);
+        console.log("DOLA pool antimatterPerSecond:", antimatterPerSecond);
         console.log("DOLA pool totalStaked (baseline):", totalStakedBefore);
-        // 10 phUSD/day = 10e18 / 86400 (floored) = 115740740740740
-        require(phusdPerSecond == uint256(10 ether) / 86400, "DOLA pool rate != 10 phUSD/day");
+        // 10 Antimatter/day = 10e18 / 86400 (floored) = 115740740740740
+        require(antimatterPerSecond == uint256(10 ether) / 86400, "DOLA pool rate != 10 Antimatter/day");
 
         uint256 dolaBefore = dola.balanceOf(deployer);
         console.log("Deployer DOLA before stake:", dolaBefore);
@@ -77,8 +83,18 @@ contract StakeStableStaker is Script {
         console.log("Deployer staked principal:", userAmount);
         console.log("DOLA pool totalStaked:", totalStakedAfter);
 
-        require(userAmount == STAKE_AMOUNT, "staked principal mismatch");
-        require(totalStakedAfter == totalStakedBefore + STAKE_AMOUNT, "totalStaked did not increase by stake");
+        // STORY 080: credited principal is asserted within a band rather than exactly, and the
+        // band is TWO-SIDED. The pool is NO LONGER EMPTY when this runs — the cutover rehearsal
+        // leaves 12 migrated positions in it — so the deposit routes through a strategy that is
+        // already carrying a client position, and two effects that used to be absent now apply:
+        // the assets->shares->assets round trip rounds, and the 10% set-aside buffer credits a
+        // share of realised surplus back to the staker on the way in. The credit is therefore
+        // within a whisker of the amount staked in either direction, not exactly equal to it.
+        // The DEBIT, by contrast, is exact and is still asserted exactly — that is the number the
+        // user actually paid.
+        uint256 credited = userAmount > STAKE_AMOUNT ? userAmount - STAKE_AMOUNT : STAKE_AMOUNT - userAmount;
+        require(credited <= STAKE_AMOUNT / 1000, "staked principal differs from the stake by more than 0.1%");
+        require(totalStakedAfter == totalStakedBefore + userAmount, "totalStaked did not increase by the credit");
         require(dolaBefore - dolaAfter == STAKE_AMOUNT, "DOLA debit mismatch");
 
         console.log("\nPASS: stake recorded. Advance time, then run ClaimWithdrawStableStaker.\n");

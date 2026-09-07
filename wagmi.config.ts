@@ -72,7 +72,14 @@ export default defineConfig({
         'NudgeStreamer.sol/NudgeStreamer.json',
 
         // Stable Staker (yield farm for stablecoin staking)
-        'StableStaker.sol/StableStaker.json',
+        // Story 080: this entry used to read 'StableStaker.sol/StableStaker.json', which has not
+        // been a real artifact since the stable-staker repo split into a frozen V1 snapshot and
+        // the evergreen V2 — there is no out/StableStaker.sol/ directory, so a `wagmi generate`
+        // would have silently DROPPED the export and the `stableStakerAbi` still in
+        // hooks/generated.ts was a frozen leftover carrying the V1 constructor shape.
+        'StableStakerV2.sol/StableStakerV2.json',
+        // The Antimatter reward token V2 pays instead of phUSD.
+        'Antimatter.sol/Antimatter.json',
 
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',

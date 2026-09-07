@@ -134,9 +134,20 @@ export const mainnetAddresses: ContractAddresses = {
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
   NudgeStreamer: "0xF7e26179D6971985107AF66b078932D6484eBEAA",
   BatchNFTMinter: "0x068395556b8c43eDf257DC54D109EA5910aE15c7",
-  // Stable Staking — deployed 2026-06-10 by ResumeStableStakerMigration (story 055).
-  // Pools: DOLA 5 / USDC 7 / USDe 10 phUSD per day, 10% set-aside buffer.
-  StableStaker: "0xbce8ABC09BaEDCabE93419bF875f6186e182079A",
+  // Stable Staking. Story 080 RETIRED the `StableStaker` key and replaced it with
+  // `StableStakerV2`, deliberately dropping the live V1 address
+  // (0xbce8ABC09BaEDCabE93419bF875f6186e182079A, deployed 2026-06-10 by
+  // ResumeStableStakerMigration, story 055) out of the registry entirely, so the UI keeps no
+  // straggling V1 reference through the cutover. This is safe because the tooling that still
+  // needs V1's address hardcodes it rather than looking it up here
+  // (scripts/gather-migration-inputs.js, and the archived migration scripts).
+  //
+  // Neither StableStakerV2 nor Antimatter is deployed on mainnet yet; both are zero placeholders
+  // so this file still satisfies the ContractAddresses interface, whose key-set is the only drift
+  // guard between the generated interface and this hand-maintained file.
+  StableStakerV2: "0x0000000000000000000000000000000000000000",
+  // The Antimatter reward token StableStakerV2 pays instead of phUSD.
+  Antimatter: "0x0000000000000000000000000000000000000000",
   // NudgeRatchet dispatcher + its mint-debt hook — not yet deployed on mainnet (story 068).
   // Zero placeholders so this file still satisfies the ContractAddresses interface once the
   // local deploy added these fields. Patch by hand when they ship to mainnet.

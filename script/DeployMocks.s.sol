@@ -82,6 +82,16 @@ import {
     IWETH9Like
 } from "./helpers/UniswapV2Deployer.sol";
 import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
+// Story 080. The evergreen staker (STAKER_VERSION == 2), its cross-version migrator, and the
+// concrete Antimatter reward token V2 pays instead of phUSD. `StableStakerV1` above is RETAINED:
+// it is still deployed locally (untracked) so the V1 -> V2 cutover has a populated source to
+// drain. `IAntimatter` is StableStakerV2's own local view of the token, which is what its
+// constructor takes; the concrete `Antimatter` comes from the antimatter submodule.
+import {StableStakerV2} from "stable-staker/StableStakerV2.sol";
+import {CrossVersionMigrator} from "stable-staker/CrossVersionMigrator.sol";
+import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
+import {IAntimatter} from "stable-staker/interfaces/IAntimatter.sol";
+import {Antimatter} from "antimatter/Antimatter.sol";
 // StableStaker's constructor takes the flax-token-v2 IFlax; alias to avoid an
 // identifier clash with phlimbo-ea's IFlax which is already in scope transitively.
 import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
@@ -95,6 +105,15 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         `DeployMainnetPromotionReady.s.sol` so the local `_setDesiredAPYTwoStep` and the
  *         mainnet one are the same code operating through the same interface.
  */
+/**
+ * @notice Story 080. The unrestricted dev-only `mint` every mock stablecoin in `src/mocks/`
+ *         exposes. Declared once here so the cutover rehearsal can seed DOLA, USDC and USDe
+ *         through one loop instead of three concrete types.
+ */
+interface IMintableMock {
+    function mint(address to, uint256 amount) external;
+}
+
 interface IPhlimboAPYLike {
     function setDesiredAPY(uint256 bps) external;
     function desiredAPYBps() external view returns (uint256);
@@ -356,8 +375,21 @@ contract DeployMocks is Script {
     // StableYieldAccumulator.
     NudgeStreamer public nudgeStreamer;
 
-    // Stable Staking infrastructure (story 051)
+    // Stable Staking infrastructure (story 051).
+    //
+    // STORY 080: `stableStaker` is now the V1 INCUMBENT ONLY. It is still deployed and still
+    // fully wired (it has to be — the cutover rehearsal needs a populated source to drain), but
+    // it is deliberately NOT `_trackDeployment`ed any more, so it never reaches
+    // `progress.31337.json`, `local-addresses.ts` or the UI. The address book sees only
+    // `StableStakerV2`. If a later story wants the local V1 addressable for debugging, that is a
+    // separate decision — see the story's Concerns.
     StableStakerV1 public stableStaker;
+
+    // Story 080: the evergreen staker the local chain ends on, and the Antimatter reward token it
+    // pays. Antimatter REPLACES phUSD as the reward token (it is not paid alongside it); V2 still
+    // holds a phUSD mint right, but only so `autoAnnihilate` can cover an annihilation shortfall.
+    Antimatter public antimatter;
+    StableStakerV2 public stableStakerV2;
 
     // Story 045.5 Phase 7 — BalancerPoolerV2 donation-phase mocks
     // waUSDC mock = ERC4626 wrapper over the existing USDC `rewardToken`.
@@ -1080,14 +1112,21 @@ contract DeployMocks is Script {
 
         // 1. Deploy the MasterChef-style stable farm. phUSD (MockPhUSD) satisfies IFlax
         //    (exposes mint/setMinter); deployer is the initial owner.
-        gasBefore = gasleft();
+        //
+        //    STORY 080 — DELIBERATELY NOT `_trackDeployment`ed. V1 is the cutover's SOURCE, not a
+        //    surface the UI should resolve: Phase 6.5 below drains its whole user base into
+        //    StableStakerV2 and leaves it empty and inert. Tracking it would put a dead staker
+        //    into `local-addresses.ts` under a key the interface no longer has. It is held in the
+        //    `stableStaker` field purely so the cutover helper can reach it.
         stableStaker = new StableStakerV1(IFlaxStaker(address(phUSD)), deployer);
-        _trackDeployment("StableStaker", address(stableStaker), gasBefore - gasleft());
-        console.log("StableStaker deployed at:", address(stableStaker));
+        console.log("StableStakerV1 (cutover source, UNTRACKED) deployed at:", address(stableStaker));
 
-        // 2. Authorize StableStaker as a phUSD minter — it mints rewards on claim/withdraw.
+        // 2. Authorize StableStakerV1 as a phUSD minter — it mints rewards on claim/withdraw, and
+        //    the terminal-migration exit mints every migrating user's frozen pending reward, so
+        //    the grant is REQUIRED for the Phase 6.5 cutover to run at all. It is revoked again at
+        //    the end of that cutover, once V1 is empty — see `_rehearseStableStakerCutover`.
         phUSD.setMinter(address(stableStaker), true);
-        console.log("Authorized StableStaker as phUSD minter");
+        console.log("Authorized StableStakerV1 as phUSD minter (revoked again after the cutover)");
 
         // 3. Per token: register the pool, authorize the staker as a client ON the strategy
         //    (mandatory two-sided wiring — without it stake/withdraw revert), wire the
@@ -1142,10 +1181,20 @@ contract DeployMocks is Script {
         // ====== PHASE 6: PhusdStableMinter Configuration ======
         console.log("\n=== Phase 6: PhusdStableMinter Configuration ===");
 
-        // Approve yield strategies for their respective tokens
+        // Approve yield strategies for their respective tokens.
+        //
+        // STORY 080 — USDe IS NOW REGISTERED TOO, and that is a real behavioural addition, not
+        // tidying. `StableStakerV2.autoAnnihilate` prices the stablecoin half through
+        // `Antimatter.toStableAmount`, which reverts `StablecoinNotRegistered` for any pool token
+        // the stable minter does not know; `autoAnnihilateAvailable(token)` is the staticcall
+        // probe of exactly that. USDe is one of the three StableStaker pools, so without this
+        // pair of calls the USDe pool's whole reward path is dead on arrival and the assertion in
+        // Phase 6.5 fails closed. DOLA and USDC were already registered below for the phUSD mint
+        // path; USDe never was because nothing before StableStakerV2 needed it.
         minter.approveYS(address(dola), address(yieldStrategyDola));
         minter.approveYS(address(rewardToken), address(yieldStrategyUSDC)); // USDC
-        console.log("Approved yield strategies for their tokens");
+        minter.approveYS(address(usde), address(yieldStrategyUSDe));
+        console.log("Approved yield strategies for their tokens (DOLA, USDC, USDe)");
 
         // Register DOLA as stablecoin (18 decimals)
         minter.registerStablecoin(
@@ -1164,6 +1213,27 @@ contract DeployMocks is Script {
             6 // decimals
         );
         console.log("Registered USDC as stablecoin");
+
+        // Register USDe as stablecoin (18 decimals). Story 080 — see the approveYS note above.
+        // The declared decimals must match what the token actually reports: `toStableAmount`
+        // cross-checks them and reverts `DecimalsMismatch` otherwise. MockUSDe is 18-decimal.
+        minter.registerStablecoin(
+            address(usde), // stablecoin
+            address(yieldStrategyUSDe), // yieldStrategy
+            1e18, // exchangeRate (1:1)
+            18 // decimals
+        );
+        console.log("Registered USDe as stablecoin (story 080: unlocks autoAnnihilate on the USDe pool)");
+
+        // ====== PHASE 6.5: Antimatter + StableStakerV2 + the V1 -> V2 cutover (story 080) ======
+        // Sequenced HERE, and the position is load-bearing in both directions:
+        //   - AFTER Phase 6, because `Antimatter.setPhUSDMinter` needs the stable minter to exist
+        //     and `autoAnnihilateAvailable` needs all three pool tokens registered on it.
+        //   - BEFORE Phase 8's pauser block, which registers V1, V2 and Antimatter together.
+        // Everything it needs from Phase 3.7 (a wired, deployable V1 and the three yield
+        // strategies) is already in place.
+        _deployAntimatterAndStableStakerV2(deployer);
+        _rehearseStableStakerCutover(deployer);
 
         // ====== PHASE 7: Phlimbo Configuration ======
         console.log("\n=== Phase 7: Phlimbo Configuration ===");
@@ -1316,7 +1386,22 @@ contract DeployMocks is Script {
         console.log("StableStaker.setPauser() called");
         // Step 2: Register with pauser
         pauser.register(address(stableStaker));
-        console.log("Pauser.register(StableStaker) completed");
+        console.log("Pauser.register(StableStakerV1) completed");
+
+        // Story 080: the evergreen staker. Registered on the same two-step pattern as everything
+        // else — `setPauser` first, because `register()` validates `pauser() == address(this)`.
+        stableStakerV2.setPauser(address(pauser));
+        pauser.register(address(stableStakerV2));
+        console.log("Pauser.register(StableStakerV2) completed");
+
+        // Story 080: Antimatter carries its OWN Phoenix IPausable pauser, distinct from the
+        // staker's — `annihilate` is its only whenNotPaused function. Registering it is not
+        // required for the cutover to work, but leaving a Phoenix pausable unregistered on the
+        // local chain diverges from every other contract here, and the divergence would be
+        // invisible until someone burned EYE and found one contract still live.
+        antimatter.setPauser(address(pauser));
+        pauser.register(address(antimatter));
+        console.log("Pauser.register(Antimatter) completed");
 
         console.log("All protocol contracts registered with Pauser");
 
@@ -1532,7 +1617,8 @@ contract DeployMocks is Script {
         _markConfigured("BatchNFTMinter", 0);
         _markConfigured("NudgeStreamer", 0);
         _markConfigured("RatchetBatchNFTMinter", 0);
-        _markConfigured("StableStaker", 0);
+        _markConfigured("Antimatter", 0);
+        _markConfigured("StableStakerV2", 0);
         _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
         _markConfigured("DepositPageView", 0);
@@ -1591,8 +1677,16 @@ contract DeployMocks is Script {
         console.log("  - PhusdStableMinter registered with Pauser");
         console.log("  - PhlimboV2 and PhlimboV3 registered with Pauser");
         console.log("  - StableYieldAccumulator registered with Pauser");
-        console.log("  - StableStaker registered with Pauser");
-        console.log("StableStaker: 10% set-aside buffer on all 3 pools (DOLA, USDC, USDe)");
+        console.log("  - StableStakerV1 (retired), StableStakerV2 and Antimatter registered with Pauser");
+        console.log("StableStakerV2: 10% set-aside buffer on all 3 pools (DOLA, USDC, USDe)");
+        console.log("");
+        console.log("StableStakerV2 Cutover (story 080):");
+        console.log("  - Antimatter is the reward token; phUSD is minted only to cover an autoAnnihilate shortfall");
+        console.log("  - antimatterPerDay mirrors V1: DOLA 10/day, USDC 5/day, USDe 10/day");
+        console.log("  - claimEnabled left FALSE - the reward path under test is autoAnnihilate");
+        console.log("  - V1 deployed but UNTRACKED, seeded with 12 stakers per pool, then drained");
+        console.log("    into V2 through CrossVersionMigrator in chunks of 10; V1 left empty and");
+        console.log("    stripped of its phUSD mint authority");
         console.log("  - Burn 1000 EYE to trigger global pause");
         console.log("");
         console.log("Initial Seeding:");
@@ -1925,14 +2019,21 @@ contract DeployMocks is Script {
         _requireLiveMinter(address(phlimbo), false, "PhlimboV2");
         _requireLiveMinter(address(phlimboV3), true, "PhlimboV3");
         _requireLiveMinter(address(minter), true, "PhusdStableMinter");
-        _requireLiveMinter(address(stableStaker), true, "StableStaker");
+        // Story 080: the V1 incumbent is retired by the Phase 6.5 cutover and its grant is
+        // revoked there, so it must read FALSE here. StableStakerV2 holds the live grant — not as
+        // a reward right (its reward token is Antimatter) but as `autoAnnihilate`'s shortfall
+        // cover, without which that reward path reverts.
+        _requireLiveMinter(address(stableStaker), false, "StableStakerV1 (retired at the cutover)");
+        _requireLiveMinter(address(stableStakerV2), true, "StableStakerV2");
         _requireLiveMinter(address(balancerPoolerHook), true, "BalancerPoolerMintDebtHook");
         _requireLiveMinter(address(nudgeRatchetHook), true, "NudgeRatchetMintDebtHook");
         _requireLiveMinter(address(uniboostHookEYE), true, "UniboostHookEYE");
         _requireLiveMinter(address(uniboostHookSCX), true, "UniboostHookSCX");
         _requireLiveMinter(address(uniboostHookFLX), true, "UniboostHookFLX");
 
-        console.log("  end-state phUSD ACL asserted: deployer + PhlimboV2 OUT, V3 + minter + staker + 5 hooks IN");
+        console.log(
+            "  end-state phUSD ACL asserted: deployer + PhlimboV2 + StableStakerV1 OUT, V3 + minter + StableStakerV2 + 5 hooks IN"
+        );
     }
 
     /// @dev Asserts one row of the end-state phUSD ACL, using the TWO-FIELD idiom. Checking
@@ -1950,6 +2051,288 @@ contract DeployMocks is Script {
                 " has the wrong phUSD minter status - do NOT relax this gate, fix the grant"
             )
         );
+    }
+
+    // =====================================================================
+    // Story 080: Antimatter + StableStakerV2 + the V1 -> V2 cutover rehearsal
+    // =====================================================================
+
+    /// @dev Users seeded into each V1 pool before the cutover. Chosen so the chunked migrate loop
+    ///      below runs MORE THAN ONCE per pool at `SS_MIGRATE_CHUNK == 10` — a single-batch
+    ///      rehearsal would leave the batching itself unexercised, which is the part of the real
+    ///      production path most likely to be wrong.
+    uint256 internal constant SS_CUTOVER_ACTORS = 12;
+
+    /// @dev Users per `migrator.migrate` call. Deliberately small: mainnet's
+    ///      `scripts/gather-migration-inputs.js` pages off-chain in 50s because it multicalls a
+    ///      live chain, but a local script has no such constraint and pages on-chain so the
+    ///      rehearsal stays self-contained.
+    uint256 internal constant SS_MIGRATE_CHUNK = 10;
+
+    /// @dev token => user => the user's V1 principal, recorded immediately before the cutover and
+    ///      compared against their V2 principal immediately after it.
+    mapping(address => mapping(address => uint256)) private _ssPreCutoverPrincipal;
+
+    /// @dev Deploys the Antimatter reward token and StableStakerV2, wires both, and registers the
+    ///      same three pools V1 carries at the same rates.
+    ///
+    ///      ORDER IS LOAD-BEARING at three points and each one fails differently:
+    ///        - `setPhUSD` BEFORE `setPhUSDMinter`: the second reverts `PhUSDNotSet` otherwise,
+    ///          and once both are set each refuses a value the other disagrees with.
+    ///        - `setApprovedMinter` is a SILENT NO-OP with no event when the status already
+    ///          matches, so the grant is verified by READING `isApprovedMinter`. An event check
+    ///          would prove nothing.
+    ///        - per pool: `addToken` -> `strategy.setClient` -> `setYieldStrategy` ->
+    ///          `setSetAsideBuffer` -> rate setter. The two-sided strategy wiring is mandatory;
+    ///          without `setClient` both stake and withdraw revert.
+    ///
+    ///      BOTH mint rights are granted and they are NOT interchangeable. Antimatter is the
+    ///      reward token V2 pays (`setApprovedMinter`). phUSD is NOT a second reward: V2 mints it
+    ///      only to cover an annihilation shortfall inside `autoAnnihilate` (`phUSD.setMinter`).
+    function _deployAntimatterAndStableStakerV2(address deployer) internal {
+        console.log("\n=== Phase 6.5a: Deploying Antimatter + StableStakerV2 (story 080) ===");
+
+        // ---- 1. Antimatter. Constructor takes ONLY the owner; phUSD and the stable minter are
+        //         attached afterwards by two owner calls that cross-check each other. ----
+        uint256 gasBefore = gasleft();
+        antimatter = new Antimatter(deployer);
+        _trackDeployment("Antimatter", address(antimatter), gasBefore - gasleft());
+        console.log("  Antimatter deployed at:", address(antimatter));
+
+        // ---- 2/3. phUSD first, THEN the stable minter. ----
+        antimatter.setPhUSD(IFlaxStaker(address(phUSD)));
+        antimatter.setPhUSDMinter(minter);
+        require(address(antimatter.phUSD()) == address(phUSD), "story-080: Antimatter.phUSD did not land");
+        require(address(antimatter.phUSDMinter()) == address(minter), "story-080: Antimatter.phUSDMinter did not land");
+        console.log("  Antimatter wired to phUSD + PhusdStableMinter");
+
+        // ---- 4. StableStakerV2. Its constructor takes the ANTIMATTER token, not phUSD, and
+        //         reverts "StableStaker: zero antimatter" on a zero address. ----
+        gasBefore = gasleft();
+        stableStakerV2 = new StableStakerV2(IAntimatter(address(antimatter)), deployer);
+        _trackDeployment("StableStakerV2", address(stableStakerV2), gasBefore - gasleft());
+        console.log("  StableStakerV2 deployed at:", address(stableStakerV2));
+        require(stableStakerV2.STAKER_VERSION() == 2, "story-080: deployed staker is not version 2");
+
+        // ---- 5. The REWARD-token grant. Read back, never trust the (absent) event. ----
+        antimatter.setApprovedMinter(address(stableStakerV2), true);
+        require(
+            antimatter.isApprovedMinter(address(stableStakerV2)),
+            "story-080: StableStakerV2 is not an approved Antimatter minter"
+        );
+        console.log("  Antimatter.setApprovedMinter(StableStakerV2) - VERIFIED by read-back");
+
+        // ---- 6. The SHORTFALL-COVER grant. Must come after step 2: `phUSDMintAvailable` resolves
+        //         the token live off `Antimatter.phUSD`, so an unwired Antimatter reads false no
+        //         matter what phUSD's own ACL says. ----
+        phUSD.setMinter(address(stableStakerV2), true);
+        require(
+            stableStakerV2.phUSDMintAvailable(),
+            "story-080: StableStakerV2 cannot mint phUSD (autoAnnihilate shortfall cover is dead)"
+        );
+        console.log("  phUSD.setMinter(StableStakerV2) - VERIFIED via phUSDMintAvailable()");
+
+        // ---- 8/9. The three pools, at V1's rates. ----
+        address[3] memory ssTokens = [address(dola), address(rewardToken), address(usde)];
+        AYieldStrategy[3] memory ssStrats =
+            [AYieldStrategy(yieldStrategyDola), AYieldStrategy(yieldStrategyUSDC), AYieldStrategy(yieldStrategyUSDe)];
+        for (uint256 i = 0; i < 3; i++) {
+            stableStakerV2.addToken(ssTokens[i]);
+            ssStrats[i].setClient(address(stableStakerV2), true); // mandatory two-sided wiring
+            stableStakerV2.setYieldStrategy(ssTokens[i], IYieldStrategy(address(ssStrats[i])));
+            ssStrats[i].setSetAsideBuffer(address(stableStakerV2), 10);
+            // MIRRORS V1 by construction rather than by a copied table: the same conditional the
+            // V1 block above uses, so "same rate as V1" stays true if that block is ever retuned.
+            // Units are 18-decimal REWARD-token wei per day regardless of the staked token's
+            // decimals, and the setter floors (perSecond = perDay / 86400).
+            uint256 dailyRate = ssTokens[i] == address(rewardToken) ? 5e18 : 10e18;
+            stableStakerV2.antimatterPerDay(ssTokens[i], dailyRate);
+            // The stablecoin half of `autoAnnihilate` is priced through the stable minter, so a
+            // pool token that is not a registered stablecoin has a dead reward path. Phase 6
+            // registers all three; this is the fail-closed probe of that.
+            require(
+                stableStakerV2.autoAnnihilateAvailable(ssTokens[i]),
+                "story-080: pool token is not registered on PhusdStableMinter - autoAnnihilate is dead"
+            );
+            console.log("  StableStakerV2 pool wired (token / antimatter-per-day):", ssTokens[i], dailyRate);
+        }
+
+        // ---- 10. Claims stay CLOSED. The reward path under test is `autoAnnihilate`; the
+        //          teaching phase deliberately never calls `setClaimEnabled`. ----
+        require(!stableStakerV2.claimEnabled(), "story-080: claimEnabled must stay false");
+        console.log("  StableStakerV2: 3 pools wired, claimEnabled left FALSE (teaching phase)");
+    }
+
+    /// @dev Rehearses the REAL production cutover: V1 keeps its stakers until a
+    ///      `CrossVersionMigrator` drains them, in batches, into V2. This is a cutover rather than
+    ///      a migration in the protocol sense — V1's stakers are drained and re-credited on V2,
+    ///      and V1 is left empty and inert. Nothing of V1's state survives beyond each user's
+    ///      principal.
+    ///
+    ///      Seeding is not optional: `migrate` over an empty staker set completes vacuously and
+    ///      would prove nothing. `depositFor` is `onlyMigrator`, so the deployer is TEMPORARILY
+    ///      installed as V1's migrator for the seeding and replaced by the real migrator before
+    ///      the cutover — the same stand-in the story-073 staker rehearsal uses, because a
+    ///      single-key broadcast script cannot produce N separately-signed `stake()` calls.
+    function _rehearseStableStakerCutover(address deployer) internal {
+        console.log("\n=== Phase 6.5b: StableStakerV1 -> V2 cutover rehearsal (story 080) ===");
+
+        address[3] memory ssTokens = [address(dola), address(rewardToken), address(usde)];
+        AYieldStrategy[3] memory ssStrats =
+            [AYieldStrategy(yieldStrategyDola), AYieldStrategy(yieldStrategyUSDC), AYieldStrategy(yieldStrategyUSDe)];
+        // Per-user stake in each pool's OWN decimals: DOLA and USDe are 18-decimal, USDC is 6.
+        uint256[3] memory ssStakeUnits = [uint256(100e18), uint256(100e6), uint256(100e18)];
+
+        // ---- 1. Seed a genuine multi-user position in every V1 pool. ----
+        stableStaker.setMigrator(deployer);
+        for (uint256 t = 0; t < 3; t++) {
+            address token = ssTokens[t];
+            uint256 unit = ssStakeUnits[t];
+            uint256 total = unit * SS_CUTOVER_ACTORS;
+            IMintableMock(token).mint(deployer, total);
+            IERC20(token).approve(address(stableStaker), total);
+            for (uint256 i = 0; i < SS_CUTOVER_ACTORS; i++) {
+                address actor = _ssCutoverActor(token, i);
+                stableStaker.depositFor(token, actor, unit);
+                (uint256 principal,) = stableStaker.userInfo(token, actor);
+                require(principal > 0, "story-080: seeded V1 position credited nothing");
+                _ssPreCutoverPrincipal[token][actor] = principal;
+            }
+            require(
+                stableStaker.stakerCount(token) == SS_CUTOVER_ACTORS, "story-080: V1 seeding did not land every actor"
+            );
+            console.log(
+                "  V1 pool seeded with 12 stakers (token / totalStaked):", token, _ssTotalStaked(stableStaker, token)
+            );
+        }
+
+        // ---- 2. The migrator, wired on BOTH sides. `initiateMigration` pre-checks the
+        //         destination has the token registered AND that `newStaker.migrator()` is the
+        //         migrator, so both `setMigrator` calls and all three `addToken`s must precede it.
+        CrossVersionMigrator migrator = new CrossVersionMigrator(
+            IStableStakerMigratable(address(stableStaker)), IStableStakerMigratable(address(stableStakerV2)), deployer
+        );
+        // Transient rehearsal artifact: NOT tracked, mirroring the story-072/079 rule that
+        // migrators get no address-book key.
+        console.log("  CrossVersionMigrator (untracked) deployed at:", address(migrator));
+        stableStaker.setMigrator(address(migrator));
+        stableStakerV2.setMigrator(address(migrator));
+        require(stableStaker.migrator() == address(migrator), "story-080: V1 migrator not wired");
+        require(stableStakerV2.migrator() == address(migrator), "story-080: V2 migrator not wired");
+        require(migrator.versionOf(address(stableStaker)) == 1, "story-080: source staker did not probe as version 1");
+        require(migrator.versionOf(address(stableStakerV2)) == 2, "story-080: destination staker is not version 2");
+
+        // ---- 3. Per token: clear the ss14m1 divergence, initiate, then page and migrate. ----
+        for (uint256 t = 0; t < 3; t++) {
+            address token = ssTokens[t];
+
+            // audit-14 `ss14m1`. V1's `initiateMigration` post-checks that the exit fully drained
+            // the client and reverts "StableStaker: incomplete exit" when the strategy's recorded
+            // principal exceeds the pool's `totalStaked` — the surplus can never be withdrawn
+            // against user positions that do not exist. V2 self-heals this and emits
+            // `PrincipalDivergence`; V1 does not, and it is V1 that gets initiated here. Both
+            // reads are taken in the same block, and the surplus is NEVER rounded up.
+            uint256 recorded = ssStrats[t].principalOf(token, address(stableStaker));
+            uint256 staked = _ssTotalStaked(stableStaker, token);
+            if (recorded > staked) {
+                uint256 surplus = recorded - staked;
+                // relinquishPrincipalAsOwner, NOT withdrawAsOwner: this writes down the strategy's
+                // principal ledger for that client without moving funds to the strategy owner.
+                ssStrats[t].relinquishPrincipalAsOwner(address(stableStaker), surplus);
+                console.log(
+                    "  cleared ss14m1 principal divergence before initiating (token / surplus):", token, surplus
+                );
+            }
+
+            migrator.initiateMigration(token);
+
+            // Page the LIVE staker set from index 0 rather than walking fixed indices: every
+            // migrated user is removed from the set, so an index-walking pager would skip users
+            // as the set shrinks under it. `getStakersRange` is half-open and clamps `end`.
+            uint256 batches = 0;
+            while (stableStaker.stakerCount(token) > 0) {
+                uint256 remaining = stableStaker.stakerCount(token);
+                uint256 end = remaining < SS_MIGRATE_CHUNK ? remaining : SS_MIGRATE_CHUNK;
+                address[] memory chunk = stableStaker.getStakersRange(token, 0, end);
+                migrator.migrate(token, chunk);
+                batches++;
+                // A zero-credit user is skipped by `batchMigrate` and stays in the set, which
+                // would spin this loop forever. Fail loudly instead.
+                require(
+                    stableStaker.stakerCount(token) < remaining,
+                    "story-080: migrate batch made no progress - a zero-credit staker is stuck in the set"
+                );
+            }
+            require(batches > 1, "story-080: the whole pool fitted in one batch - batching was not exercised");
+            console.log("  pool migrated (token / batches):", token, batches);
+
+            _assertStableStakerCutover(token, t == 2);
+        }
+
+        // ---- 4. V1 is empty and inert. Take its phUSD mint authority away.
+        //         THE EXPLICIT DECISION the story asks for: V1 LOSES the grant. It was needed only
+        //         so the terminal-migration exit could mint each migrating user's frozen pending
+        //         reward, that mint is now done, and a decommissioned staker holding a live mint
+        //         right on the protocol's stablecoin is exactly the residue the run-26 sweep
+        //         exists to catch. This mirrors PhlimboV2's treatment in the Phase 7.4 cutover.
+        //         Safe because V1 is provably drained: `stakerCount == 0` and `totalStaked == 0`
+        //         were asserted for all three pools above, so no position remains that could
+        //         accrue an unpayable reward.
+        phUSD.setMinter(address(stableStaker), false);
+        console.log("  phUSD.setMinter(StableStakerV1, false) - retired staker's mint authority REVOKED");
+        console.log("  cutover complete: the local chain now stakes on StableStakerV2");
+    }
+
+    /// @dev Post-conditions for one migrated pool.
+    ///
+    ///      `exactPrincipal` is false for the USDe pool ONLY, and that is a property of the
+    ///      strategy rather than a relaxation of the story's intent. USDe runs on
+    ///      `ERC4626MarketYieldStrategy`, which credits principal at a slippage haircut on the way
+    ///      in and realises less than par on the way out, so principal is provably NOT preserved
+    ///      across a round trip through it — that non-preservation is the documented point of that
+    ///      strategy (Phase 2.7). DOLA and USDC run on the 1:1 `ERC4626YieldStrategy` and DO
+    ///      preserve principal, up to ERC4626 share-rounding, which the 2-wei floor absorbs.
+    function _assertStableStakerCutover(address token, bool marketStrategy) internal view {
+        require(stableStaker.stakerCount(token) == 0, "story-080: V1 still holds stakers after the cutover");
+        require(_ssTotalStaked(stableStaker, token) == 0, "story-080: V1 pool still holds principal after the cutover");
+
+        uint256 maxLossBps = marketStrategy ? 100 : 0;
+        uint256 v2Sum;
+        for (uint256 i = 0; i < SS_CUTOVER_ACTORS; i++) {
+            address actor = _ssCutoverActor(token, i);
+            uint256 pre = _ssPreCutoverPrincipal[token][actor];
+            (uint256 post,) = stableStakerV2.userInfo(token, actor);
+            require(pre > 0, "story-080: no recorded V1 principal for a seeded actor");
+            require(post > 0, "story-080: a seeded staker was not credited on V2");
+            require(post <= pre, "story-080: a staker gained principal in the cutover");
+            // 2-wei absolute floor for ERC4626 share rounding on the exit and the re-deposit.
+            require(
+                pre - post <= (pre * maxLossBps) / 10_000 + 2,
+                "story-080: cutover lost more principal than the strategy can explain"
+            );
+            v2Sum += post;
+        }
+        require(
+            _ssTotalStaked(stableStakerV2, token) == v2Sum,
+            "story-080: V2 pool total does not equal the sum of the migrated positions"
+        );
+    }
+
+    /// @dev A deterministic, pool-specific mock staker. Distinct per (token, index), so the three
+    ///      pools hold three disjoint user bases and a cross-pool accounting bug cannot hide.
+    function _ssCutoverActor(address token, uint256 index) internal pure returns (address) {
+        return address(uint160(uint256(keccak256(abi.encodePacked("story-080-stable-staker", token, index)))));
+    }
+
+    /// @dev `poolInfo`'s fourth field. Its meaning is `totalStaked` on both versions — field 0 is
+    ///      the only one that was renamed (phusdPerSecond -> antimatterPerSecond), so the tuple
+    ///      shape is identical and one accessor serves both.
+    function _ssTotalStaked(StableStakerV1 staker, address token) internal view returns (uint256 totalStaked) {
+        (,,, totalStaked) = staker.poolInfo(token);
+    }
+
+    function _ssTotalStaked(StableStakerV2 staker, address token) internal view returns (uint256 totalStaked) {
+        (,,, totalStaked) = staker.poolInfo(token);
     }
 
     // =====================================================================

@@ -1,12 +1,20 @@
 #!/bin/bash
-# verify-stable-staker.sh - Story 051 end-to-end config verification for StableStaker.
+# verify-stable-staker.sh - Story 051 end-to-end config verification for StableStaker,
+# retargeted onto StableStakerV2 by story 080.
 #
 # A configuration/smoke check (NOT a unit test): it deploys the full mock stack to a
-# fresh local Anvil, stakes into the StableStaker DOLA pool (10 phUSD/day), advances
-# the live chain clock by one day with `cast rpc evm_increaseTime` + `evm_mine`
-# (vm.warp inside --broadcast does NOT move the live clock), then claims + withdraws
-# and asserts the reward (~10 phUSD), full principal return, and totalStaked baseline
-# restoration. A clean run (no reverts) IS the verification.
+# fresh local Anvil, stakes into the StableStakerV2 DOLA pool (10 Antimatter/day),
+# advances the live chain clock by one day with `cast rpc evm_increaseTime` +
+# `evm_mine` (vm.warp inside --broadcast does NOT move the live clock), then asserts
+# the accrued reward (~10 Antimatter), that `claim` is still closed, and that the
+# withdraw returns full principal and restores the totalStaked baseline. A clean run
+# (no reverts) IS the verification.
+#
+# STORY 080: the two interaction scripts below live in `script/interactions/`, NOT in
+# `script/archives/interactions/` where they had been filed. That is not cosmetic —
+# `foundry.toml` excludes `script/archives/**` from compilation, so `forge script`
+# cannot resolve a target contract there at all ("Could not find target contract").
+# These two are live tooling this file invokes on every run, not mainnet history.
 #
 # Usage: ./verify-stable-staker.sh
 #
@@ -52,7 +60,7 @@ echo "=== Deploying mocks (deploy:local) ==="
 npm run deploy:local
 
 echo ""
-echo "=== STEP 1: Stake into StableStaker DOLA pool ==="
+echo "=== STEP 1: Stake into StableStakerV2 DOLA pool ==="
 forge script script/interactions/StakeStableStaker.s.sol:StakeStableStaker \
     --rpc-url "$RPC_URL" --broadcast -vv
 
@@ -63,7 +71,7 @@ cast rpc evm_mine --rpc-url "$RPC_URL"
 echo "Advanced time by 86400s and mined a block."
 
 echo ""
-echo "=== STEP 3: Claim + Withdraw and assert results ==="
+echo "=== STEP 3: Assert accrual + withdraw (claim is closed on V2) ==="
 forge script script/interactions/ClaimWithdrawStableStaker.s.sol:ClaimWithdrawStableStaker \
     --rpc-url "$RPC_URL" --broadcast -vv
 

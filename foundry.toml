@@ -104,9 +104,34 @@ remappings = [
     # Canonicalize stable-staker's own nested vendored copies onto the top-level
     # pinned submodules (defensive — keeps a stray nested import from forking a
     # second physical interface file).
-    "lib/stable-staker/lib/flax-token/=lib/flax-token-v2/",
+    # Story 080: the `lib/stable-staker/lib/flax-token/` entry that used to sit here has been
+    # REMOVED. stable-staker story 024 vendored IFlax into `src/versions/v1/vendor/` and dropped
+    # its `lib/flax-token` submodule, so at pin cf8de27 the path no longer exists and the
+    # remapping was dangling. `flax-token/=lib/flax-token-v2/src/` above still resolves the
+    # frozen V1's own `flax-token/IFlax.sol` import onto the single top-level pin.
     "lib/stable-staker/lib/pauser/=lib/pauser/",
     "lib/stable-staker/lib/reflax-yield-vault/=lib/vault/",
+    "lib/stable-staker/lib/antimatter/=lib/antimatter/",
+    # --- antimatter (story 080) ------------------------------------------------
+    # The concrete `Antimatter` reward token, deployed by DeployMocks alongside
+    # StableStakerV2. StableStakerV2 itself compiles against its own local
+    # `src/interfaces/IAntimatter.sol` and needs none of this; the concrete token does.
+    #
+    # Antimatter.sol imports `@phUSD/IFlax.sol`, `@phUSDMinter/PhusdStableMinter.sol` and
+    # `@pauser/interfaces/IPausable.sol` (its own foundry.toml points those at ITS nested
+    # submodules). Both new prefixes are pointed at the SAME top-level pins this repo already
+    # compiles those files from — lib/flax-token-v2 and lib/phUSD-stable-minter — so there is
+    # exactly one physical IFlax.sol and one physical PhusdStableMinter.sol in the build and no
+    # "Identifier already declared". `@pauser/` is already mapped above.
+    "antimatter/=lib/antimatter/src/",
+    "@phUSD/=lib/flax-token-v2/src/",
+    "@phUSDMinter/=lib/phUSD-stable-minter/src/",
+    # Canonicalize antimatter's own nested vendored copies onto the top-level pins, mirroring
+    # the diamond-dependency block above.
+    "lib/antimatter/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "lib/antimatter/lib/flax-token-v2/=lib/flax-token-v2/",
+    "lib/antimatter/lib/phUSD-stable-minter/=lib/phUSD-stable-minter/",
+    "lib/antimatter/lib/pauser/=lib/pauser/",
     # --- OpenZeppelin canonicalization (single top-level pin) -----------------
     # OZ is pinned at lib/openzeppelin-contracts @ v5.6.1 (tag 5fd1781b). Every
     # submodule vendors its OWN nested copy at a different commit (5.1.0 through

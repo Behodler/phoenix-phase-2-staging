@@ -31,7 +31,7 @@
     "test:integration-erc4626-market-usde": "forge test --fork-url $RPC_MAINNET --match-contract ERC4626MarketYieldStrategy_USDeFork -vvv",
     "//phlimbo-v1-to-v2": "Story 049 — PhlimboEA V1 → PhlimboV2 silent staker migration (snapshot stakers, then migrate)",
     "snapshot:phlimbo-v1": "node scripts/snapshot-phlimbo-v1-stakers.js",
-    "//verify-stable-staker": "Story 051 — end-to-end StableStaker config verification (deploy, stake, evm_increaseTime 1 day, claim+withdraw, assert ~10 phUSD reward + principal/baseline restored)",
+    "//verify-stable-staker": "Story 051, retargeted onto StableStakerV2 by story 080 — end-to-end config verification (deploy, stake, evm_increaseTime 1 day, assert ~10 Antimatter accrued + claim still closed, withdraw, assert principal/baseline restored and the reward backlog banked)",
     "test:stable-staker": "./verify-stable-staker.sh",
     "//migration-saga": "Story 060+065 migration saga — KEYS BELOW ARE IN ASCENDING EXECUTION ORDER; run top to bottom. For each numbered step: run the -preview key, read the -vvv output, then run the broadcast key (Ledger, hd-path index 46, owner 0xCad1..D0B6). Gather steps are read-only node scripts (no preview). The break-glass keys at the very bottom are an OUT-OF-BAND contingency for a mid-suite halt — NOT part of the linear flow. Prereq satisfied: YS-01 fixed (lib/vault@0110ce4). No --skip-simulation on any step.",
     "//saga-04-gather-leg1": "STEP 4 — snapshot original-staker stakers for leg1 (read-only; re-run if leg1 preflight reports a stale count)",
