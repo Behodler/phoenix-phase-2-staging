@@ -423,6 +423,29 @@ contract DeployMocks is Script {
         console.log("Deployer:", deployer);
         console.log("Chain ID:", block.chainid);
 
+        // Script-audit run-28, M-01 / L-02. Two DIFFERENT gates, both required.
+        //
+        // The chain-id require is the L-02 remediation: it stops this local-only mock stack from
+        // ever being broadcast at a real network. It does NOT close M-01 — a leftover local anvil
+        // reports chainId 31337 exactly like a fresh one, so on its own it catches nothing.
+        //
+        // The freshness require is the M-01 remediation. `deploy:local` is preceded by
+        // `clean:local`, which deletes the progress file outright, so every local run is a FRESH
+        // leg by construction and there is no resume branch anywhere in this file. Until now only
+        // the FILE side of that invariant was enforced; the CHAIN side was unchecked, so a
+        // pre-existing anvil (the state a Ctrl-C out of `npm run serve` reliably leaves behind)
+        // would silently absorb the whole mainnet-cutover rehearsal, inherit addresses, nonces,
+        // phUSD ACL state and dispatcher indices, and still pass every post-condition. A
+        // deployer nonce of 0 is the cheapest honest proof that the node was just started.
+        //
+        // `vm.getNonce` is inlined rather than bound to a local on purpose: `run()` is at its
+        // stack-depth ceiling (see the armKenduPromo note below).
+        require(block.chainid == 31337, "DeployMocks: local only");
+        require(
+            vm.getNonce(deployer) == 0,
+            "DeployMocks: chain is not fresh - a prior deployment is already on 8545; kill it and re-run"
+        );
+
         // Script-audit run-26, L-03. Resolved ONCE, here, and logged loudly next to the deployer
         // and chain-id lines so a developer reading the transcript knows which leg they got
         // without scrolling to Phase 7.4. Assigning a CONTRACT FIELD rather than a `run()` local
@@ -1732,7 +1755,9 @@ contract DeployMocks is Script {
             console.log("      whitelisted-but-unregistered and unfunded (day-one mainnet shape)");
             console.log("    Unset LOCAL_PROMO_KENDU (or set it true) to boot the ARMED chain");
         }
-        console.log("  - Phase 7.6: index-1 dispatcher swap rehearsed (pull -> setDispatcher -> setHook -> replaceDispatcher)");
+        console.log(
+            "  - Phase 7.6: index-1 dispatcher swap rehearsed (pull -> setDispatcher -> setHook -> replaceDispatcher)"
+        );
         console.log("  - Terminal sweep: deployer phUSD mint authority REVOKED, end-state ACL asserted");
     }
 
@@ -1945,7 +1970,9 @@ contract DeployMocks is Script {
         require(address(newUb.hook()) == address(hook), "replacement dispatcher is not carrying the REUSED hook");
         require(hook.recipient() == recipientBefore, "hook recipient changed across the swap");
         require(hook.ratio() == ratioBefore, "hook ratio changed across the swap");
-        require(nftMinterV2.dispatcherToIndex(address(newUb)) == idx, "dispatcherToIndex did not move to the replacement");
+        require(
+            nftMinterV2.dispatcherToIndex(address(newUb)) == idx, "dispatcherToIndex did not move to the replacement"
+        );
         require(nftMinterV2.dispatcherToIndex(oldUb) == 0, "dispatcherToIndex still resolves the RETIRED dispatcher");
 
         // ---- 9. Finalise, so the local chain ends FULLY WORKING (the UI is tested against it). ----
@@ -2610,23 +2637,22 @@ contract DeployMocks is Script {
         require(v3.promoRewardPerSecond() > 0, "promo rate rounded to zero");
 
         console.log("  LOCAL-ONLY: Kendu promotion armed on PhlimboV3");
-        console.log("    token / amount / duration(s):", address(mockKendu), LOCAL_PROMO_KENDU_AMOUNT, LOCAL_PROMO_DURATION);
+        console.log(
+            "    token / amount / duration(s):", address(mockKendu), LOCAL_PROMO_KENDU_AMOUNT, LOCAL_PROMO_DURATION
+        );
         console.log("    promoRewardPerSecond (PRECISION-scaled):", v3.promoRewardPerSecond());
     }
 
     /// @dev Steps 6-14 of the cutover. Split out of `_rehearsePhlimboV3Cutover` purely to stay
     ///      under the stack-depth ceiling, matching how story 073 split its staker rehearsal.
-    function _runPhlimboV2ToV3Migration(PhlimboV3 v3, address v2Reward, uint256 preMigrationTotal)
-        internal
-    {
+    function _runPhlimboV2ToV3Migration(PhlimboV3 v3, address v2Reward, uint256 preMigrationTotal) internal {
         // ---- 6. Deploy MigratorV2V3. Transient: deliberately NEVER `_trackDeployment`d. ----
         // It gets no address key for the same reason mainnet gives it none and story 073 gave
         // the three `NFTStakerMigrator`s none — a one-shot orchestrator is not UI surface.
         //
         // NO phUSD mint role goes to the migrator, unlike its V1->V2 predecessor: V2 itself mints
         // the pending phUSD rewards during `withdraw` (MigratorV2V3.sol:54-56).
-        MigratorV2V3 migrator =
-            new MigratorV2V3(address(phlimbo), address(v3), address(phUSD), v2Reward);
+        MigratorV2V3 migrator = new MigratorV2V3(address(phlimbo), address(v3), address(phUSD), v2Reward);
         console.log("  MigratorV2V3 (transient, untracked) deployed at:", address(migrator));
 
         // ---- 7. BOTH sides of the migrator pair, then read BOTH back. ----
