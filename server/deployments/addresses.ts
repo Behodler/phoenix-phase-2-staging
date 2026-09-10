@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-09-07T08:17:40.696Z
+// Generated interface from local.json on 2026-09-10T21:14:48.783Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -23,7 +23,7 @@ export interface ContractAddresses {
   USDeAMMAdapter: string;
   YieldStrategyUSDe: string;
   PhusdStableMinter: string;
-  PhlimboEA: string;
+  PhlimboV3: string;
   StableYieldAccumulator: string;
   BalancerPool: string;
   BalancerVault: string;
@@ -57,6 +57,5 @@ export interface ContractAddresses {
   RatchetBatchNFTMinter: string;
   Antimatter: string;
   StableStakerV2: string;
-  PhlimboV3: string;
   ViewRouter: string;
 }

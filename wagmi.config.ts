@@ -16,13 +16,15 @@ export default defineConfig({
 
         // Main Phase 2 contracts
         'PhusdStableMinter.sol/PhusdStableMinter.json',
+        // PhlimboV2 is RETAINED as an ABI although the local chain no longer deploys it: story
+        // 076's cutover migrated the mainnet user base into V3, but V2 still exists there wound
+        // down and unpaused, so the UI must stay able to read it. ABI retention and address
+        // retention are decoupled -- see the view-contract note below.
         'PhlimboV2.sol/PhlimboV2.json',
-        // Story 076: the promotion-ready cutover's Phase 4e deploys PhlimboV3 and migrates
-        // the V2 user base into it. V2 is RETAINED alongside it -- it continues to exist
-        // post-cutover (wound down, not paused), so the UI must stay able to read it.
         'PhlimboV3.sol/PhlimboV3.json',
-        // MigratorV2V3 is TRANSIENT and gets no address key, so hooks for it are arguably
-        // noise. It is included anyway for the ABI alone: `UserMigrationSkipped` and
+        // MigratorV2V3 is TRANSIENT, gets no address key, and is no longer deployed locally now
+        // that the V2->V3 cutover has executed on mainnet. It is included anyway for the ABI
+        // alone, to decode a historical migration pass: `UserMigrationSkipped` and
         // `RewardForwardFailed` are the ONLY diagnostic surface for a failed migration pass
         // (the pass completes even when wholly misconfigured -- MigratorV2V3.sol:68-73), and
         // decoding those events off-chain is exactly what an operator needs.
@@ -60,9 +62,10 @@ export default defineConfig({
 
         // NFT Staking
         'NFTStaker.sol/NFTStaker.json',
-        // NFTStakerDepletion and BatchNFTMinter are RETAINED alongside their story-073
-        // successors: the local chain now ends on the V2 / multi-token types, but the retired
-        // ABIs stay readable while the UI transitions.
+        // NFTStakerDepletion, NFTStakerMigrator and BatchNFTMinter are RETAINED alongside their
+        // story-073 successors: the local chain deploys only the V2 / multi-token types now that
+        // the migration has executed on mainnet, but the retired ABIs stay readable while the UI
+        // transitions.
         'NFTStakerDepletion.sol/NFTStakerDepletion.json',
         'NFTStakerDepletionV2.sol/NFTStakerDepletionV2.json',
         'NFTStakerMigrator.sol/NFTStakerMigrator.json',
@@ -92,7 +95,9 @@ export default defineConfig({
         // Story 078 removed the DepositView / DepositPageView / MintPageView ADDRESS keys from
         // the address books, leaving ViewRouter as the sole view key — but the ABIs below are
         // all RETAINED, on the same reasoning as NudgeRatchetDelayRelease and NFTStakerDepletion
-        // above: superseded types stay readable while the UI transitions. The two surfaces are
+        // above: superseded types stay readable while the UI transitions, whether or not
+        // DeployMocks still deploys them (it no longer deploys either deposit page). The two
+        // surfaces are
         // decoupled — this config declares no `deployments:`, so it emits bare `…Abi` exports
         // and no addresses, and keeping an ABI therefore cannot reintroduce a second
         // address-resolution path. Retaining DepositPageViewV3's predecessors also keeps

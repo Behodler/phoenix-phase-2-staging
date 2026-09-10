@@ -76,7 +76,7 @@ app.get('/', (req, res) => {
             'YieldStrategyDola',
             'PhusdStableMinter',
             'StableYieldAccumulator',
-            'PhlimboEA'
+            'PhlimboV3'
         ]
     });
 });
@@ -184,7 +184,7 @@ app.listen(PORT, HOST, () => {
     console.log(`\nExample requests:`);
     console.log(`  curl http://${HOST}:${PORT}/health`);
     console.log(`  curl http://${HOST}:${PORT}/contracts`);
-    console.log(`  curl http://${HOST}:${PORT}/contracts/PhlimboEA`);
+    console.log(`  curl http://${HOST}:${PORT}/contracts/PhlimboV3`);
     console.log(`==============================================\n`);
 
     // Log deployment status

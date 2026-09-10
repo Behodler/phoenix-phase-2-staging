@@ -16,6 +16,9 @@
 // Updated 2026-07-08: Uniboost dispatchers cut over at indices 1/2/3 + index-7 ratchet swapped to NudgeRatchetDelayRelease (story 071, RESUMED); addresses patched from progress file
 // Updated 2026-07-29: zero-address placeholders added for Kendu + NudgeStreamer so the hand-
 // maintained key-set still matches the regenerated ContractAddresses interface (story 073)
+// Updated 2026-09-10: the PhlimboEA key was DELETED. DeployMocks now deploys PhlimboV3 as the
+// only phlimbo generation -- the V1->V2 and V2->V3 cutover rehearsals were retired once both had
+// executed on mainnet -- so the key left the generated interface this file must satisfy.
 // Updated 2026-08-04: the DepositView, DepositPageView and MintPageView keys were DELETED
 // (story 078). ViewRouter is now the SOLE view-resolution path: consumers call
 // `ViewRouter.pages(keccak256("<page>"))` rather than reading a hand-maintained address. The
@@ -43,10 +46,14 @@ export const mainnetAddresses: ContractAddresses = {
   // Deployed Phase 2 contracts
   Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
   PhusdStableMinter: "0x94855ACA13952D81507C92D3CdBb2e25D3bbE60C",
-  // V2 of PhlimboEA -- deployed by story 049 MigratePhlimboV1ToV2.s.sol.
-  // STAYS the V2 address after the promotion-ready cutover (story 076): V2 continues to
-  // exist, wound down and mint-revoked but NOT paused. PhlimboV3 is the separate key below.
-  PhlimboEA: "0x6084a02c2ac0127ddf1e617de257c61480a2aee0",
+  // The `PhlimboEA` key is RETIRED. It named PhlimboV2 (0x6084a02c2ac0127ddf1e617de257c61480a2aee0,
+  // deployed by story 049), which still exists on mainnet wound down, mint-revoked and NOT paused
+  // so a late staker can still exit -- but it is no longer UI surface, and DeployMocks stopped
+  // deploying a V2 locally once its V3 cutover had executed, so the key left the generated
+  // ContractAddresses interface. Same reasoning story 080 used when it dropped the live
+  // StableStakerV1 address: a registry key is a resolution path, and keeping one pointed at a
+  // superseded generation is how a UI silently keeps reading the wrong contract. Anything that
+  // still needs V2's address hardcodes it.
   PhlimboV3: "0x8D3A8E3ba43DEb8C7e2110DF437a92243523b6ca",
   StableYieldAccumulator: "0x0cD353bfda674D04823B2826ffafB83B560D21B6",
   // Story 055 migration (executed 2026-06-10: MigrateStableStakerMainnet run txs 1-20 +

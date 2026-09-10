@@ -47,10 +47,15 @@ const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "Ba
  * a PhlimboEA (V1) view while the keyed `DepositView` named the V2-correct one. `ViewRouter`
  * stays; every page behind it goes.
  *
- * `DeployMocks.s.sol` still deploys all three locally and nothing about the anvil environment
- * changes — dropping them here only stops them being PUBLISHED into the generated
- * `ContractAddresses` interface. Without this entry, the hand-deletions in `addresses.ts` /
- * `local-addresses.ts` are undone by the very next local deploy.
+ * `MintPageView` is still deployed locally and nothing about the anvil environment changes —
+ * dropping it here only stops it being PUBLISHED into the generated `ContractAddresses`
+ * interface. Without this entry, the hand-deletions in `addresses.ts` / `local-addresses.ts` are
+ * undone by the very next local deploy.
+ *
+ * `DepositView` and `DepositPageView` are no longer deployed at all: both are typed against the
+ * V1/V2-shaped `IPhlimbo` and went with PhlimboV2 when the local chain flattened onto PhlimboV3.
+ * Their entries are kept as a guard, so a future contract reviving either name cannot slip back
+ * into the interface unnoticed.
  *
  * `DepositPageViewV3`, the replacement page, is deliberately never tracked by
  * `DeployMocks.s.sol` as a UI-consumable address either — it is keyless by design.

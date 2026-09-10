@@ -21,15 +21,12 @@ import "../src/mocks/MockBalancerVault.sol";
 import "../src/mocks/MockERC4626Wrapper.sol";
 import "../src/mocks/MockSkyPSM.sol";
 import "../src/mocks/MockMarketAMMAdapter.sol";
-import "@phlimbo-ea/Phlimbo.sol";
-import "@phlimbo-ea/interfaces/IPhlimbo.sol";
-// Story 079: the local chain now mirrors mainnet's promotion-ready cutover, so it carries the
-// SAME three phlimbo-side contracts that Phase 4e touches. `PhlimboEA` (V1) is no longer
-// deployed locally at all — mainnet's incumbent is V2, and a rehearsal that starts from the
-// wrong generation rehearses nothing.
-import {PhlimboV2} from "@phlimbo-ea/PhlimboV2.sol";
+// PhlimboV3 is the ONLY phlimbo generation the local chain carries. V1 (`PhlimboEA`) and V2
+// were both retired here once their mainnet cutovers had executed: a local chain that deploys a
+// superseded generation just to migrate off it again is rehearsing a migration that can no
+// longer happen. The V2 -> V3 cutover ran on mainnet via `MigratorV2V3`; nothing local mirrors
+// it any more.
 import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
-import {MigratorV2V3} from "@phlimbo-ea/MigratorV2V3.sol";
 import {IPhlimboV3} from "@phlimbo-ea/interfaces/IPhlimboV3.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
@@ -37,9 +34,7 @@ import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldS
 import {ERC4626MarketYieldStrategy} from "@vault/concreteYieldStrategies/ERC4626MarketYieldStrategy.sol";
 import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
 import "@stable-yield-accumulator/StableYieldAccumulator.sol";
-import "../src/views/DepositView.sol";
 import "../src/views/ViewRouter.sol";
-import "../src/views/DepositPageView.sol";
 import {DepositPageViewV3} from "../src/views/DepositPageViewV3.sol";
 import {MintPageView} from "../src/views/MintPageView.sol";
 // V1 INFTMinter removed (yield-claim-nft story-039). MintPageView's constructor takes the V2
@@ -65,15 +60,12 @@ import {IUniboostMintDebtHook} from "@yield-claim-nft/interfaces/IUniboostMintDe
 import {MultiPooler} from "@yield-claim-nft/MultiPooler.sol";
 import {NFTStaker} from "nft-staking/NFTStaker.sol";
 import {NFTStakerPriceScaled} from "nft-staking/NFTStakerPriceScaled.sol";
-import {NFTStakerDepletion} from "nft-staking/NFTStakerDepletion.sol";
 import {BatchNFTMinter} from "nft-staking/BatchNFTMinter.sol";
 import {INFTSupply} from "nft-staking/INFTSupply.sol";
 // Story 073: the streamer-era contract set (mirrors the mainnet cutover planned in story 072).
 import {NudgeStreamer} from "nft-staking/NudgeStreamer.sol";
 import {BatchNFTMinterMultiToken} from "nft-staking/BatchNFTMinterMultiToken.sol";
 import {NFTStakerDepletionV2} from "nft-staking/NFTStakerDepletionV2.sol";
-import {NFTStakerMigrator} from "nft-staking/NFTStakerMigrator.sol";
-import {INFTStakerMigratable} from "nft-staking/INFTStakerMigratable.sol";
 // Story 070: canonical Uniswap V2 (WETH9 + Factory + Router02) deployer + interfaces.
 import {
     UniswapV2Deployer,
@@ -100,15 +92,17 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
- * @notice Story 079. The shared admin surface of `PhlimboV2` and `PhlimboV3`, which are
- *         unrelated Solidity types. Byte-identical to the shim in
+ * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
  *         `DeployMainnetPromotionReady.s.sol` so the local `_setDesiredAPYTwoStep` and the
- *         mainnet one are the same code operating through the same interface.
+ *         mainnet one are the same code operating through the same interface. Introduced when
+ *         one call site had to drive both PhlimboV2 and PhlimboV3, which are unrelated Solidity
+ *         types; retained after V2's retirement because it keeps the two commit read-backs with
+ *         the setter.
  */
 /**
  * @notice Story 080. The unrestricted dev-only `mint` every mock stablecoin in `src/mocks/`
- *         exposes. Declared once here so the cutover rehearsal can seed DOLA, USDC and USDe
- *         through one loop instead of three concrete types.
+ *         exposes. Declared once here so the StableStakerV1 -> V2 cutover rehearsal can seed
+ *         DOLA, USDC and USDe through one loop instead of three concrete types.
  */
 interface IMintableMock {
     function mint(address to, uint256 amount) external;
@@ -165,41 +159,24 @@ contract DeployMocks is Script {
     // without dwarfing the USDC slot the real donors fund.
     uint256 constant LOCAL_PHUSD_NUDGE_SEED = 5_000 * 10 ** 18; // 5,000 phUSD (18dp)
     uint256 constant LOCAL_KENDU_NUDGE_SEED = 50_000 * 10 ** 18; // 50,000 Kendu (18dp)
-    // phUSD budget seeded onto each rehearsal V1 depletion staker before the migration dry-run.
-    // Deliberate, non-default: large enough that per-second emission is non-zero over a 12-month
-    // window (budget / (12 * 30 days) > 0) so the migration exercises a real, non-trivial accrual.
-    uint256 constant REHEARSAL_STAKER_BUDGET = 1_000 * 10 ** 18; // 1,000 phUSD
-    // Distinct mock actors whose positions the V1 -> V2 depletion-staker migration rehearsal
-    // moves. These are anvil's default accounts #1/#2/#3 — real, distinct addresses so
-    // `migrator.migrate(users)` operates on a genuine multi-user list rather than a single
-    // self-staked position.
-    address constant REHEARSAL_ACTOR_1 = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
-    address constant REHEARSAL_ACTOR_2 = 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC;
-    address constant REHEARSAL_ACTOR_3 = 0x90F79bf6EB2c4f870365E785982E1f101E93b906;
-
-    // ---- Story 079: PhlimboV2 -> PhlimboV3 cutover rehearsal (mirrors mainnet Phase 4e) ----
+    // ---- LOCAL-ONLY seed stake on PhlimboV3 ----
     //
-    // Per-actor stake seeded onto PhlimboV2 before the migration. Deliberate, non-default, and
-    // COMFORTABLY ABOVE `PhlimboV3.MINIMUM_STAKE` (1e15): `MigratorV2V3.migrate` skips any live
-    // position below that threshold up-front with an EMPTY-reason `UserMigrationSkipped`
-    // (MigratorV2V3.sol:194-200). A dust-sized seed would therefore produce a pass that
-    // "succeeds" having migrated nobody — precisely the silent failure this rehearsal exists to
-    // catch — and would then trip the completeness gate for the wrong reason.
-    uint256 constant PHLIMBO_REHEARSAL_STAKE = 100 * 10 ** 18; // 100 phUSD per actor
-    // Chunk size for the `migrate` loop. Mainnet chunks because each user costs a V2 withdraw
-    // (with reward settlement and a phUSD mint) plus a V3 stake; locally the point is to
-    // exercise the CHUNKED path — a cursor that has to advance across more than one call — not
-    // to fit a gas ceiling. 2 with 3 actors guarantees at least two passes and a partial chunk.
-    uint256 constant PHLIMBO_MIGRATE_CHUNK = 2;
-    // Distinct mock actors for the phlimbo migration, deliberately NOT the three
-    // `REHEARSAL_ACTOR_*` above: those hold NFT-staker positions from the story-073 rehearsal,
-    // and reusing them would let an NFT-side reward transfer be mistaken for a phlimbo-side one
-    // when reading the migration's forwarded-reward deltas. Anvil default accounts #4/#5/#6.
+    // Per-actor stake placed directly on V3 at deploy time. Not a migration artifact: the actors
+    // are staked with a plain `stake(amount, user)` call, which takes the beneficiary as a
+    // parameter, so no migrator has to be installed and no prior generation has to exist.
+    //
+    // Sized COMFORTABLY ABOVE `PhlimboV3.MINIMUM_STAKE` (1e15) and chosen so the farm reads
+    // non-empty on a fresh chain: `accPromoPerShare` only accrues against live stake, so an empty
+    // V3 would leave every promo field at zero and make the armed promotion below indisting-
+    // uishable from a dormant one.
+    uint256 constant PHLIMBO_LOCAL_STAKE = 100 * 10 ** 18; // 100 phUSD per actor
+    // Three distinct mock actors, so the farm holds a genuine multi-user position rather than a
+    // single self-staked one. Anvil default accounts #4/#5/#6.
     address constant PHLIMBO_ACTOR_1 = 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65;
     address constant PHLIMBO_ACTOR_2 = 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc;
     address constant PHLIMBO_ACTOR_3 = 0x976EA74026E726554dB657fA54763abd0C3a0aa9;
 
-    // ---- Story 079: LOCAL-ONLY Kendu promotion armed on PhlimboV3 ----
+    // ---- LOCAL-ONLY Kendu promotion armed on PhlimboV3 ----
     //
     // A DELIBERATE DIVERGENCE FROM MAINNET, not a prediction of it. Mainnet's Phase 4e ships the
     // cutover with `promoToken == address(0)` and explicitly does NOT call `startPromotion` —
@@ -218,11 +195,10 @@ contract DeployMocks is Script {
 
     // ---- Script-audit run-26, L-03 (`pps26l3`): the arming above is now TOGGLEABLE ----
     //
-    // The arming block immediately above is admissible and stays exactly as it was — deliberate,
-    // argued, and sequenced dead last for a load-bearing reason. The run-26 finding is the
-    // INVERSE: because it was unconditional, the DORMANT promo state — the one mainnet actually
-    // ships on day one — was the single state this script could never produce, so no local run
-    // could ever rehearse it.
+    // The arming block immediately above is admissible and stays exactly as it was. The run-26
+    // finding is the INVERSE: because it was unconditional, the DORMANT promo state — the one
+    // mainnet actually ships on day one — was the single state this script could never produce,
+    // so no local run could ever reproduce it.
     /// @dev LOCAL-ONLY toggle for the Kendu promotion (script-audit run-26, L-03). Default TRUE:
     ///      an unqualified `npm run dev` arms the promotion, because the armed state is the one a
     ///      UI developer needs most of the time (every V3 promo field reads zero when dormant, which
@@ -230,18 +206,6 @@ contract DeployMocks is Script {
     ///      DORMANT chain instead — the state mainnet actually ships on day one, and the one state
     ///      this script could previously never produce.
     bool internal armKenduPromo;
-
-    // ---- Script-audit run-26, L-01 (`pps26l1`): the index the Phase 7.6 swap rehearsal moves ----
-    //
-    // Index 1 (`uniboostEYE`). The Uniboost swap is the shape mainnet repeats three times
-    // (indices 1/2/3), it is the lowest-blast-radius index on the local chain, and its hook's
-    // `scale` is IMMUTABLE, which is what makes the prime-token assertion meaningful. Index 7
-    // (`NudgeRatchet`) would additionally exercise the `hookTypeId()` guard and the non-default
-    // `DEFAULT_RATIO == 100`, but swapping it means re-wiring `RatchetNFTStaker`,
-    // `RatchetBatchNFTMinter`, the nudge streamer and the target APY on the exact chain the UI is
-    // about to be tested against. Those two index-7 claims are instead pinned by cheap STATIC
-    // assertions at the end of the phase, which regression-gates them without a swap.
-    uint256 constant REHEARSAL_SWAP_INDEX = 1;
 
     // Deployment addresses
     MockPhUSD public phUSD;
@@ -260,24 +224,17 @@ contract DeployMocks is Script {
     ERC4626MarketYieldStrategy public yieldStrategyUSDe;
     MockMarketAMMAdapter public usdeAmmAdapter;
     PhusdStableMinter public minter;
-    // Story 079: the INCUMBENT, tracked under the existing `PhlimboEA` progress key. The key name
-    // is mainnet's, not the contract's: on mainnet `PhlimboEA` names the PhlimboV2 address and
-    // keeps naming it after the cutover, because V2 survives the cutover wound down (APY 0,
-    // mint-revoked) but explicitly NOT paused, so a late staker can still exit. Renaming the key
-    // here would desync the local `ContractAddresses` interface from the mainnet one.
-    PhlimboV2 public phlimbo;
-    // Story 079: the post-cutover farm. This is what the UI stakes into and what SYA feeds.
+    // The ONLY phlimbo on the local chain. This is what the UI stakes into and what SYA feeds.
+    // Tracked under its own `PhlimboV3` key; the legacy `PhlimboEA` key retired with V2.
     PhlimboV3 public phlimboV3;
     MockEYE public eyeToken;
     Pauser public pauser;
     StableYieldAccumulator public stableYieldAccumulator;
-    DepositView public depositView;
     ViewRouter public viewRouter;
-    DepositPageView public depositPageView;
-    // Story 079: the V3-native deposit page. Deliberately KEYLESS — never `_trackDeployment`d —
-    // mirroring mainnet, where every page behind `ViewRouter` was stripped of its address key so
-    // `pages(keccak256("deposit"))` is the single resolution path (see extract-addresses.js's
-    // DROPPED_CONTRACT_NAMES note).
+    // The V3-native deposit page, and the only one the router ever holds. Deliberately KEYLESS —
+    // never `_trackDeployment`d — mirroring mainnet, where every page behind `ViewRouter` was
+    // stripped of its address key so `pages(keccak256("deposit"))` is the single resolution path
+    // (see extract-addresses.js's DROPPED_CONTRACT_NAMES note).
     DepositPageViewV3 public depositPageViewV3;
     MintPageView public mintPageView;
 
@@ -296,16 +253,16 @@ contract DeployMocks is Script {
     NFTMinterV2 public nftMinterV2;
     // Story 070: the three BurnerV2 dispatchers (indices 1/2/3) were replaced with Uniboost
     // dispatchers, each backed by a real UniV2 pool + a UniboostMintDebtHook + an
-    // NFTStakerDepletion staker. Indices 1/2/3 are preserved (same registration order).
+    // NFTStakerDepletionV2 staker. Indices 1/2/3 are preserved (same registration order).
     Uniboost public uniboostEYE;
     Uniboost public uniboostSCX;
     Uniboost public uniboostFLX;
     UniboostMintDebtHook public uniboostHookEYE;
     UniboostMintDebtHook public uniboostHookSCX;
     UniboostMintDebtHook public uniboostHookFLX;
-    // Story 073: the chain now ENDS on NFTStakerDepletionV2. Each of these is the V2 instance the
-    // migration rehearsal migrated into; the transient V1 stakers and migrators are deliberately
-    // not retained as fields (they are rehearsal artifacts, never tracked, never read by the UI).
+    // The chain runs `NFTStakerDepletionV2` on all three Uniboost indices. Story 073 reached that
+    // end state by deploying V1 and draining it through an `NFTStakerMigrator`; since that
+    // migration executed on mainnet, V2 is deployed directly under these same keys.
     NFTStakerDepletionV2 public uniboostStakerEYE;
     NFTStakerDepletionV2 public uniboostStakerSCX;
     NFTStakerDepletionV2 public uniboostStakerFLX;
@@ -644,25 +601,10 @@ contract DeployMocks is Script {
         _trackDeployment("PhusdStableMinter", address(minter), gasBefore - gasleft());
         console.log("PhusdStableMinter deployed at:", address(minter));
 
-        // 2. Deploy the INCUMBENT phlimbo — PhlimboV2 as of story 079, was PhlimboEA (V1).
-        //
-        // WHY V2 AND NOT V1: mainnet's incumbent is PhlimboV2, and the cutover under rehearsal
-        // (Phase 4e / `MigratorV2V3`) only exists between V2 and V3. Deploying V1 here would
-        // leave the local chain a generation behind and make the rehearsal impossible — there is
-        // no V1->V3 migrator. Same constructor arity and same depletion model, so nothing else
-        // in this phase changes.
-        //
-        // Using Linear Depletion model: depletion window = 1 week (604800 seconds)
-        uint256 oneWeekInSeconds = 604800;
-        gasBefore = gasleft();
-        phlimbo = new PhlimboV2(
-            address(phUSD), // _phUSD
-            address(rewardToken), // _rewardToken (USDC)
-            oneWeekInSeconds // _depletionDuration (1 week for linear depletion)
-        );
-        _trackDeployment("PhlimboEA", address(phlimbo), gasBefore - gasleft());
-        console.log("PhlimboV2 (incumbent, key 'PhlimboEA') deployed at:", address(phlimbo));
-        console.log("  - Depletion window:", oneWeekInSeconds, "seconds (1 week)");
+        // 2. Deploy phlimbo. PhlimboV3 is the only generation the local chain carries: V1
+        //    (`PhlimboEA`) and V2 both retired here once their mainnet cutovers had executed.
+        //    A separate helper, not inline: `run()` is at its stack-depth ceiling.
+        phlimboV3 = _deployPhlimboV3(deployer);
 
         // 3. Deploy StableYieldAccumulator
         gasBefore = gasleft();
@@ -965,20 +907,20 @@ contract DeployMocks is Script {
         // LSP batch minter) — NOT ratchetBatchNFTMinter — so 50% of each mint's USDC nudges
         // protocol-pooler (LSP) minting; the remaining 50% is retained for pool().
         //
-        // Story 073: `_finalizeUniboost` additionally calls setNudgeStreamer, and the staker step
-        // is now the full V1 -> migrator -> V2 depletion-staker migration REHEARSAL. The chain ends
-        // on NFTStakerDepletionV2 under the existing UniboostStaker* keys; the V1 stakers and the
-        // migrators are transient rehearsal artifacts and are deliberately NOT tracked.
+        // Story 073: `_finalizeUniboost` additionally calls setNudgeStreamer. The staker step
+        // deploys `NFTStakerDepletionV2` directly under the `UniboostStaker*` keys — the V1 ->
+        // migrator -> V2 rehearsal that used to sit here was retired once its mainnet cutover had
+        // executed.
         _finalizeUniboost(uniboostEYE, uniboostHookEYE, address(batchNFTMinter), deployer);
-        uniboostStakerEYE = _rehearseStakerMigration(uniboostEYE, uniboostHookEYE, deployer, "EYE");
+        uniboostStakerEYE = _deployUniboostStaker(uniboostEYE, uniboostHookEYE, deployer);
         _trackDeployment("UniboostStakerEYE", address(uniboostStakerEYE), 0);
 
         _finalizeUniboost(uniboostSCX, uniboostHookSCX, address(batchNFTMinter), deployer);
-        uniboostStakerSCX = _rehearseStakerMigration(uniboostSCX, uniboostHookSCX, deployer, "SCX");
+        uniboostStakerSCX = _deployUniboostStaker(uniboostSCX, uniboostHookSCX, deployer);
         _trackDeployment("UniboostStakerSCX", address(uniboostStakerSCX), 0);
 
         _finalizeUniboost(uniboostFLX, uniboostHookFLX, address(batchNFTMinter), deployer);
-        uniboostStakerFLX = _rehearseStakerMigration(uniboostFLX, uniboostHookFLX, deployer, "FLX");
+        uniboostStakerFLX = _deployUniboostStaker(uniboostFLX, uniboostHookFLX, deployer);
         _trackDeployment("UniboostStakerFLX", address(uniboostStakerFLX), 0);
 
         // ---- Batch minters for the three Uniboost NFTs (EYE/SCX/FLX) ----
@@ -1182,13 +1124,6 @@ contract DeployMocks is Script {
         // ====== PHASE 4: Token Authorization ======
         console.log("\n=== Phase 4: Token Authorization ===");
 
-        // Authorize the PhlimboV2 incumbent as phUSD minter. Story 079: this grant is REVOKED
-        // again in the Phase 7.4 cutover, after V2 has been emptied and wound down — mirroring
-        // mainnet Phase 4e step 14. It is granted here because V2 must be able to mint the
-        // pending phUSD reward leg during the migration's `withdraw` calls.
-        phUSD.setMinter(address(phlimbo), true);
-        console.log("Authorized PhlimboV2 as phUSD minter (revoked again after the cutover)");
-
         // Authorize PhusdStableMinter as phUSD minter
         phUSD.setMinter(address(minter), true);
         console.log("Authorized PhusdStableMinter as phUSD minter");
@@ -1258,26 +1193,6 @@ contract DeployMocks is Script {
         _deployAntimatterAndStableStakerV2(deployer);
         _rehearseStableStakerCutover(deployer);
 
-        // ====== PHASE 7: Phlimbo Configuration ======
-        console.log("\n=== Phase 7: Phlimbo Configuration ===");
-
-        // Desired APY = 0: no phUSD minted by phlimbo, yield comes only from the yield funnel
-        phlimbo.setDesiredAPY(0);
-        console.log("Set desired APY (preview): 0 bps");
-
-        // Wait for next block (simulate block advancement)
-        vm.roll(block.number + 1);
-
-        // Commit APY change
-        phlimbo.setDesiredAPY(0);
-        console.log("Set desired APY (commit): 0 bps");
-
-        // ====== PHASE 7.4: PhlimboV2 -> PhlimboV3 cutover rehearsal (story 079) ======
-        // Sequenced HERE, immediately before Phase 7.5, for the same reason mainnet sequences
-        // Phase 4e immediately before Phase 5: with V3 already live, the accumulator can be
-        // pointed at its final target in ONE place below rather than wired to V2 and repointed.
-        phlimboV3 = _rehearsePhlimboV3Cutover(deployer);
-
         // ====== PHASE 7.5: StableYieldAccumulator Configuration ======
         console.log("\n=== Phase 7.5: StableYieldAccumulator Configuration ===");
 
@@ -1291,12 +1206,8 @@ contract DeployMocks is Script {
         stableYieldAccumulator.setRewardToken(address(rewardToken));
         console.log("Set reward token to USDC:", address(rewardToken));
 
-        // Set Phlimbo as the reward recipient.
-        //
-        // STORY 079: this is PhlimboV3, not the `phlimbo` (V2) field, mirroring mainnet Phase 5.
-        // The stable yield funnel must terminate at the farm users are actually staked in — V2
-        // was emptied and wound down in Phase 7.4 above, so feeding it would strand every
-        // collected reward in a contract with zero stakers.
+        // Set Phlimbo as the reward recipient. The stable yield funnel must terminate at the farm
+        // users are actually staked in, which on both mainnet and this chain is PhlimboV3.
         stableYieldAccumulator.setPhlimbo(address(phlimboV3));
         console.log("Set PhlimboV3 as reward recipient:", address(phlimboV3));
 
@@ -1355,13 +1266,11 @@ contract DeployMocks is Script {
         console.log("SYA.setNudgeStreamer ->", address(nudgeStreamer));
         require(stableYieldAccumulator.nudgeStreamer() == address(nudgeStreamer), "SYA nudgeStreamer not wired");
 
-        // ====== PHASE 7.6: dispatcher-swap cutover rehearsal (script-audit run-26, L-01) ======
-        // The local chain rehearsed the cutover's END STATE but never its MECHANICS: before this
-        // phase, `hook.pull()`, `hook.setDispatcher()` and `replaceDispatcher()` executed ZERO
-        // times locally, so the one cutover ordering whose wrong direction is SILENT rather than
-        // loud was also the only one the local mirror never executed. A separate internal helper,
-        // not inline: `run()` is at its stack-depth ceiling.
-        _rehearseDispatcherSwap(deployer);
+        // ====== PHASE 7.6: static index-7 dispatcher claims ======
+        // Two cheap read-only gates on the index-7 hook, kept after the index-1 dispatcher-swap
+        // rehearsal was retired (its mainnet cutover has executed, so a local chain that deploys a
+        // second UniboostEYE purely to replace the first was rehearsing nothing).
+        _pinNudgeRatchetStaticClaims();
 
         // ====== PHASE 8: Pauser Registration ======
         console.log("\n=== Phase 8: Pauser Registration ===");
@@ -1375,13 +1284,8 @@ contract DeployMocks is Script {
         pauser.register(address(minter));
         console.log("Pauser.register(PhusdStableMinter) completed");
 
-        // Register the PhlimboV2 incumbent with Pauser (PhlimboV3 is registered in Phase 7.4)
-        // Step 1: Set pauser address on contract FIRST
-        phlimbo.setPauser(address(pauser));
-        console.log("PhlimboV2.setPauser() called");
-        // Step 2: Register with pauser
-        pauser.register(address(phlimbo));
-        console.log("Pauser.register(PhlimboV2) completed");
+        // PhlimboV3 sets its pauser and registers inside `_deployPhlimboV3` (Phase 3), beside its
+        // constructor, so it is never live for a phase without a pauser wired.
 
         // Register StableYieldAccumulator with Pauser
         // Step 1: Set pauser address on contract FIRST
@@ -1504,36 +1408,16 @@ contract DeployMocks is Script {
         console.log("  - Share price now > 1, creating claimable yield");
         console.log("  - YieldStrategyUSDC can claim this yield via ERC4626YieldStrategy");
 
-        // ====== PHASE 10: Deploy DepositView for UI Polling ======
-        console.log("\n=== Phase 10: Deploy DepositView for UI Polling ===");
-
-        depositView = new DepositView(IPhlimbo(address(phlimbo)), IERC20(address(phUSD)));
-        _trackDeployment("DepositView", address(depositView), 0);
-        console.log("DepositView deployed at:", address(depositView));
-
-        // ====== PHASE 11: Deploy ViewRouter + DepositPageView ======
-        console.log("\n=== Phase 11: Deploy ViewRouter + DepositPageView ===");
+        // ====== PHASE 11: Deploy ViewRouter + the page views ======
+        // `DepositView` and `DepositPageView` are both gone with PhlimboV2: they are typed against
+        // the V1/V2-shaped `IPhlimbo`, whose 3-tuple `userInfo` silently mis-decodes V3's 4-tuple
+        // rather than reverting. `DepositPageViewV3` below is the only deposit page.
+        console.log("\n=== Phase 11: Deploy ViewRouter + page views ===");
 
         gasBefore = gasleft();
         viewRouter = new ViewRouter();
         _trackDeployment("ViewRouter", address(viewRouter), gasBefore - gasleft());
         console.log("ViewRouter deployed at:", address(viewRouter));
-
-        gasBefore = gasleft();
-        depositPageView = new DepositPageView(IPhlimbo(address(phlimbo)), IERC20(address(phUSD)));
-        _trackDeployment("DepositPageView", address(depositPageView), gasBefore - gasleft());
-        console.log("DepositPageView deployed at:", address(depositPageView));
-
-        // Register DepositPageView with ViewRouter.
-        //
-        // STORY 079: registered and then DISPLACED a few lines below by DepositPageViewV3, which
-        // is not redundant work — it reproduces mainnet's exact Phase 4f transition (the live
-        // router held a V1-baked page and Phase 4f overwrites the key). Keeping the displaced
-        // registration here means a regression that drops the V3 setPage shows up locally as the
-        // router serving 7-field V1 data, which is what the bug looked like on mainnet, rather
-        // than as an unset key that reverts and would be caught by accident.
-        viewRouter.setPage(keccak256("deposit"), IPageView(address(depositPageView)));
-        console.log("Registered DepositPageView with ViewRouter (WILL BE DISPLACED by V3 below)");
 
         gasBefore = gasleft();
         mintPageView = new MintPageView(
@@ -1553,16 +1437,13 @@ contract DeployMocks is Script {
         viewRouter.setPage(keccak256("mint"), IPageView(address(mintPageView)));
         console.log("Registered MintPageView with ViewRouter under key: keccak256('mint')");
 
-        // ====== PHASE 11.5: DepositPageViewV3 — the read side of the cutover (story 079) ======
-        // Local mirror of mainnet Phase 4f. Runs AFTER the Phase 7.4 cutover because the view's
-        // `phlimbo` is IMMUTABLE: it must be constructed against the V3 that already exists.
-        //
-        // NOT A RE-CAST OF THE OLD PAGE. `PhlimboV3.userInfo` returns a 4-tuple where V1/V2
-        // returned 3, and Solidity's decoder tolerates the extra trailing returndata — so the old
-        // V1-typed page pointed at V3 does not revert, it silently returns undefined-by-accident
-        // data with none of the promo fields. That is exactly the failure mode this phase exists
-        // to remove, and it is why a separate contract typed against `IPhlimboV3` is required.
-        console.log("\n=== Phase 11.5: Deploy DepositPageViewV3 + repoint the deposit page ===");
+        // ====== PHASE 11.5: DepositPageViewV3, the deposit page ======
+        // The view's `phlimbo` is IMMUTABLE, so it is constructed against the V3 deployed back in
+        // Phase 3. Typed against `IPhlimboV3` rather than `IPhlimbo` because `PhlimboV3.userInfo`
+        // returns a 4-tuple where V1/V2 returned 3: Solidity's decoder tolerates the extra
+        // trailing returndata, so a V1-shaped page pointed at V3 does not revert, it silently
+        // returns undefined-by-accident data with none of the promo fields.
+        console.log("\n=== Phase 11.5: Deploy DepositPageViewV3 + register the deposit page ===");
 
         gasBefore = gasleft();
         depositPageViewV3 = new DepositPageViewV3(IPhlimboV3(address(phlimboV3)), IERC20(address(phUSD)));
@@ -1573,14 +1454,15 @@ contract DeployMocks is Script {
         // resolution path — the precise duplication that let mainnet's deposit page sit on a
         // stale view unnoticed for months. See extract-addresses.js DROPPED_CONTRACT_NAMES.
 
-        // THE LAST STEP OF THE PHASE, deliberately: until this lands, the router still serves the
-        // displaced V1-shaped page registered above.
+        // THE LAST STEP OF THE PHASE, deliberately: until this lands the "deposit" key is unset
+        // and every read through the router reverts, which is a loud failure rather than a quiet
+        // one.
         viewRouter.setPage(keccak256("deposit"), IPageView(address(depositPageViewV3)));
         require(
             address(viewRouter.pages(keccak256("deposit"))) == address(depositPageViewV3),
-            "ViewRouter deposit page did not repoint to DepositPageViewV3"
+            "ViewRouter deposit page did not point at DepositPageViewV3"
         );
-        console.log("ViewRouter deposit page -> DepositPageViewV3 (displaced the V1-shaped page)");
+        console.log("ViewRouter deposit page -> DepositPageViewV3");
 
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
@@ -1602,10 +1484,9 @@ contract DeployMocks is Script {
         _markConfigured("YieldStrategyUSDe", 0);
         _markConfigured("USDeAMMAdapter", 0);
         _markConfigured("PhusdStableMinter", 0);
-        _markConfigured("PhlimboEA", 0);
-        // Story 079. Configured inside the Phase 7.4 cutover (APY, pauser, phUSD mint grant,
-        // migrated user base) rather than in the phases above, but it is a first-class tracked
-        // deployment and must appear here or extract-addresses drops it from the interface.
+        // Configured inside `_deployPhlimboV3` (APY, pauser, phUSD mint grant, seed stakers)
+        // rather than in the phases above, but it is a first-class tracked deployment and must
+        // appear here or extract-addresses drops it from the interface.
         _markConfigured("PhlimboV3", 0);
         _markConfigured("StableYieldAccumulator", 0);
         _markConfigured("Pauser", 0);
@@ -1642,9 +1523,7 @@ contract DeployMocks is Script {
         _markConfigured("RatchetBatchNFTMinter", 0);
         _markConfigured("Antimatter", 0);
         _markConfigured("StableStakerV2", 0);
-        _markConfigured("DepositView", 0);
         _markConfigured("ViewRouter", 0);
-        _markConfigured("DepositPageView", 0);
         _markConfigured("MintPageView", 0);
 
         // Track seeding completion
@@ -1657,13 +1536,12 @@ contract DeployMocks is Script {
 
         // ====== TERMINAL: residual-privilege sweep (script-audit run-26, L-04) ======
         // THE LAST STATEMENT BEFORE `stopBroadcast`, deliberately. The script grants the deployer
-        // phUSD mint authority three times (`_seedNudgeStream`, `_seedPhlimboV2Position`,
-        // `_seedV1Position`) and, before this, never revoked it — while correctly revoking
-        // PhlimboV2's grant in the same run. No malicious-owner vector is asserted: this is a mock
-        // token on chain 31337 whose deployer key is published in Foundry's own documentation. The
-        // cost is purely rehearsal fidelity — "revoke the operational key's temporary grant" is
-        // exactly the kind of step that is easy to forget on a Ledger broadcast, and it was the one
-        // step the local mirror never exercised.
+        // phUSD mint authority twice (`_deployPhlimboV3`, `_seedNudgeStream`) and, before this,
+        // never revoked it. No malicious-owner vector is asserted: this is a mock token on chain
+        // 31337 whose deployer key is published in Foundry's own documentation. The cost is purely
+        // fidelity — "revoke the operational key's temporary grant" is exactly the kind of step
+        // that is easy to forget on a Ledger broadcast, and it was the one step the local mirror
+        // never exercised.
         _sweepResidualPrivileges(deployer);
 
         vm.stopBroadcast();
@@ -1698,7 +1576,7 @@ contract DeployMocks is Script {
         console.log("Global Pauser System:");
         console.log("  - Pauser contract deployed with MockEYE token");
         console.log("  - PhusdStableMinter registered with Pauser");
-        console.log("  - PhlimboV2 and PhlimboV3 registered with Pauser");
+        console.log("  - PhlimboV3 registered with Pauser");
         console.log("  - StableYieldAccumulator registered with Pauser");
         console.log("  - StableStakerV1 (retired), StableStakerV2 and Antimatter registered with Pauser");
         console.log("StableStakerV2: 10% set-aside buffer on all 3 pools (DOLA, USDC, USDe)");
@@ -1743,7 +1621,7 @@ contract DeployMocks is Script {
         console.log("  - StableYieldAccumulator authorized as NFT burner");
         console.log("  - NFTMinter registered with Global Pauser");
         console.log("");
-        console.log("Local rehearsal toggles + sweeps (script-audit run-26):");
+        console.log("Local toggles + sweeps (script-audit run-26):");
         console.log("  - LOCAL_PROMO_KENDU (Kendu promo armed on PhlimboV3):", armKenduPromo);
         if (armKenduPromo) {
             console.log("    ARMED leg: promoToken == MockKendu, promoPhase == Active");
@@ -1755,9 +1633,6 @@ contract DeployMocks is Script {
             console.log("      whitelisted-but-unregistered and unfunded (day-one mainnet shape)");
             console.log("    Unset LOCAL_PROMO_KENDU (or set it true) to boot the ARMED chain");
         }
-        console.log(
-            "  - Phase 7.6: index-1 dispatcher swap rehearsed (pull -> setDispatcher -> setHook -> replaceDispatcher)"
-        );
         console.log("  - Terminal sweep: deployer phUSD mint authority REVOKED, end-state ACL asserted");
     }
 
@@ -1861,159 +1736,12 @@ contract DeployMocks is Script {
         dispatcher.setNudgeStreamer(address(nudgeStreamer));
     }
 
-    // =====================================================================
-    // Script-audit run-26, L-01: dispatcher-swap cutover rehearsal (Phase 7.6)
-    // =====================================================================
-
-    /// @dev Performs ONE genuine dispatcher swap on index 1 (`uniboostEYE`) in the exact
-    ///      fail-closed order the mainnet cutover mandates, with the same assertions.
-    ///
-    ///      THE ORDERING CONTRACT (`DeployMainnetPromotionReady.s.sol:146-158`), per index:
-    ///
-    ///          hook.pull() -> hook.setDispatcher(new) -> new.setHook(hook) -> replaceDispatcher(idx, new)
-    ///
-    ///      During the window between `setDispatcher` and `replaceDispatcher` the OLD dispatcher is
-    ///      still on the index but the hook now rejects it (`onDispatch` is gated
-    ///      `if (msg.sender != dispatcher) revert OnlyDispatcher()`), so mints on that index REVERT.
-    ///      That is the correct failure direction. The reverse order would put the new dispatcher
-    ///      live on the index while it still carried the fresh `DefaultDispatchHook` its constructor
-    ///      gave it, so mints would SUCCEED while accruing no mint debt — a silent value leak.
-    ///      Never do that.
-    ///
-    ///      THIS PHASE MAKES NO CLAIM THAT THE MAINNET ORDERING IS WRONG. The run-26 finding is
-    ///      that `dev` could not tell you either way, because `setDispatcher`, `replaceDispatcher`
-    ///      and `hook.pull()` executed ZERO times on the local chain.
-    ///
-    ///      The hook is REUSED, not redeployed, and no new `phUSD.setMinter` grant is issued —
-    ///      hook reuse is the whole point of the exercise, and it is what makes the immutable-scale
-    ///      prime-token assertion load-bearing rather than decorative.
-    function _rehearseDispatcherSwap(address deployer) internal {
-        console.log("\n=== Phase 7.6: Dispatcher-swap cutover rehearsal (script-audit run-26, L-01) ===");
-
-        UniboostMintDebtHook hook = uniboostHookEYE;
-        address oldUb = address(uniboostEYE);
-        uint256 idx = nftMinterV2.dispatcherToIndex(oldUb);
-        require(idx == REHEARSAL_SWAP_INDEX, "rehearsal: UniboostEYE is not on the expected dispatcher index");
-
-        // ---- 0. NON-VACUITY FIRST. ----
-        // `pull()` is a NO-OP at zero debt, so a conservation assertion taken across a pull on an
-        // empty ledger is trivially true and proves nothing. Drive a real mint through index 1 so
-        // the ledger is non-zero at pull time, then gate on it below.
-        _accrueIndex1MintDebt(deployer, idx);
-
-        // ---- 1. Snapshot everything the swap must preserve. ----
-        uint256 mintDebtBefore = hook.mintDebt();
-        require(
-            mintDebtBefore > 0,
-            "VACUOUS REHEARSAL: uniboost hook mintDebt is zero at pull time, so the conservation assertion below would prove NOTHING - do NOT relax this gate, fix the accrual"
-        );
-        address recipientBefore = hook.recipient();
-        uint8 ratioBefore = hook.ratio();
-        uint256 recipientPhusdBefore = phUSD.balanceOf(recipientBefore);
-        (, uint256 priceBefore, uint256 growthBefore, bool disabledBefore) = nftMinterV2.configs(idx);
-
-        // ---- 2. pull(), then MINT-DEBT CONSERVATION. ----
-        // Non-vacuous by construction: `mintDebtBefore` was just gated above as strictly positive,
-        // so the recipient's phUSD balance MUST move by exactly that amount.
-        hook.pull();
-        require(hook.mintDebt() == 0, "uniboost hook mintDebt != 0 after pull");
-        require(
-            phUSD.balanceOf(recipientBefore) - recipientPhusdBefore == mintDebtBefore,
-            "CONSERVATION FAILED: the phUSD realised by hook.pull() does not equal the mint debt it retired - do NOT relax this gate"
-        );
-        console.log("  hook.pull() realised NON-ZERO mint debt (phUSD wei):", mintDebtBefore);
-
-        // ---- 3. The replacement, built with the SAME constructor arguments as the incumbent. ----
-        Uniboost newUb = new Uniboost(address(rewardToken), address(uniRouter), poolEYE, address(eyeToken), deployer);
-        console.log("  replacement UniboostEYE deployed at:", address(newUb));
-        _wireUniboost(newUb, "UniboostEYE(replacement)");
-
-        // The hook's `scale` is IMMUTABLE (`10 ** (18 - primeDecimals)`), so a replacement under a
-        // reused hook MUST carry the same 6-decimal prime or every future mint inflates the debt by
-        // 1e12. Assert BEFORE repointing, mirroring DeployMainnetPromotionReady.s.sol:1475-1479.
-        require(
-            newUb.primeToken() == address(rewardToken),
-            "replacement Uniboost is not USDC-primed (the reused hook's scale is IMMUTABLE)"
-        );
-        require(rewardToken.decimals() == 6, "USDC (MockRewardToken) decimals != 6");
-
-        // ---- 4. Repoint, in the fail-closed order and no other. ----
-        hook.setDispatcher(address(newUb));
-        newUb.setHook(IDispatchHook(address(hook)));
-
-        // ---- 5. THE INTERMEDIATE-WINDOW ASSERTION. ----
-        // Asserted STRUCTURALLY rather than by a live probe: a reverting call issued while
-        // `vm.startBroadcast` is active is recorded into the broadcast bundle and would fail
-        // `deploy:local`. This mismatch IS the property that makes a mint on the index revert
-        // `OnlyDispatcher()`, and asserting it is deterministic.
-        require(hook.dispatcher() == address(newUb), "intermediate window: hook did not repoint to the new dispatcher");
-        (address midDispatcher,,,) = nftMinterV2.configs(idx);
-        require(
-            midDispatcher == oldUb,
-            "intermediate window: the index already moved - the fail-closed window was never entered"
-        );
-        console.log("  intermediate window OK: hook -> NEW dispatcher while the index still carries the OLD one");
-        console.log("    a mint on this index right now would revert OnlyDispatcher(). That is the correct direction.");
-
-        // ---- 7. Replace, then read the whole config back. ----
-        // `replaceDispatcher` touches NEITHER price NOR growthBasisPoints NOR disabled — which is
-        // exactly the claim these assertions pin.
-        nftMinterV2.replaceDispatcher(idx, address(newUb));
-        (address d, uint256 price, uint256 growth, bool disabled) = nftMinterV2.configs(idx);
-        require(d == address(newUb), "configs(idx).dispatcher != the replacement Uniboost");
-        require(price == priceBefore && growth == growthBefore, "configs(idx) price/growth not preserved");
-        require(disabled == disabledBefore, "configs(idx) disabled flag not preserved");
-        require(price < 1e12, "index price is not 6-decimal-shaped");
-        console.log("  replaceDispatcher OK; price/growth preserved:", price, growth);
-
-        // ---- 8. Post-swap invariants. ----
-        require(address(newUb.hook()) == address(hook), "replacement dispatcher is not carrying the REUSED hook");
-        require(hook.recipient() == recipientBefore, "hook recipient changed across the swap");
-        require(hook.ratio() == ratioBefore, "hook ratio changed across the swap");
-        require(
-            nftMinterV2.dispatcherToIndex(address(newUb)) == idx, "dispatcherToIndex did not move to the replacement"
-        );
-        require(nftMinterV2.dispatcherToIndex(oldUb) == 0, "dispatcherToIndex still resolves the RETIRED dispatcher");
-
-        // ---- 9. Finalise, so the local chain ends FULLY WORKING (the UI is tested against it). ----
-        // The full `_finalizeUniboost` recipe, not a subset: the dispatcher's own `recipient` (the
-        // DONATION recipient) is a different field from the hook's `recipient`, and a fresh
-        // Uniboost arrives with it unset, which would silently disable the donation branch.
-        _finalizeUniboost(newUb, hook, address(batchNFTMinter), deployer);
-
-        // ---- 10. The address book must name the dispatcher that is actually LIVE on the index. ----
-        // `deployments[...]` is edited in place rather than re-`_trackDeployment`ed: the latter also
-        // pushes onto `contractNames`, which would emit a DUPLICATE key into the progress-file JSON.
-        // The key is reused, so no new `_markConfigured` entry is required.
-        uniboostEYE = newUb;
-        deployments["UniboostEYE"].addr = address(newUb);
-        require(deployments["UniboostEYE"].addr == address(newUb), "UniboostEYE address key did not repoint");
-        console.log("  UniboostEYE address key repointed to the live index-1 dispatcher:", address(newUb));
-
-        _pinNudgeRatchetStaticClaims();
-
-        console.log("  Phase 7.6 complete: setDispatcher / setHook / replaceDispatcher / pull all EXECUTED locally.");
-    }
-
-    /// @dev Makes `uniboostHookEYE.mintDebt()` strictly positive by driving one real mint through
-    ///      the index, so the conservation assertion in `_rehearseDispatcherSwap` is non-vacuous.
-    ///      The mint routes prime USDC through the Uniboost donation branch, so it doubles as a
-    ///      live smoke test that the incumbent dispatcher is still fully wired at this point.
-    function _accrueIndex1MintDebt(address deployer, uint256 idx) internal {
-        // 2x the current price: `getPrice` grows 0.1% per mint, and the surplus costs nothing on a
-        // mock token. `approve` overwrites rather than adds, so no stale allowance accumulates.
-        uint256 budget = nftMinterV2.getPrice(idx) * 2;
-        rewardToken.mint(deployer, budget);
-        rewardToken.approve(address(nftMinterV2), budget);
-        require(nftMinterV2.mint(idx, deployer), "rehearsal: index-1 mint returned false");
-        console.log("  accrued mint debt via one real index-1 mint; hook.mintDebt() now:", uniboostHookEYE.mintDebt());
-    }
-
-    /// @dev The two claims an index-7 swap would have exercised, pinned STATICALLY instead.
-    ///      Swapping index 7 would mean re-wiring `RatchetNFTStaker`, `RatchetBatchNFTMinter`, the
-    ///      nudge streamer and the target APY on the exact chain the UI is about to be tested
-    ///      against; blast radius won. These two assertions regression-gate the claims without a
-    ///      swap, so a hook or ratio drift on index 7 still fails the run loudly.
+    /// @dev Two static claims about the index-7 hook, asserted rather than exercised by a swap.
+    ///      Actually swapping index 7 would mean re-wiring `RatchetNFTStaker`,
+    ///      `RatchetBatchNFTMinter`, the nudge streamer and the target APY on the exact chain the
+    ///      UI is about to be tested against; blast radius won. These two read-only assertions
+    ///      regression-gate the claims for free, so a hook or ratio drift still fails the run
+    ///      loudly.
     function _pinNudgeRatchetStaticClaims() internal view {
         require(
             nudgeRatchetHook.hookTypeId() == keccak256("NudgeRatchetMintDebtHook.v1"),
@@ -2031,10 +1759,10 @@ contract DeployMocks is Script {
     ///      rather than silently surviving into `local-addresses.ts`.
     ///
     ///      SAFE ONLY AS THE LAST STATEMENT BEFORE `stopBroadcast`. The last deployer-as-minter
-    ///      phUSD mint in the whole run is `_seedPhlimboV2Position`, at the START of Phase 7.4;
-    ///      everything after that mints through `PhusdStableMinter` (its own grant) or through
-    ///      contracts holding their own. `_armLocalKenduPromotion` mints MockKendu, whose `mint` is
-    ///      permissionless. A revoke placed before `_seedPhlimboV2Position` would break it.
+    ///      phUSD mint in the whole run is `_seedNudgeStream`, in Phase 3.7; everything after that
+    ///      mints through `PhusdStableMinter` (its own grant) or through contracts holding their
+    ///      own. `_armLocalKenduPromotion` mints MockKendu, whose `mint` is permissionless. A
+    ///      revoke placed before the Phase 3.7 stream seeding would break it.
     function _sweepResidualPrivileges(address deployer) internal {
         console.log("\n=== Terminal: residual-privilege sweep (script-audit run-26, L-04) ===");
 
@@ -2043,7 +1771,6 @@ contract DeployMocks is Script {
 
         // The expected end-state ACL, as a table. Any drift names its own offender.
         _requireLiveMinter(deployer, false, "deployer");
-        _requireLiveMinter(address(phlimbo), false, "PhlimboV2");
         _requireLiveMinter(address(phlimboV3), true, "PhlimboV3");
         _requireLiveMinter(address(minter), true, "PhusdStableMinter");
         // Story 080: the V1 incumbent is retired by the Phase 6.5 cutover and its grant is
@@ -2059,7 +1786,7 @@ contract DeployMocks is Script {
         _requireLiveMinter(address(uniboostHookFLX), true, "UniboostHookFLX");
 
         console.log(
-            "  end-state phUSD ACL asserted: deployer + PhlimboV2 + StableStakerV1 OUT, V3 + minter + StableStakerV2 + 5 hooks IN"
+            "  end-state phUSD ACL asserted: deployer + StableStakerV1 OUT, PhlimboV3 + minter + StableStakerV2 + 5 hooks IN"
         );
     }
 
@@ -2511,65 +2238,47 @@ contract DeployMocks is Script {
     }
 
     // =====================================================================
-    // Story 079: PhlimboV2 -> MigratorV2V3 -> PhlimboV3 cutover rehearsal
+    // PhlimboV3 deployment (Phase 3)
     // =====================================================================
 
-    /// @dev Local mirror of `DeployMainnetPromotionReady._phase4e_phlimboV3Cutover` (story 076),
-    ///      step for step, plus the seeding of a user base that mainnet gets for free from live
-    ///      stakers. This is the ONLY place the highest-risk phase of the promotion-ready cutover
-    ///      can be dry-run for free, and it is the reason the local chain deploys V2 rather than
-    ///      V3 directly: an end-state-only deploy would leave the migration itself untested.
+    /// @dev Deploys and fully wires the local chain's only phlimbo.
     ///
-    ///      Deliberately NOT mirrored from mainnet, and each omission is a real difference rather
-    ///      than an oversight:
+    ///      There is no incumbent to migrate off. Both prior generations were retired here once
+    ///      their mainnet cutovers had executed: V1 -> V2 (story 049) and V2 -> V3 (story 076,
+    ///      via `MigratorV2V3`). Deploying a superseded generation locally just to drain it again
+    ///      rehearses a migration that can no longer happen, and leaves an empty husk on the chain
+    ///      the UI is tested against.
     ///
-    ///        * NO `_isDeployed`/`_isConfigured` resume guards. Mainnet's Phase 4e is resumable
-    ///          because a Ledger broadcast can die mid-phase and must not re-deploy V3 or re-run
-    ///          a completed migration. `deploy:local` is preceded by `clean:local`, which deletes
-    ///          the progress file outright — every local run is a FRESH leg by construction, so a
-    ///          resume branch here would be dead code that silently rots.
-    ///        * NO owner assertions (`owner() == OWNER`). There is one key on anvil.
-    ///        * NO snapshot file. Mainnet seeds the migrator from
-    ///          `phlimbo-v2-snapshot-latest.json` because PhlimboV2 exposes no staker
-    ///          enumeration; here the script created the positions and knows the list.
+    ///      A helper rather than inline code because `run()` is at its stack-depth ceiling.
     ///
-    ///      What IS mirrored exactly, because these are the steps that can fail silently:
-    ///      the two-step APY commit, the BOTH-SIDES `setMigrator` with read-back, the chunked
-    ///      migrate loop, the stake-conservation assertion, and the ordering of the wind-down
-    ///      (APY 0 -> revoke migrator -> completeness gate -> revoke mint authority).
-    /// @return v3 The `PhlimboV3` the user base was migrated into.
-    function _rehearsePhlimboV3Cutover(address deployer) internal returns (PhlimboV3 v3) {
-        console.log("\n=== Phase 7.4: PhlimboV2 -> PhlimboV3 cutover rehearsal (story 079) ===");
+    ///      The constructor arguments are the ones V2 carried and V3 inherited at the mainnet
+    ///      cutover: the USDC reward token and a 1-week linear depletion window. They are literals
+    ///      here because there is no longer a live predecessor to read them off.
+    /// @return v3 The deployed, wired, seeded `PhlimboV3`.
+    function _deployPhlimboV3(address deployer) internal returns (PhlimboV3 v3) {
+        console.log("\n=== Deploy PhlimboV3 ===");
 
-        // ---- 0. A real multi-user V2 position. Mainnet's Phase 0 asserts this is non-zero. ----
-        uint256 preMigrationTotal = _seedPhlimboV2Position(deployer);
-        console.log("  V2 migration baseline (totalStaked):", preMigrationTotal);
-
-        // ---- 1. Deploy PhlimboV3, mirroring V2's LIVE config. ----
-        // `rewardToken` and `depletionDuration` are read off V2 rather than re-derived from the
-        // locals above, exactly as mainnet reads them off the live V2: the rehearsal must
-        // exercise the read path, not a parallel source of truth that cannot drift.
-        address v2Reward = address(phlimbo.rewardToken());
-        uint256 v2Duration = phlimbo.depletionDuration();
-        require(v2Duration > 0, "PhlimboV3 ctor requires depletionDuration > 0");
+        // ---- 1. Deploy. Linear depletion model, window = 1 week. ----
+        uint256 oneWeekInSeconds = 604800;
         uint256 gasBefore = gasleft();
-        v3 = new PhlimboV3(address(phUSD), v2Reward, v2Duration);
+        v3 = new PhlimboV3(address(phUSD), address(rewardToken), oneWeekInSeconds);
         _trackDeployment("PhlimboV3", address(v3), gasBefore - gasleft());
         console.log("  PhlimboV3 deployed at:", address(v3));
+        console.log("  - Depletion window:", oneWeekInSeconds, "seconds (1 week)");
         // A fresh V3 arrives with no promotion armed. `promoToken == address(0)` is the designed
-        // dormant state, NOT a misconfiguration — the local chain, like mainnet, ships the
-        // cutover with no promotion running.
+        // dormant state, NOT a misconfiguration — the local chain, like mainnet, ships with no
+        // promotion running and arms one below only because the UI needs the fields populated.
         require(v3.promoToken() == IERC20(address(0)), "PhlimboV3 arrived with a promo token set");
 
-        // ---- 2/3. Mirror V2's APY. TWO-STEP preview -> commit. ----
-        _setDesiredAPYTwoStep(IPhlimboAPYLike(address(v3)), phlimbo.desiredAPYBps(), "PhlimboV3");
+        // ---- 2. Desired APY = 0: no phUSD minted by phlimbo, yield comes only from the funnel. ----
+        _setDesiredAPYTwoStep(IPhlimboAPYLike(address(v3)), 0, "PhlimboV3");
 
-        // ---- 4. Pauser wiring, both directions (setPauser BEFORE register, as everywhere). ----
+        // ---- 3. Pauser wiring, both directions (setPauser BEFORE register, as everywhere). ----
         v3.setPauser(address(pauser));
         pauser.register(address(v3));
         console.log("  PhlimboV3 pauser set + registered with the local Pauser");
 
-        // ---- 5. phUSD mint authority to V3. THE SILENT-FAILURE STEP. ----
+        // ---- 4. phUSD mint authority. THE SILENT-FAILURE STEP. ----
         // V3 pays its phUSD reward leg with a try/catch'd mint that BANKS on failure rather than
         // reverting (PhlimboV3.sol:913). Forget this grant and nothing reverts: every staker
         // accrues an unpayable phUSD entitlement while the stable leg keeps paying. Hence the
@@ -2585,21 +2294,37 @@ contract DeployMocks is Script {
         );
         console.log("  phUSD.setMinter(PhlimboV3, true) - mint authority GRANTED");
 
-        // ---- 6..14. The migration and the wind-down. ----
-        _runPhlimboV2ToV3Migration(v3, v2Reward, preMigrationTotal);
-
-        // ---- 15. LOCAL ONLY: arm a Kendu promotion. NOT part of the mainnet cutover. ----
-        // Sequenced dead last, AFTER the migration, and that ordering is load-bearing rather
-        // than cosmetic. `MigratorV2V3.migrateOne` brackets the live `promoToken` balance around
-        // each user's withdraw+stake and forwards the delta (MigratorV2V3.sol:241-272); arming
-        // the promo first would drag that path into a migration mainnet runs with the slot
-        // dormant, so the rehearsal would stop rehearsing the thing it exists to rehearse. It
-        // also keeps the `promoToken == address(0)` assertion on the fresh V3 above meaningful.
+        // ---- 5. LOCAL ONLY: a real multi-user staked position. ----
+        // `stake(amount, user)` is gated `msg.sender == user || msg.sender == migrator`
+        // (PhlimboV3.sol:697), so the deployer installs itself as the migrator for the duration of
+        // the seeding and stands it down immediately afterwards. This is NOT a migration and no
+        // migrator contract is involved: it is the local stand-in for three separately-signed user
+        // `stake()` calls, which a single-key broadcast script cannot produce. The resulting
+        // on-chain state (three non-zero `userInfo` entries) is identical to the real thing, and
+        // the farm ends with `migrator == address(0)`, which is the correct end state.
         //
-        // SCRIPT-AUDIT RUN-26, L-03: the CALL SITE is gated, the helper is not. The arming itself
-        // is admissible and its four post-condition `require`s stay exactly as they were; the
-        // finding was that the DORMANT leg — mainnet's day-one shape — was unreachable. Both legs
-        // now assert, so neither is a silent no-op.
+        // Sequenced BEFORE the promotion below: `accPromoPerShare` only accrues against live
+        // stake, so arming onto an empty farm would leave every promo field reading zero — the
+        // exact state the arming exists to escape.
+        address[3] memory actors = [PHLIMBO_ACTOR_1, PHLIMBO_ACTOR_2, PHLIMBO_ACTOR_3];
+        uint256 total = PHLIMBO_LOCAL_STAKE * actors.length;
+        phUSD.setMinter(deployer, true);
+        phUSD.mint(deployer, total);
+        IERC20(address(phUSD)).approve(address(v3), total);
+        v3.setMigrator(deployer);
+        for (uint256 i = 0; i < actors.length; i++) {
+            v3.stake(PHLIMBO_LOCAL_STAKE, actors[i]);
+        }
+        // Stand the seeding grant down. Read back rather than fire-and-forget: a farm left with a
+        // live migrator is a farm where one address can move anybody's position.
+        v3.setMigrator(address(0));
+        require(v3.migrator() == address(0), "PhlimboV3 seeding migrator was not stood down");
+        require(v3.totalStaked() == total, "PhlimboV3 seeding did not land the full stake");
+        console.log("  seeded 3 local stakers; PhlimboV3 totalStaked:", v3.totalStaked());
+
+        // ---- 6. LOCAL ONLY: arm a Kendu promotion. NO MAINNET COUNTERPART. ----
+        // SCRIPT-AUDIT RUN-26, L-03: the CALL SITE is gated, the helper is not. Both legs assert,
+        // so neither is a silent no-op.
         if (armKenduPromo) {
             _armLocalKenduPromotion(deployer, v3);
         } else {
@@ -2616,10 +2341,10 @@ contract DeployMocks is Script {
     ///      calls `startPromotion` nowhere, and if this helper ever grows one, that is a new
     ///      owner decision and a new story, not a port of this code.
     ///
-    ///      Runs while V3 already holds the migrated stake, so `accPromoPerShare` accrues against
-    ///      real positions from the first block. The migrated users' `promoDebt` was set against
+    ///      Runs after the three seed stakes above, so `accPromoPerShare` accrues against real
+    ///      positions from the first block. Those stakers' `promoDebt` was set against
     ///      `accPromoPerShare == 0` at stake time, so they accrue from zero with no retroactive
-    ///      credit — the same shape a post-cutover promotion would have on mainnet.
+    ///      credit — the same shape a promotion armed after launch would have on mainnet.
     function _armLocalKenduPromotion(address deployer, PhlimboV3 v3) internal {
         // `startPromotion` pulls via transferFrom, so the owner must hold and approve first.
         // MockKendu's `mint` is permissionless (local mock), so no minter grant is needed.
@@ -2643,131 +2368,19 @@ contract DeployMocks is Script {
         console.log("    promoRewardPerSecond (PRECISION-scaled):", v3.promoRewardPerSecond());
     }
 
-    /// @dev Steps 6-14 of the cutover. Split out of `_rehearsePhlimboV3Cutover` purely to stay
-    ///      under the stack-depth ceiling, matching how story 073 split its staker rehearsal.
-    function _runPhlimboV2ToV3Migration(PhlimboV3 v3, address v2Reward, uint256 preMigrationTotal) internal {
-        // ---- 6. Deploy MigratorV2V3. Transient: deliberately NEVER `_trackDeployment`d. ----
-        // It gets no address key for the same reason mainnet gives it none and story 073 gave
-        // the three `NFTStakerMigrator`s none — a one-shot orchestrator is not UI surface.
-        //
-        // NO phUSD mint role goes to the migrator, unlike its V1->V2 predecessor: V2 itself mints
-        // the pending phUSD rewards during `withdraw` (MigratorV2V3.sol:54-56).
-        MigratorV2V3 migrator = new MigratorV2V3(address(phlimbo), address(v3), address(phUSD), v2Reward);
-        console.log("  MigratorV2V3 (transient, untracked) deployed at:", address(migrator));
-
-        // ---- 7. BOTH sides of the migrator pair, then read BOTH back. ----
-        // A HALF-MET PAIR IS THE WHOLE POINT OF THIS REHEARSAL. With only one side wired, every
-        // per-user body reverts "Not authorized" inside the try/catch, `migrate` emits
-        // UserMigrationSkipped for all of them, the pass COMPLETES, and nothing reverts —
-        // the cutover reports success having moved nobody (MigratorV2V3.sol:66-71).
-        phlimbo.setMigrator(address(migrator));
-        v3.setMigrator(address(migrator));
-        require(phlimbo.migrator() == address(migrator), "PhlimboV2.setMigrator did not land");
-        require(v3.migrator() == address(migrator), "PhlimboV3.setMigrator did not land");
-        console.log("  migrator role set on BOTH V2 and V3, both read back");
-
-        // ---- 8. Seed. ----
-        // The migration cannot run against a paused V2 and would not fail loudly if it did:
-        // `withdraw` is `whenNotPaused`, so a paused V2 surfaces as a pass full of
-        // "Pausable: paused" skips that still reports success.
-        require(!phlimbo.paused(), "PhlimboV2 is PAUSED - every user would be silently SKIPPED");
-        address[] memory users = new address[](3);
-        users[0] = PHLIMBO_ACTOR_1;
-        users[1] = PHLIMBO_ACTOR_2;
-        users[2] = PHLIMBO_ACTOR_3;
-        migrator.seedUsers(users);
-
-        // ---- 9. Migrate in chunks until the cursor terminates at -1. ----
-        // Bounded loop: `migrate` always advances the cursor by at least one per iteration (a
-        // reverting or dust position is skipped, not retried), so `users.length` passes is a
-        // hard upper bound and this cannot spin.
-        for (uint256 i = 0; i < users.length && migrator.migrateIterator() >= 0; i++) {
-            migrator.migrate(PHLIMBO_MIGRATE_CHUNK);
-            console.log("  migrate pass done; V3 totalStaked now:", v3.totalStaked());
-        }
-        require(migrator.migrateIterator() == -1, "migration pass did not complete");
-
-        // ---- 10. Stake conservation. `>=`, not `==`. ----
-        // V3 may legitimately hold MORE than the baseline (a direct stake between the baseline
-        // read and here); it may never hold less, which is the failure that matters.
-        require(
-            v3.totalStaked() >= preMigrationTotal,
-            "CONSERVATION FAILED: PhlimboV3.totalStaked is below the pre-migration PhlimboV2 baseline"
-        );
-        console.log("  stake conserved into V3:", v3.totalStaked());
-
-        // ---- 11. Wind V2 down. An APY of 0, NOT a pause. TWO-STEP, like every APY set. ----
-        // Pausing V2 would trap the late stakers this wind-down is designed to let out.
-        _setDesiredAPYTwoStep(IPhlimboAPYLike(address(phlimbo)), 0, "PhlimboV2");
-
-        // ---- 12. Revoke the migrator role now the pass is done. ----
-        phlimbo.setMigrator(address(0));
-        require(phlimbo.migrator() == address(0), "PhlimboV2 migrator revoke did not land");
-        console.log("  PhlimboV2.setMigrator(0) - migrator role revoked");
-
-        // ---- 13. THE COMPLETENESS GATE. ----
-        // Mainnet fails the entire cutover here rather than downgrading to a skip-the-revoke
-        // branch, and so does the rehearsal: locally every seeded position is well above
-        // MINIMUM_STAKE and freshly created, so a non-zero residue can only mean the wiring or
-        // the migrator itself is broken — exactly what this run exists to detect BEFORE mainnet.
-        require(
-            phlimbo.totalStaked() == 0,
-            "REHEARSAL INCOMPLETE: PhlimboV2 still holds stake after the migration passes - read the UserMigrationSkipped reasons; do NOT relax this gate"
-        );
-        console.log("  completeness gate: PhlimboV2.totalStaked() == 0");
-
-        // ---- 14. Revoke V2's phUSD mint authority. AFTER 11 and AFTER 13, never before. ----
-        // Safe only because of those two: with totalStaked == 0 no position's `_claimRewards` can
-        // reach V2's BARE, REVERTING `phUSD.mint` (PhlimboV2.sol:495), and with desiredAPYBps == 0
-        // a post-cutover staker accrues zero pending phUSD and can still exit cleanly.
-        phUSD.setMinter(address(phlimbo), false);
-        console.log("  phUSD.setMinter(PhlimboV2, false) - mint authority REVOKED");
-
-        console.log("  Cutover rehearsal complete. V2 wound down and mint-revoked; NOT paused.");
-    }
-
-    /// @dev Creates the multi-user PhlimboV2 position the migration moves. This is the local
-    ///      stand-in for mainnet's live user base, which a single-key broadcast script cannot
-    ///      otherwise produce.
+    /// @dev `setDesiredAPY` is a two-step preview -> commit (PhlimboV3.sol:261-280): the first
+    ///      call only records `pendingAPYBps`; the value commits on a SECOND call with the
+    ///      IDENTICAL bps within 100 blocks. A script that calls it once has silently done nothing.
     ///
-    ///      `stake(amount, user)` is `msg.sender == user || msg.sender == migrator`, so the
-    ///      deployer is TEMPORARILY installed as V2's migrator to stake on the actors' behalf and
-    ///      is replaced by the real `MigratorV2V3` in `_runPhlimboV2ToV3Migration` — the same
-    ///      idiom story 073 used to seed its V1 depletion staker. The resulting on-chain state
-    ///      (three non-zero `userInfo` entries) is identical to three separately-signed stakes.
-    /// @return preMigrationTotal `phlimbo.totalStaked()` immediately after seeding.
-    function _seedPhlimboV2Position(address deployer) internal returns (uint256 preMigrationTotal) {
-        address[3] memory actors = [PHLIMBO_ACTOR_1, PHLIMBO_ACTOR_2, PHLIMBO_ACTOR_3];
-        uint256 total = PHLIMBO_REHEARSAL_STAKE * actors.length;
-
-        // The deployer is authorised as a phUSD minter for local dev so the rehearsal mints its
-        // own stake budget rather than competing with the seeded protocol balances.
-        phUSD.setMinter(deployer, true);
-        phUSD.mint(deployer, total);
-        phUSD.approve(address(phlimbo), total);
-
-        phlimbo.setMigrator(deployer);
-        for (uint256 i = 0; i < actors.length; i++) {
-            phlimbo.stake(PHLIMBO_REHEARSAL_STAKE, actors[i]);
-        }
-
-        preMigrationTotal = phlimbo.totalStaked();
-        require(preMigrationTotal == total, "rehearsal: V2 seeding did not land the full stake");
-    }
-
-    /// @dev `setDesiredAPY` is a two-step preview -> commit on BOTH V2 and V3
-    ///      (PhlimboV3.sol:261-280, PhlimboV2.sol:172-190): the first call only records
-    ///      `pendingAPYBps`; the value commits on a SECOND call with the IDENTICAL bps within 100
-    ///      blocks. A script that calls it once has silently done nothing.
-    ///
-    ///      Both a value read-back AND an `apySetInProgress` read-back, because the value alone
-    ///      is not enough: setting an APY to the value it already holds (the local case — V2 sits
-    ///      at 0 and V3 mirrors it) leaves `desiredAPYBps` correct after the PREVIEW call alone,
-    ///      so a value-only assertion would pass on a half-done set. Only the commit branch
+    ///      Both a value read-back AND an `apySetInProgress` read-back, because the value alone is
+    ///      not enough: setting an APY to the value it already holds (the local case — V3 is
+    ///      constructed at 0 and set to 0) leaves `desiredAPYBps` correct after the PREVIEW call
+    ///      alone, so a value-only assertion would pass on a half-done set. Only the commit branch
     ///      clears the latch.
     ///
-    ///      Takes `IPhlimboAPYLike` rather than a concrete type because V2 and V3 are unrelated
-    ///      Solidity types with identical admin surfaces — the same shim mainnet's Phase 4e uses.
+    ///      Takes `IPhlimboAPYLike` rather than the concrete type: the shim outlived the V2/V3
+    ///      cutover that needed one call site to drive both generations, and is kept because the
+    ///      two read-backs belong with the setter rather than at the call site.
     function _setDesiredAPYTwoStep(IPhlimboAPYLike p, uint256 bps, string memory label) internal {
         p.setDesiredAPY(bps); // preview
         vm.roll(block.number + 1);
@@ -2777,197 +2390,27 @@ contract DeployMocks is Script {
         console.log(string.concat("  ", label, " desired APY committed (bps):"), bps);
     }
 
-    // =====================================================================
-    // Story 073: V1 -> migrator -> V2 depletion-staker migration rehearsal
-    // =====================================================================
-
-    /// @dev Deploys the V1 Uniboost staker exactly as before, seeds it with a real multi-user
-    ///      staked position, then runs the COMPLETE `NFTStakerMigrator` sequence so the local chain
-    ///      ends on `NFTStakerDepletionV2` with migrated balances. This exists because story 072's
-    ///      mainnet Phase 6 is its riskiest, least-exercised phase and this is the only place it
-    ///      can be dry-run for free.
-    /// @return v2 The `NFTStakerDepletionV2` the position was migrated into. This is what gets
-    ///         tracked under the existing `UniboostStaker*` key; the V1 staker and the migrator are
-    ///         transient rehearsal artifacts and are never tracked (mirroring story 072's
-    ///         "no interface keys for migrators" rule).
-    function _rehearseStakerMigration(
-        Uniboost dispatcher,
-        UniboostMintDebtHook hook,
-        address deployer,
-        string memory label
-    ) internal returns (NFTStakerDepletionV2 v2) {
-        uint256 idx = nftMinterV2.dispatcherToIndex(address(dispatcher));
-        require(idx != 0, "Uniboost dispatcher not registered");
-
-        // ---- 1. V1, exactly as deployed today ----
-        NFTStakerDepletion v1 = _deployUniboostStaker(dispatcher, hook, deployer);
-
-        // ---- 2. Real reward budget + a real multi-user staked position ----
-        uint256 preMigrationTotal = _seedV1Position(v1, idx, deployer);
-        console.log(string.concat("[", label, "] V1 rehearsal staked total:"), preMigrationTotal);
-
-        // ---- 3. V2, IDENTICAL constructor args ----
-        v2 = new NFTStakerDepletionV2(
-            IERC1155(address(nftMinterV2)), idx, IERC20(address(phUSD)), deployer, INFTSupply(address(nftMinterV2)), idx
-        );
-        v2.setDepletionWindow(12);
-        v2.setPauser(address(pauser));
-        pauser.register(address(v2));
-
-        // ---- 4-9. The migration itself ----
-        _runStakerMigration(v1, v2, hook, idx, deployer);
-
-        // ---- 10. Post-conditions ----
-        require(v1.totalStaked() == 0, "rehearsal: V1 still holds stake");
-        require(v2.totalStaked() == preMigrationTotal, "rehearsal: V2 total != pre-migration total");
-        require(phUSD.balanceOf(address(v2)) > 0, "rehearsal: V2 has no reward budget");
-        console.log(string.concat("[", label, "] migration rehearsal OK -> V2 at"), address(v2));
-    }
-
-    /// @dev Mints three NFTs of `idx` to the deployer and credits them to three DISTINCT mock
-    ///      actors, so `migrator.migrate(users)` operates on a genuine multi-user list.
+    /// @dev Deploys the uniboost staker (`NFTStakerDepletionV2`), wires it to the dispatcher hook,
+    ///      sets the hook recipient to the staker, configures the depletion window, and registers
+    ///      with the local Pauser.
     ///
-    ///      `depositFor` is `onlyMigrator`, so the deployer is TEMPORARILY installed as the
-    ///      migrator for the seeding and replaced by the real `NFTStakerMigrator` in
-    ///      `_runStakerMigration`. This is the local stand-in for three separately-signed user
-    ///      `stake()` calls, which a single-key broadcast script cannot produce; the resulting
-    ///      on-chain state (three non-zero `userInfo` entries) is identical.
-    /// @return preMigrationTotal `v1.totalStaked()` immediately after seeding.
-    function _seedV1Position(NFTStakerDepletion v1, uint256 idx, address deployer)
-        internal
-        returns (uint256 preMigrationTotal)
-    {
-        // Reward budget. The deployer is authorised as a phUSD minter for local dev so the
-        // rehearsal does not have to compete with the seeded protocol balances.
-        phUSD.setMinter(deployer, true);
-        phUSD.mint(deployer, REHEARSAL_STAKER_BUDGET);
-        phUSD.approve(address(v1), REHEARSAL_STAKER_BUDGET);
-        v1.topUp(REHEARSAL_STAKER_BUDGET);
-
-        // Mint three NFTs of this dispatcher's id. Each mint routes prime USDC through the
-        // Uniboost donation branch, so this doubles as a live smoke test that setNudgeStreamer
-        // landed (an unwired streamer reverts the mint outright).
-        uint256 budget = nftMinterV2.getPrice(idx) * 6; // generous: price grows 0.1% per mint
-        rewardToken.mint(deployer, budget);
-        rewardToken.approve(address(nftMinterV2), budget);
-        nftMinterV2.mint(idx, deployer);
-        nftMinterV2.mint(idx, deployer);
-        nftMinterV2.mint(idx, deployer);
-
-        address[3] memory actors = [REHEARSAL_ACTOR_1, REHEARSAL_ACTOR_2, REHEARSAL_ACTOR_3];
-        nftMinterV2.setApprovalForAll(address(v1), true);
-        v1.setMigrator(deployer);
-        for (uint256 i = 0; i < 3; i++) {
-            v1.depositFor(actors[i], 1);
-        }
-        nftMinterV2.setApprovalForAll(address(v1), false);
-
-        preMigrationTotal = v1.totalStaked();
-        require(preMigrationTotal == 3, "rehearsal: expected 3 staked units on V1");
-    }
-
-    /// @dev Steps 4-9 of the rehearsal. Split out of `_rehearseStakerMigration` purely to stay
-    ///      under the stack-depth ceiling.
+    ///      V2 DIRECTLY, no V1 first. Story 073 used to deploy `NFTStakerDepletion` (V1) here, seed
+    ///      it with three positions and drain it through an `NFTStakerMigrator`, so that mainnet's
+    ///      riskiest phase could be dry-run before it shipped. That migration has since executed on
+    ///      mainnet, so the rehearsal was deploying a superseded staker purely to migrate off it
+    ///      again. Constructor arity and admin surface are identical between the two generations,
+    ///      so nothing else about this helper changed.
     ///
-    ///      TWO DEVIATIONS FROM THE STORY'S LITERAL STEP ORDER, both forced by the contracts and
-    ///      both recorded in the story's Autonomous Decisions section:
-    ///
-    ///      (a) `v1.pause()` is `onlyPauser`, and V1's pauser is the GLOBAL `Pauser`, whose
-    ///          `pause()` burns EYE and pauses every registered contract. A global pause is not an
-    ///          acceptable end state for a dev chain, so V1's pauser is repointed to the deployer
-    ///          and V1 is unregistered from the global Pauser first. The unregister is mandatory,
-    ///          not tidiness: leaving a contract registered whose `pauser` is no longer the Pauser
-    ///          would make a later global `Pauser.unpause()` revert for everyone.
-    ///
-    ///      (b) The budget move happens AFTER `initiateMigration`, and moves strictly less than the
-    ///          full balance. `rescueERC20` requires the post-transfer balance still covers
-    ///          `committedDebt`, and `_exitPosition` -> `_safePayTo` requires the balance to cover
-    ///          each user's frozen pending. Rescuing the FULL balance (the story's literal step 7)
-    ///          therefore reverts as soon as any accrual exists — which it always does, since
-    ///          `--slow` puts seconds between the seeding and the migration.
-    ///
-    ///          ORDERING IS THE FINDING THE REHEARSAL EXISTS TO PRODUCE: settle and freeze
-    ///          (`initiateMigration`) BEFORE moving the budget, so `committedDebt` is final rather
-    ///          than still growing under the transfer. Story 072's mainnet Phase 6 must apply that
-    ///          correction.
-    ///
-    ///          SIZING IS NOT THE FINDING, AND IS NOT SOLVED HERE. This rehearsal moves a flat 90%
-    ///          of the seeded budget — a script-local expedient forced by forge's simulate-then-
-    ///          replay model, explained at the `movable` line below. It is NOT `balance -
-    ///          committedDebt`, it is not exact, and it leaves an arbitrary 10% stranded in V1.
-    ///          Story 072 inherits the question of how much a mainnet migration should move as
-    ///          OPEN. Do not read this 90% as a validated answer; the rehearsal proves nothing
-    ///          about sizing.
-    function _runStakerMigration(
-        NFTStakerDepletion v1,
-        NFTStakerDepletionV2 v2,
-        UniboostMintDebtHook hook,
-        uint256 idx,
-        address deployer
-    ) internal {
-        NFTStakerMigrator migrator = new NFTStakerMigrator(
-            INFTStakerMigratable(address(v1)),
-            INFTStakerMigratable(address(v2)),
-            IERC1155(address(nftMinterV2)),
-            idx,
-            IERC20(address(phUSD)),
-            deployer
-        );
-
-        // BOTH sides, or the pair is half-met: V1 needs it for initiateMigration/batchMigrate,
-        // V2 needs it for depositFor.
-        v1.setMigrator(address(migrator));
-        v2.setMigrator(address(migrator));
-
-        // MANDATORY. V1's `stake` is ungated during `Migrating` (audit-20 M-05), so a
-        // permissionless stake mid-migration wedges `finalizeAndReset`'s
-        // `require(totalStaked == 0)`. V2 fixed this; V1 relies on the pause-before-migrate
-        // operational remedy. See deviation (a) above for why the pauser is repointed first.
-        v1.setPauser(deployer);
-        pauser.unregister(address(v1));
-        v1.pause();
-
-        // Settle + freeze BEFORE moving the budget — see deviation (b) above.
-        migrator.initiateMigration();
-
-        // The moved amount is a CONSTANT FRACTION of the seeded budget, deliberately NOT
-        // `balanceOf(v1) - committedDebt()`. A forge script builds its calldata during the
-        // simulation pass, where every rehearsal tx shares one block timestamp and
-        // `committedDebt` is therefore 0; the broadcast then replays that baked-in number
-        // against a `--slow` chain where seconds have elapsed and `committedDebt > 0`, and
-        // `rescueERC20` reverts "NFTStaker: rescue breaches committedDebt". Any on-chain-state-
-        // dependent amount has the same defect. 90% is safe by a wide margin: over a 12-month
-        // depletion window a few seconds of accrual is ~1e-7 of the budget, so the 10% left
-        // behind covers every departing user's frozen pending many times over.
-        uint256 movable = (REHEARSAL_STAKER_BUDGET * 90) / 100;
-        v1.rescueERC20(IERC20(address(phUSD)), deployer, movable);
-        phUSD.approve(address(v2), movable);
-        v2.topUp(movable);
-
-        address[] memory users = new address[](3);
-        users[0] = REHEARSAL_ACTOR_1;
-        users[1] = REHEARSAL_ACTOR_2;
-        users[2] = REHEARSAL_ACTOR_3;
-        migrator.migrate(users);
-
-        // Repoint the mint-debt hook at V2 and complete the two-sided wiring, or every subsequent
-        // dispatch would keep funding the abandoned V1.
-        hook.setRecipient(address(v2));
-        v2.setDispatcherHook(IUniboostMintDebtHook(address(hook)));
-    }
-
-    /// @dev Deploys the uniboost staker (NFTStakerDepletion), wires it to the dispatcher hook, sets
-    ///      the hook recipient to the staker, configures the depletion window, and registers with
-    ///      the local Pauser. NFTStakerDepletion has NO setTargetAPY (depletion-budget model);
-    ///      the window is owner-set and the per-second rate is budget/windowSeconds. stakedId ==
-    ///      dispatcherIndex (NFTMinterV2 mints tokenId == index); resolve the index dynamically.
+    ///      There is NO setTargetAPY (depletion-budget model); the window is owner-set and the
+    ///      per-second rate is budget/windowSeconds. stakedId == dispatcherIndex (NFTMinterV2 mints
+    ///      tokenId == index); resolve the index dynamically.
     function _deployUniboostStaker(Uniboost dispatcher, UniboostMintDebtHook hook, address deployer)
         internal
-        returns (NFTStakerDepletion staker)
+        returns (NFTStakerDepletionV2 staker)
     {
         uint256 idx = nftMinterV2.dispatcherToIndex(address(dispatcher));
         require(idx != 0, "Uniboost dispatcher not registered");
-        staker = new NFTStakerDepletion(
+        staker = new NFTStakerDepletionV2(
             IERC1155(address(nftMinterV2)), idx, IERC20(address(phUSD)), deployer, INFTSupply(address(nftMinterV2)), idx
         );
         staker.setDispatcherHook(IUniboostMintDebtHook(address(hook)));
