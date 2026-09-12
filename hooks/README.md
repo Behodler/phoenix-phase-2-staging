@@ -1,6 +1,6 @@
 # @behodler/phase2-wagmi-hooks
 
-Type-safe Wagmi hooks for Phoenix Phase 2 protocol contracts including MockPhUSD, MockRewardToken, MockYieldStrategy, PhusdStableMinter, and PhlimboEA.
+Type-safe Wagmi hooks for Phoenix Phase 2 protocol contracts including MockPhUSD, MockRewardToken, MockKendu, PhusdStableMinter, PhlimboV3, StableStakerV2 and Antimatter.
 
 ## Installation
 

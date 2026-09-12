@@ -5,6 +5,48 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-09-12
+
+Story-080 plus a scope cut. Two things happened at once: the stable farm moved from
+`StableStaker` (now the frozen V1 snapshot) to `StableStakerV2`, which pays **Antimatter**
+instead of phUSD, and the include list in `wagmi.config.ts` was re-scoped onto a single rule —
+an ABI ships only if `script/DeployMocks.s.sol` (the `npm run dev` stack) actually deploys an
+instance of that type. **This release removes ABI exports.** Every removal is a generation whose
+mainnet cutover has already executed.
+
+### Removed (breaking)
+- `stableStakerAbi` — the farm it described no longer exists as a deployable type. There is no
+  `out/StableStaker.sol/` artifact any more, so this export had been a frozen leftover carrying
+  the V1 constructor shape since the stable-staker repo split. Replaced by `stableStakerV2Abi`.
+- `phlimboV2Abi` and `migratorV2V3Abi` — the V2 → V3 cutover and its one-shot migration have run.
+- `nftStakerDepletionAbi` and `nftStakerMigratorAbi` — the depletion-staker migration to V2 has run.
+- `depositViewAbi` and `depositPageViewAbi` — both were typed against the V1/V2-shaped
+  `IPhlimbo` and went with `PhlimboV2`. Use `depositPageViewV3Abi`, resolved through `ViewRouter`.
+- `iPhlimboAbi` — same 3-tuple `userInfo` shape, which silently mis-decodes PhlimboV3's 4-tuple.
+  Use `phlimboV3Abi`.
+
+`nudgeRatchetDelayReleaseAbi` is also gone from the config, but it was never actually emitted:
+the artifact it named had already stopped resolving, and `wagmi generate` drops an unresolved
+include **silently**. Nothing depended on it.
+
+### Added
+- `antimatterAbi` — the ERC20 reward token StableStakerV2 pays.
+- `stableStakerV2Abi` — replaces `stableStakerAbi`. Not a rename: the reward leg changed token
+  and the surface grew. Gone are `phUSD`, `phusdPerDay`, `phusdPerSecond` and `accPhusdPerShare`;
+  in their place are `antimatter`, `antimatterPerDay`, `antimatterPerSecond` and
+  `accAntimatterPerShare`, alongside a claim gate (`claimEnabled` / `setClaimEnabled`, closed by
+  default, so accrued rewards bank rather than pay until an owner opens it), auto-annihilation
+  (`autoAnnihilate`, `autoAnnihilateAvailable`, `antimatterBurned`), and phUSD-mint accounting
+  retained on the side (`phUSDMinted`, `phUSDPaid`, `phUSDMintAvailable`, `phUSDMinterContract`).
+  New events: `AutoAnnihilated`, `ClaimEnabledSet`, `PrincipalDivergence`, `ProtocolPrincipalSwept`.
+- `nudgeRatchetMintDebtHookAbi` — the mint-debt hook installed on the index-7 `NudgeRatchet`.
+  It has had a `NudgeRatchetMintDebtHook` address key for some time; only the ABI was missing.
+
+### Unchanged
+No retained ABI's content changed in this release. `StableStakerV1` and `CrossVersionMigrator`
+are still deployed by `DeployMocks` — purely as the source and the vehicle of the V1 → V2 cutover
+rehearsal — but both are untracked, get no `ContractAddresses` key, and are therefore not exported.
+
 ## [0.14.0] - 2026-08-07
 
 Story-078. The read side of the PhlimboV3 cutover. **This is the first published release since
