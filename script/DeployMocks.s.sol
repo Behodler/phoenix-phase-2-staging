@@ -1114,6 +1114,14 @@ contract DeployMocks is Script {
             // on each skimSurplus, so 90% flows downstream. Integer percent (require <= 100); the
             // setter lives on the strategy, not the staker (story 053).
             ssStrats[i].setSetAsideBuffer(address(stableStaker), 10);
+            // A nonzero buffer with no recipient makes every skimSurplus on this strategy revert
+            // "AYieldStrategy: setAsideBufferRecipient not set", which bricks the yield funnel.
+            // Mainnet points the recipient at the staker (MigrateSaga2Deploy asserts it); dev must match.
+            ssStrats[i].setSetAsideBufferRecipient(address(stableStaker));
+            require(
+                ssStrats[i].setAsideBufferRecipient() == address(stableStaker),
+                "DeployMocks: setAsideBufferRecipient not wired to StableStaker"
+            );
             uint256 dailyRate = ssTokens[i] == address(rewardToken) ? 5e18 : 10e18;
             stableStaker.phUSDPerDay(ssTokens[i], dailyRate);
             console.log("StableStaker pool wired (token / phUSD-per-day):", ssTokens[i], dailyRate);
@@ -1895,6 +1903,13 @@ contract DeployMocks is Script {
             ssStrats[i].setClient(address(stableStakerV2), true); // mandatory two-sided wiring
             stableStakerV2.setYieldStrategy(ssTokens[i], IYieldStrategy(address(ssStrats[i])));
             ssStrats[i].setSetAsideBuffer(address(stableStakerV2), 10);
+            // The recipient is GLOBAL per strategy, not per client. Once V2 carries the buffer the
+            // set-aside must land on V2, because V1 is drained by the cutover and left inert.
+            ssStrats[i].setSetAsideBufferRecipient(address(stableStakerV2));
+            require(
+                ssStrats[i].setAsideBufferRecipient() == address(stableStakerV2),
+                "story-080: setAsideBufferRecipient not repointed to StableStakerV2"
+            );
             // MIRRORS V1 by construction rather than by a copied table: the same conditional the
             // V1 block above uses, so "same rate as V1" stays true if that block is ever retuned.
             // Units are 18-decimal REWARD-token wei per day regardless of the staked token's

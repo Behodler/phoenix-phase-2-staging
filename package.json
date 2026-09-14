@@ -4,7 +4,7 @@
   "description": "Local deployment orchestration for Phoenix Phase 2 contracts",
   "scripts": {
     "//local-deploy": "Story 003 — local Anvil deployment orchestration",
-    "start:anvil": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-time 2",
+    "start:anvil": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-time 5",
     "clean:local": "rm -rf broadcast/*/31337 server/deployments/progress.31337.json server/deployments/local.json",
     "//deploy-local-forge": "Story 081 — the bare forge leg of deploy:local, split out so dev-local.sh can run clean:local ONCE before anvil starts. Cleaning after anvil is up deletes the broadcast/*/31337 directory the very next forge script writes into. deploy:local keeps its clean+deploy meaning for standalone callers (verify-stable-staker.sh)",
     "deploy:local:forge": "forge script script/DeployMocks.s.sol:DeployMocks --rpc-url http://localhost:8545 --broadcast --slow --gas-estimate-multiplier 300",
