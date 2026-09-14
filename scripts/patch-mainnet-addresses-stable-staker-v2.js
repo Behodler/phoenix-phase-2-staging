@@ -135,7 +135,7 @@ function run() {
         /^([ \t]*)\/\/ Neither StableStakerV2 nor Antimatter is deployed on mainnet yet;[^\n]*\n(?:[ \t]*\/\/[^\n]*\n)*?(?=[ \t]*StableStakerV2:)/m,
         (m, indent) =>
             `${indent}// Story 082: StableStakerV2 and Antimatter deployed by the V1 -> V2 cutover and patched\n` +
-            `${indent}// from progress.stable-staker-v2-cutover.1.json. V1 is drained (every pool Migrating, paused,\n` +
+            `${indent}// from progress.stable-staker-v2-cutover.1.json. V1 is drained (every pool Migrating,\n` +
             `${indent}// phUSD mint revoked); the transient CrossVersionMigrator deliberately has no key.\n`
     );
 
