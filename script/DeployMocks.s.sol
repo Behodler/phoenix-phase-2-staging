@@ -1590,7 +1590,7 @@ contract DeployMocks is Script {
         console.log("StableStakerV2: 10% set-aside buffer on all 3 pools (DOLA, USDC, USDe)");
         console.log("");
         console.log("StableStakerV2 Cutover (story 080):");
-        console.log("  - Antimatter is the reward token; phUSD is minted only to cover an autoAnnihilate shortfall");
+        console.log("  - Antimatter is the reward token; Antimatter mints phUSD on annihilate, V2 only for shortfall cover");
         console.log("  - antimatterPerDay mirrors V1: DOLA 10/day, USDC 5/day, USDe 10/day");
         console.log("  - claimEnabled left FALSE - the reward path under test is autoAnnihilate");
         console.log("  - V1 deployed but UNTRACKED, seeded with 12 stakers per pool, then drained");
@@ -1787,6 +1787,7 @@ contract DeployMocks is Script {
         // cover, without which that reward path reverts.
         _requireLiveMinter(address(stableStaker), false, "StableStakerV1 (retired at the cutover)");
         _requireLiveMinter(address(stableStakerV2), true, "StableStakerV2");
+        _requireLiveMinter(address(antimatter), true, "Antimatter");
         _requireLiveMinter(address(balancerPoolerHook), true, "BalancerPoolerMintDebtHook");
         _requireLiveMinter(address(nudgeRatchetHook), true, "NudgeRatchetMintDebtHook");
         _requireLiveMinter(address(uniboostHookEYE), true, "UniboostHookEYE");
@@ -1794,7 +1795,7 @@ contract DeployMocks is Script {
         _requireLiveMinter(address(uniboostHookFLX), true, "UniboostHookFLX");
 
         console.log(
-            "  end-state phUSD ACL asserted: deployer + StableStakerV1 OUT, PhlimboV3 + minter + StableStakerV2 + 5 hooks IN"
+            "  end-state phUSD ACL asserted: deployer + StableStakerV1 OUT, PhlimboV3 + minter + StableStakerV2 + Antimatter + 5 hooks IN"
         );
     }
 
@@ -1851,6 +1852,8 @@ contract DeployMocks is Script {
     ///      BOTH mint rights are granted and they are NOT interchangeable. Antimatter is the
     ///      reward token V2 pays (`setApprovedMinter`). phUSD is NOT a second reward: V2 mints it
     ///      only to cover an annihilation shortfall inside `autoAnnihilate` (`phUSD.setMinter`).
+    ///      Antimatter itself also receives a phUSD mint right, because `annihilate` mints the
+    ///      antimatter half of the payout directly.
     function _deployAntimatterAndStableStakerV2(address deployer) internal {
         console.log("\n=== Phase 6.5a: Deploying Antimatter + StableStakerV2 (story 080) ===");
 
@@ -1893,6 +1896,14 @@ contract DeployMocks is Script {
             "story-080: StableStakerV2 cannot mint phUSD (autoAnnihilate shortfall cover is dead)"
         );
         console.log("  phUSD.setMinter(StableStakerV2) - VERIFIED via phUSDMintAvailable()");
+
+        // ---- 7. The ANNIHILATION grant. `Antimatter.annihilate` pays its antimatter half with
+        //         `_phUSD.mint(recipient, amount)`, so without this grant every annihilation (and
+        //         therefore V2's `autoAnnihilate` reward path) reverts. Mirrors Phase 5 of
+        //         CutoverStableStakerV2Mainnet.s.sol. Verified at the CURRENT mintVersion. ----
+        phUSD.setMinter(address(antimatter), true);
+        _requireLiveMinter(address(antimatter), true, "Antimatter (post-grant)");
+        console.log("  phUSD.setMinter(Antimatter) - VERIFIED at current mintVersion");
 
         // ---- 8/9. The three pools, at V1's rates. ----
         address[3] memory ssTokens = [address(dola), address(rewardToken), address(usde)];
