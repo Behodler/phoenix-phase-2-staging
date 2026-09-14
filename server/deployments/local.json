@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-09-12T20:30:14.295Z",
+  "extractedAt": "2026-09-14T10:02:22.052Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -369,24 +369,24 @@
       "configGas": 0
     },
     "Antimatter": {
-      "address": "0xcD0048A5628B37B8f743cC2FeA18817A29e97270",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 1999847,
-      "configGas": 0
-    },
-    "StableStakerV2": {
       "address": "0x942ED2fa862887Dc698682cc6a86355324F0f01e",
       "deployed": true,
       "configured": true,
-      "deployGas": 4058871,
+      "deployGas": 1999883,
+      "configGas": 0
+    },
+    "StableStakerV2": {
+      "address": "0xa722bdA6968F50778B973Ae2701e90200C564B49",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 4058875,
       "configGas": 0
     },
     "ViewRouter": {
-      "address": "0xA3307BF348ACC4bEDdd67CCA2f7F0c4349d347Db",
+      "address": "0x103A3b128991781EE2c8db0454cA99d67b257923",
       "deployed": true,
       "configured": true,
-      "deployGas": 516961,
+      "deployGas": 516962,
       "configGas": 0
     }
   }

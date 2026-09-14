@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-09-12T20:30:14.405Z
+// Generated from local.json on 2026-09-14T10:02:22.155Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -56,9 +56,9 @@ export const anvilAddresses: ContractAddresses = {
   NudgeRatchetMintDebtHook: "0x9BcC604D4381C5b0Ad12Ff3Bf32bEdE063416BC7",
   RatchetNFTStaker: "0x38A70c040CA5F5439ad52d0e821063b0EC0B52b6",
   RatchetBatchNFTMinter: "0x56D13Eb21a625EdA8438F55DF2C31dC3632034f5",
-  Antimatter: "0xcD0048A5628B37B8f743cC2FeA18817A29e97270",
-  StableStakerV2: "0x942ED2fa862887Dc698682cc6a86355324F0f01e",
-  ViewRouter: "0xA3307BF348ACC4bEDdd67CCA2f7F0c4349d347Db",
+  Antimatter: "0x942ED2fa862887Dc698682cc6a86355324F0f01e",
+  StableStakerV2: "0xa722bdA6968F50778B973Ae2701e90200C564B49",
+  ViewRouter: "0x103A3b128991781EE2c8db0454cA99d67b257923",
 };
 
 export type AnvilContractName = keyof ContractAddresses;
