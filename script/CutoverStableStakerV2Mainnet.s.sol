@@ -40,8 +40,9 @@ import {
  *      (see the Phase 5 NatSpec for why the third grant exists), two-sided minter delta.
  *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus, initiate, plan
  *      (dust predicate), batch-migrate non-dust, allow-list stragglers under a cap, post-conditions.
- *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 pauser -> Pauser
- *      (V1 stays paused), V2 + Antimatter pauser -> Pauser and registered, V2 unpaused.
+ *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 pauser -> Pauser and
+ *      V1 unpaused (inert; a paused registered contract bricks Pauser.pause()), V2 + Antimatter
+ *      pauser -> Pauser and registered, V2 unpaused.
  *   8  Wiring assertions (both modes).
  *   -  PREVIEW_MODE only: smoke tests (Antimatter mint-revocation proof, V2 stake/withdraw on every
  *      pool, autoAnnihilate on DOLA). Prank-only, never broadcast.
@@ -262,9 +263,14 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
     /// @dev Stakes into V1 revert once paused, so no new position (and no new dust) can enter during
     ///      the window. `initiateMigration` / `batchMigrate` carry no `whenNotPaused`, so the pause does
-    ///      not obstruct the cutover. V1 stays paused afterwards; only its pauser is handed back.
+    ///      not obstruct the cutover. Phase 7 hands the pauser back and UNPAUSES V1 (see there), so a
+    ///      finalized cutover (V2 pauser == Pauser) must not be re-paused by a verification/resume leg.
     function _phase1_pauseV1() internal {
         console.log("\n=== Phase 1: pause V1 ===");
+        if (address(v2) != address(0) && v2.pauser() == PAUSER) {
+            console.log("  cutover already finalized (V2 pauser == Pauser) - V1 pause window skipped");
+            return;
+        }
         if (IPausableLike(STABLE_STAKER_V1).paused()) {
             console.log("  V1 already paused - skipped");
             return;
@@ -531,12 +537,21 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
         require(!_canMintPhUSD(STABLE_STAKER_V1), "Phase7: V1 phUSD mint not revoked");
 
-        // V1 stays PAUSED (every pool is Migrating, so it is inert either way; the pause is defence in
-        // depth). Only the pauser role goes back to the global Pauser, where V1 is already registered.
+        // V1 pauser goes back to the global Pauser (where V1 is already registered) and V1 is UNPAUSED.
+        // It must not be left paused: `Pauser.pause()` loops `pause()` over every registered contract
+        // with no try/catch, and OZ `_pause` reverts on an already-paused contract, so a paused
+        // registered V1 would brick the protocol-wide emergency pause. Unpaused V1 is inert: every
+        // pool is Migrating, so stake / withdraw / emergencyWithdraw revert "pool not active", and
+        // claim can only mint phUSD, which was revoked above. Stragglers keep `userMigrate`, which is
+        // not pause-gated either way. Must run BEFORE V2's pauser hand-back (the finalized marker).
         if (IPausableLike(STABLE_STAKER_V1).pauser() != PAUSER) {
             IPausableLike(STABLE_STAKER_V1).setPauser(PAUSER);
         }
         require(IPausableLike(STABLE_STAKER_V1).pauser() == PAUSER, "Phase7: V1 pauser not restored");
+        if (IPausableLike(STABLE_STAKER_V1).paused()) {
+            IPausableLike(STABLE_STAKER_V1).unpause();
+        }
+        require(!IPausableLike(STABLE_STAKER_V1).paused(), "Phase7: V1 still paused - would brick Pauser.pause()");
 
         if (v2.pauser() != PAUSER) v2.setPauser(PAUSER);
         if (!IPauserRegistry(PAUSER).isRegistered(address(v2))) IPauserRegistry(PAUSER).register(address(v2));
@@ -548,7 +563,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         if (v2.paused()) v2.unpause();
         require(!v2.paused(), "Phase7: V2 still paused");
         require(!v2.claimEnabled(), "Phase7: claimEnabled must stay false");
-        console.log("  V1 pauser -> Pauser (V1 stays paused); V2 + Antimatter registered with Pauser; V2 unpaused");
+        console.log("  V1 pauser -> Pauser and V1 unpaused (inert); V2 + Antimatter registered with Pauser; V2 unpaused");
     }
 
     // =====================================================================
@@ -604,6 +619,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(v2.pauser() == PAUSER, "Phase8: V2 pauser");
         require(antimatter.pauser() == PAUSER, "Phase8: Antimatter pauser");
         require(IPausableLike(STABLE_STAKER_V1).pauser() == PAUSER, "Phase8: V1 pauser");
+        require(!IPausableLike(STABLE_STAKER_V1).paused(), "Phase8: V1 left paused (bricks Pauser.pause())");
         require(IPauserRegistry(PAUSER).isRegistered(address(v2)), "Phase8: V2 not registered with Pauser");
         require(IPauserRegistry(PAUSER).isRegistered(address(antimatter)), "Phase8: Antimatter not registered");
         require(!v2.paused(), "Phase8: V2 paused");
@@ -902,6 +918,7 @@ interface IPausableLike {
     function paused() external view returns (bool);
     function setPauser(address newPauser) external;
     function pause() external;
+    function unpause() external;
 }
 
 interface IStakerTokens {
