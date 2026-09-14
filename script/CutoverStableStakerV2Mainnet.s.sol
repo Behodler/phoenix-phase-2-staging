@@ -40,9 +40,9 @@ import {
  *      (see the Phase 5 NatSpec for why the third grant exists), two-sided minter delta.
  *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus, initiate, plan
  *      (dust predicate), batch-migrate non-dust, allow-list stragglers under a cap, post-conditions.
- *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 pauser -> Pauser and
- *      V1 unpaused (inert; a paused registered contract bricks Pauser.pause()), V2 + Antimatter
- *      pauser -> Pauser and registered, V2 unpaused.
+ *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 retired (pauser -> OWNER,
+ *      Pauser.unregister(V1), V1 left PAUSED - story 083), V2 + Antimatter pauser -> Pauser and
+ *      registered, V2 unpaused.
  *   8  Wiring assertions (both modes).
  *   -  PREVIEW_MODE only: smoke tests (Antimatter mint-revocation proof, V2 stake/withdraw on every
  *      pool, autoAnnihilate on DOLA). Prank-only, never broadcast.
@@ -105,8 +105,11 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     uint256 public constant MIGRATE_CHUNK = 25;
     /// @dev Straggler cap: summed straggler V1 principal must be < 1 cent, token-decimal aware.
     uint256 public constant STRAGGLER_CAP_CENTS = 1;
-    /// @dev Per-user absolute rounding slack (080's 2-wei floor for ERC4626 share rounding on exit + re-deposit).
-    uint256 public constant WEI_SLACK = 2;
+    /// @dev Per-user absolute rounding slack, additive to the bps bound (`_maxLossBps`). Story 083 raised it
+    ///      from 080's 2-wei floor to 1000 wei: simulated round trips (V1 exit + V2 re-deposit) lost more
+    ///      than 2 wei per user and tripped the Phase 6 post-migration assert. 1000 wei is at most $0.001
+    ///      per user even on a 6-decimal token (USDC), so the looser bound is economically negligible.
+    uint256 public constant WEI_SLACK = 1000;
     /// @dev Per-user loss bound on the 1:1 ERC4626 strategies. The story planned 0 bps, but the live
     ///      autoDOLA autopool is NOT loss-free on either leg: the planning preview (block ~25975061)
     ///      measured, per leg, autoDOLA: exit R/P = 1 - 1.70e-6, re-deposit x * (1 - 1.73e-6)
@@ -263,8 +266,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
     /// @dev Stakes into V1 revert once paused, so no new position (and no new dust) can enter during
     ///      the window. `initiateMigration` / `batchMigrate` carry no `whenNotPaused`, so the pause does
-    ///      not obstruct the cutover. Phase 7 hands the pauser back and UNPAUSES V1 (see there), so a
-    ///      finalized cutover (V2 pauser == Pauser) must not be re-paused by a verification/resume leg.
+    ///      not obstruct the cutover. Phase 7 retires V1: its pauser stays OWNER, it is unregistered from
+    ///      the Pauser and it is LEFT PAUSED (story 083). On a resumed or verification leg V1 is therefore
+    ///      already paused (or the cutover is finalized, V2 pauser == Pauser) and this phase skips.
     function _phase1_pauseV1() internal {
         console.log("\n=== Phase 1: pause V1 ===");
         if (address(v2) != address(0) && v2.pauser() == PAUSER) {
@@ -280,7 +284,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
         IPausableLike(STABLE_STAKER_V1).pause();
         require(IPausableLike(STABLE_STAKER_V1).paused(), "Phase1: V1 did not pause");
-        console.log("  V1 paused (pauser temporarily OWNER)");
+        console.log("  V1 paused (pauser OWNER; V1 stays paused and is unregistered in Phase 7)");
     }
 
     // =====================================================================
@@ -537,21 +541,31 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
         require(!_canMintPhUSD(STABLE_STAKER_V1), "Phase7: V1 phUSD mint not revoked");
 
-        // V1 pauser goes back to the global Pauser (where V1 is already registered) and V1 is UNPAUSED.
-        // It must not be left paused: `Pauser.pause()` loops `pause()` over every registered contract
-        // with no try/catch, and OZ `_pause` reverts on an already-paused contract, so a paused
-        // registered V1 would brick the protocol-wide emergency pause. Unpaused V1 is inert: every
-        // pool is Migrating, so stake / withdraw / emergencyWithdraw revert "pool not active", and
-        // claim can only mint phUSD, which was revoked above. Stragglers keep `userMigrate`, which is
-        // not pause-gated either way. Must run BEFORE V2's pauser hand-back (the finalized marker).
-        if (IPausableLike(STABLE_STAKER_V1).pauser() != PAUSER) {
-            IPausableLike(STABLE_STAKER_V1).setPauser(PAUSER);
+        // V1 is retired (story 083, superseding 082's Decision 9 which handed V1's pauser back to the
+        // Pauser and unpaused it). V1's pauser moves to OWNER, V1 is UNREGISTERED from the Pauser, and
+        // V1 is left PAUSED. Decision 9 unpaused V1 because `Pauser.pause()` loops `pause()` over every
+        // registered contract with no try/catch and OZ `_pause` reverts on an already-paused contract;
+        // once V1 is no longer registered that brick risk is gone, so V1 stays paused. Stragglers keep
+        // `userMigrate`, which is not pause-gated.
+        // ORDER IS FORCED: `Pauser.unregister` reverts while V1.pauser() == PAUSER, so setPauser first.
+        // `unregister` is onlyOwner (Phase 0 asserts Pauser owner == OWNER). Every step is gated on
+        // on-chain state so a resumed run converges. Must run BEFORE V2's pauser hand-back (the
+        // finalized marker).
+        if (IPausableLike(STABLE_STAKER_V1).pauser() != OWNER) {
+            IPausableLike(STABLE_STAKER_V1).setPauser(OWNER);
         }
-        require(IPausableLike(STABLE_STAKER_V1).pauser() == PAUSER, "Phase7: V1 pauser not restored");
-        if (IPausableLike(STABLE_STAKER_V1).paused()) {
-            IPausableLike(STABLE_STAKER_V1).unpause();
+        require(IPausableLike(STABLE_STAKER_V1).pauser() == OWNER, "Phase7: V1 pauser not moved to OWNER");
+        if (IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1)) {
+            IPauserRegistry(PAUSER).unregister(STABLE_STAKER_V1);
+            console.log("  Pauser.unregister(V1) - retired staker removed from the global pause registry");
+        } else {
+            console.log("  V1 already unregistered from Pauser - skipped");
         }
-        require(!IPausableLike(STABLE_STAKER_V1).paused(), "Phase7: V1 still paused - would brick Pauser.pause()");
+        require(!IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1), "Phase7: V1 still registered with Pauser");
+        if (!IPausableLike(STABLE_STAKER_V1).paused()) {
+            IPausableLike(STABLE_STAKER_V1).pause();
+        }
+        require(IPausableLike(STABLE_STAKER_V1).paused(), "Phase7: V1 not paused");
 
         if (v2.pauser() != PAUSER) v2.setPauser(PAUSER);
         if (!IPauserRegistry(PAUSER).isRegistered(address(v2))) IPauserRegistry(PAUSER).register(address(v2));
@@ -563,7 +577,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         if (v2.paused()) v2.unpause();
         require(!v2.paused(), "Phase7: V2 still paused");
         require(!v2.claimEnabled(), "Phase7: claimEnabled must stay false");
-        console.log("  V1 pauser -> Pauser and V1 unpaused (inert); V2 + Antimatter registered with Pauser; V2 unpaused");
+        console.log("  V1 pauser -> OWNER, unregistered from Pauser, left paused; V2 + Antimatter registered with Pauser; V2 unpaused");
     }
 
     // =====================================================================
@@ -618,8 +632,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
         require(v2.pauser() == PAUSER, "Phase8: V2 pauser");
         require(antimatter.pauser() == PAUSER, "Phase8: Antimatter pauser");
-        require(IPausableLike(STABLE_STAKER_V1).pauser() == PAUSER, "Phase8: V1 pauser");
-        require(!IPausableLike(STABLE_STAKER_V1).paused(), "Phase8: V1 left paused (bricks Pauser.pause())");
+        require(IPausableLike(STABLE_STAKER_V1).pauser() == OWNER, "Phase8: V1 pauser");
+        require(!IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1), "Phase8: V1 still registered with Pauser");
+        require(IPausableLike(STABLE_STAKER_V1).paused(), "Phase8: V1 not paused");
         require(IPauserRegistry(PAUSER).isRegistered(address(v2)), "Phase8: V2 not registered with Pauser");
         require(IPauserRegistry(PAUSER).isRegistered(address(antimatter)), "Phase8: Antimatter not registered");
         require(!v2.paused(), "Phase8: V2 paused");
@@ -778,7 +793,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         revert("V1 stakes a token with no known strategy - STOP AND REPORT (update the strategy map deliberately)");
     }
 
-    /// @dev Per-user loss bound. ERC4626 strategies: ERC4626_MAX_LOSS_BPS + WEI_SLACK. The market strategy
+    /// @dev Per-user loss bound (bps part; Phase 6 adds the absolute WEI_SLACK = 1000 wei on top, story 083).
+    ///      ERC4626 strategies: ERC4626_MAX_LOSS_BPS + WEI_SLACK. The market strategy
     ///      haircuts TWICE: the V1 exit sells shares with minOut = ideal * (1 - bps) and the V2 re-deposit
     ///      books credited = credit * (1 - bps). Worst case 1 - (1 - bps)^2 < 2 * bps; +1 bps slack.
     function _maxLossBps(address ys) internal view returns (uint256) {
@@ -950,4 +966,5 @@ interface IPhUSDOwner {
 interface IPauserRegistry {
     function isRegistered(address c) external view returns (bool);
     function register(address c) external;
+    function unregister(address pausableContract) external;
 }

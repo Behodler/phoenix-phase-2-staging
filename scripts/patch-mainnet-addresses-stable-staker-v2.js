@@ -136,7 +136,8 @@ function run() {
         (m, indent) =>
             `${indent}// Story 082: StableStakerV2 and Antimatter deployed by the V1 -> V2 cutover and patched\n` +
             `${indent}// from progress.stable-staker-v2-cutover.1.json. V1 is drained (every pool Migrating,\n` +
-            `${indent}// phUSD mint revoked); the transient CrossVersionMigrator deliberately has no key.\n`
+            `${indent}// phUSD mint revoked) and retired: paused, and unregistered from the Pauser (story 083);\n` +
+            `${indent}// the transient CrossVersionMigrator deliberately has no key.\n`
     );
 
     const today = new Date().toISOString().split('T')[0];
