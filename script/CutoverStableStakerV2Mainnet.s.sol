@@ -794,7 +794,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     }
 
     /// @dev Per-user loss bound (bps part; Phase 6 adds the absolute WEI_SLACK = 1000 wei on top, story 083).
-    ///      ERC4626 strategies: ERC4626_MAX_LOSS_BPS + WEI_SLACK. The market strategy
+    ///      ERC4626 strategies: ERC4626_MAX_LOSS_BPS (WEI_SLACK is a separate wei term, not added here). The market strategy
     ///      haircuts TWICE: the V1 exit sells shares with minOut = ideal * (1 - bps) and the V2 re-deposit
     ///      books credited = credit * (1 - bps). Worst case 1 - (1 - bps)^2 < 2 * bps; +1 bps slack.
     function _maxLossBps(address ys) internal view returns (uint256) {
