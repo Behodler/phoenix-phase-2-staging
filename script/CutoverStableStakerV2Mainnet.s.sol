@@ -55,7 +55,7 @@ import {
  *
  * ================================ RUNNING IT ==============================================
  *   npm run stable-staker-v2-cutover:preview     (impersonates OWNER on live mainnet state)
- *   npm run stable-staker-v2-cutover:broadcast   (Ledger m/44'/60'/46'/0/0; chains to :preview)
+ *   npm run stable-staker-v2-cutover:broadcast   (Ledger m/44'/60'/46'/0/0; chains :verify && :preview)
  *
  *   npm run stable-staker-v2-cutover:verify      (story 086: read-only, asserts every phase on chain)
  *
