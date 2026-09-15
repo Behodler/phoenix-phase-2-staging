@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-09-15T20:30:51.621Z",
+  "extractedAt": "2026-09-15T22:12:39.116Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -99,7 +99,7 @@
       "address": "0x9A9f2CCfdE556A7E9Ff0848998Aa4a0CFD8863AE",
       "deployed": true,
       "configured": true,
-      "deployGas": 1216953,
+      "deployGas": 1220153,
       "configGas": 0
     },
     "YieldStrategyDola": {
@@ -113,7 +113,7 @@
       "address": "0x3Aa5ebB10DC797CAC828524e59A333d0A371443c",
       "deployed": true,
       "configured": true,
-      "deployGas": 1216549,
+      "deployGas": 1219749,
       "configGas": 0
     },
     "YieldStrategyUSDC": {
