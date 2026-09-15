@@ -43,7 +43,7 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *         `migrate` transactions - and take their credit to their own wallet. That is a designed exit, never a
  *         loss, and no check here may count it as one:
  *           1. Phase 6 (view, shared with the cutover): the EXIT-REALIZATION BOUND on V1's immutable
- *              `migrationInfo` - `min(R, P) * MAX_BPS >= P * (MAX_BPS - bps)`. It bounds the pre -> credit
+ *              `migrationInfo` - `(min(R, P) + weiSlack) * MAX_BPS >= P * (MAX_BPS - bps)`. It bounds the pre -> credit
  *              haircut of every staker however they exit and reads nothing a self-exit can move, so a self-exit
  *              no longer reverts Phase 6 and the verifier always reaches Phase 7, the per-user re-check, the
  *              registrant sweep and Phase 8.
