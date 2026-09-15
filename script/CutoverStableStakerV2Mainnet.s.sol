@@ -30,7 +30,12 @@ import {
  * ================================= PHASES =================================================
  *   0  Preconditions (require-gated, no mutation). Live token list off V1, per-token reads,
  *      owners, V1 phUSD mint, PhusdStableMinter registration, strategy map, phUSD minter baseline.
- *   1  Pause V1 for the window (story 062 pattern: setPauser(OWNER) + pause()).
+ *   1  Retire V1 for the window (story 084, audit L-04): setPauser(OWNER) -> Pauser.unregister(V1) ->
+ *      pause(), each step state-gated. V1 is UNREGISTERED BEFORE it is paused so the permissionless
+ *      global `Pauser.pause()` (which loops every registrant with no try/catch) stays live all session.
+ *      PREVIEW additionally proves the breaker with a simulated EYE-funded `Pauser.pause()` inside a
+ *      state snapshot at three stages: end of Phase 0, after Phase 1, after Phase 8
+ *      (log `GLOBAL_PAUSE|<stage>|SUCCEEDED|registered=<n>`).
  *   2  Deploy Antimatter (name "Antimatter", symbol "AM" - hard-coded in its constructor), owner
  *      OWNER; setPhUSD then setPhUSDMinter; read back.
  *   3  Deploy StableStakerV2(antimatter, OWNER); setPauser(OWNER) + pause() BEFORE any addToken.
@@ -40,10 +45,11 @@ import {
  *      (see the Phase 5 NatSpec for why the third grant exists), two-sided minter delta.
  *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus, initiate, plan
  *      (dust predicate), batch-migrate non-dust, allow-list stragglers under a cap, post-conditions.
- *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 retired (pauser -> OWNER,
- *      Pauser.unregister(V1), V1 left PAUSED - story 083), V2 + Antimatter pauser -> Pauser and
- *      registered, V2 unpaused.
- *   8  Wiring assertions (both modes).
+ *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 retirement BACKSTOP (the
+ *      same state-gated triple Phase 1 ran; normally every step skips - story 083/084), V2 + Antimatter
+ *      pauser -> Pauser and registered, V2 unpaused.
+ *   8  Wiring assertions (both modes), incl. a static sweep: every Pauser registrant unpaused with
+ *      pauser == Pauser (story 084, audit L-03).
  *   -  PREVIEW_MODE only: smoke tests (Antimatter mint-revocation proof, V2 stake/withdraw on every
  *      pool, autoAnnihilate on DOLA). Prank-only, never broadcast.
  *
@@ -60,6 +66,12 @@ import {
  *   sent. After a crashed broadcast it can therefore name a contract that never landed. Every
  *   address loaded from it is required to have code; one that does not aborts with an instruction
  *   to trim the file to the on-chain-confirmed deployments (run-latest.json receipts + `cast nonce`).
+ *
+ *   HALTED RUNS (story 084): V1 is unregistered from the Pauser in Phase 1. If a broadcast halts before
+ *   Phase 1's unregister lands but after V1's pauser moved to OWNER (or V1 was paused manually while still
+ *   registered), the global permissionless pause is DEAD until V1 is unregistered. Do not walk away from a
+ *   halted run: resume it (Phase 1 converges from any partial state), or at minimum have OWNER call
+ *   `Pauser.unregister(V1)`. A preview on such a state reports `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`.
  */
 contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverCore {
     // =====================================================================
@@ -156,6 +168,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         _loadProgressFile();
 
         _phase0_preconditions();
+        // Story 084: simulated EYE-funded global pause, PREVIEW ONLY (deal/prank/snapshot never run in a
+        // broadcast session). Before any prank.
+        if (isPreview) _assertGlobalPauseWorks("phase0", true);
 
         if (isPreview) {
             console.log("");
@@ -167,6 +182,12 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
 
         _phase1_pauseV1();
+        if (isPreview) {
+            // Foundry refuses vm.prank while a startPrank is active: drop OWNER, simulate, resume OWNER.
+            vm.stopPrank();
+            _assertGlobalPauseWorks("after-phase1", false);
+            vm.startPrank(OWNER);
+        }
         _phase2_antimatter();
         _phase3_stakerV2();
         _phase4_pools();
@@ -187,6 +208,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         } else {
             console.log("");
             console.log("PREVIEW: progress file NOT written (by design).");
+            // BEFORE the smoke tests: they mutate fork state with no snapshot isolation.
+            _assertGlobalPauseWorks("after-phase8", false);
             _previewSmokeTests();
         }
         _printSummary();
@@ -266,25 +289,51 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
     /// @dev Stakes into V1 revert once paused, so no new position (and no new dust) can enter during
     ///      the window. `initiateMigration` / `batchMigrate` carry no `whenNotPaused`, so the pause does
-    ///      not obstruct the cutover. Phase 7 retires V1: its pauser stays OWNER, it is unregistered from
-    ///      the Pauser and it is LEFT PAUSED (story 083). On a resumed or verification leg V1 is therefore
-    ///      already paused (or the cutover is finalized, V2 pauser == Pauser) and this phase skips.
+    ///      not obstruct the cutover.
+    ///      STORY 084 (audit L-04): Phase 1 now RETIRES V1 in full - pauser -> OWNER, Pauser.unregister(V1),
+    ///      then pause() - instead of pausing V1 while it stays registered until Phase 7. `Pauser.pause()`
+    ///      loops `pause()` over every registrant with no try/catch; a registered V1 whose pauser is OWNER
+    ///      reverts `StableStaker: only pauser` and takes the whole permissionless breaker down with it.
+    ///      Unregistering BEFORE pausing keeps the global breaker live for the entire Ledger session.
+    ///      Each step is independently state-gated (no "already paused - skip" shortcut), so a resume from
+    ///      "V1 paused but still registered" (a run halted under the old ordering, or a manual owner pause)
+    ///      still unregisters V1. Phase 7 calls the same helper as an idempotent backstop.
     function _phase1_pauseV1() internal {
-        console.log("\n=== Phase 1: pause V1 ===");
+        console.log("\n=== Phase 1: retire V1 (pauser OWNER, unregister, pause) ===");
         if (address(v2) != address(0) && v2.pauser() == PAUSER) {
-            console.log("  cutover already finalized (V2 pauser == Pauser) - V1 pause window skipped");
+            console.log("  cutover already finalized (V2 pauser == Pauser) - V1 retirement skipped (Phase 7/8 assert it)");
             return;
         }
-        if (IPausableLike(STABLE_STAKER_V1).paused()) {
-            console.log("  V1 already paused - skipped");
-            return;
+        _retireV1("Phase1");
+        console.log("  V1 pauser OWNER, unregistered from Pauser, paused - global Pauser.pause() stays live");
+    }
+
+    /// @dev V1 retirement triple. ORDER IS FORCED: `Pauser.unregister` reverts while V1.pauser() == PAUSER,
+    ///      so setPauser first; and V1 must be unregistered BEFORE it is paused (story 084, audit L-04).
+    ///      `unregister` is onlyOwner (Phase 0 asserts Pauser owner == OWNER). Every step is gated on
+    ///      on-chain state and followed by a read-back require, so any resume converges.
+    function _retireV1(string memory phase) internal {
+        IPausableLike v1p = IPausableLike(STABLE_STAKER_V1);
+        if (v1p.pauser() != OWNER) {
+            v1p.setPauser(OWNER);
         }
-        if (IPausableLike(STABLE_STAKER_V1).pauser() != OWNER) {
-            IPausableLike(STABLE_STAKER_V1).setPauser(OWNER);
+        require(v1p.pauser() == OWNER, string.concat(phase, ": V1 pauser not moved to OWNER"));
+        if (IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1)) {
+            IPauserRegistry(PAUSER).unregister(STABLE_STAKER_V1);
+            console.log("  Pauser.unregister(V1) - retired staker removed from the global pause registry");
+        } else {
+            console.log("  V1 already unregistered from Pauser - skipped");
         }
-        IPausableLike(STABLE_STAKER_V1).pause();
-        require(IPausableLike(STABLE_STAKER_V1).paused(), "Phase1: V1 did not pause");
-        console.log("  V1 paused (pauser OWNER; V1 stays paused and is unregistered in Phase 7)");
+        require(
+            !IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1),
+            string.concat(phase, ": V1 still registered with Pauser")
+        );
+        if (!v1p.paused()) {
+            v1p.pause();
+        } else {
+            console.log("  V1 already paused - pause step skipped");
+        }
+        require(v1p.paused(), string.concat(phase, ": V1 not paused"));
     }
 
     // =====================================================================
@@ -541,31 +590,14 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
         require(!_canMintPhUSD(STABLE_STAKER_V1), "Phase7: V1 phUSD mint not revoked");
 
-        // V1 is retired (story 083, superseding 082's Decision 9 which handed V1's pauser back to the
-        // Pauser and unpaused it). V1's pauser moves to OWNER, V1 is UNREGISTERED from the Pauser, and
-        // V1 is left PAUSED. Decision 9 unpaused V1 because `Pauser.pause()` loops `pause()` over every
-        // registered contract with no try/catch and OZ `_pause` reverts on an already-paused contract;
-        // once V1 is no longer registered that brick risk is gone, so V1 stays paused. Stragglers keep
-        // `userMigrate`, which is not pause-gated.
-        // ORDER IS FORCED: `Pauser.unregister` reverts while V1.pauser() == PAUSER, so setPauser first.
-        // `unregister` is onlyOwner (Phase 0 asserts Pauser owner == OWNER). Every step is gated on
-        // on-chain state so a resumed run converges. Must run BEFORE V2's pauser hand-back (the
-        // finalized marker).
-        if (IPausableLike(STABLE_STAKER_V1).pauser() != OWNER) {
-            IPausableLike(STABLE_STAKER_V1).setPauser(OWNER);
-        }
-        require(IPausableLike(STABLE_STAKER_V1).pauser() == OWNER, "Phase7: V1 pauser not moved to OWNER");
-        if (IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1)) {
-            IPauserRegistry(PAUSER).unregister(STABLE_STAKER_V1);
-            console.log("  Pauser.unregister(V1) - retired staker removed from the global pause registry");
-        } else {
-            console.log("  V1 already unregistered from Pauser - skipped");
-        }
-        require(!IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1), "Phase7: V1 still registered with Pauser");
-        if (!IPausableLike(STABLE_STAKER_V1).paused()) {
-            IPausableLike(STABLE_STAKER_V1).pause();
-        }
-        require(IPausableLike(STABLE_STAKER_V1).paused(), "Phase7: V1 not paused");
+        // V1 retirement BACKSTOP. Story 084 (audit L-04) moved the retirement itself into Phase 1: V1's
+        // pauser moves to OWNER, V1 is UNREGISTERED from the Pauser and only THEN paused, so the global
+        // `Pauser.pause()` loop (no try/catch) never reaches a registered V1 it cannot pause. On a normal
+        // run every step of `_retireV1` below is already satisfied and skips; it stays here, idempotent,
+        // so a state that drifted after Phase 1 is still corrected and asserted before finalizing.
+        // V1 is left PAUSED (story 083); stragglers keep `userMigrate`, which is not pause-gated.
+        // Must run BEFORE V2's pauser hand-back (the finalized marker).
+        _retireV1("Phase7");
 
         if (v2.pauser() != PAUSER) v2.setPauser(PAUSER);
         if (!IPauserRegistry(PAUSER).isRegistered(address(v2))) IPauserRegistry(PAUSER).register(address(v2));
@@ -639,7 +671,129 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(IPauserRegistry(PAUSER).isRegistered(address(antimatter)), "Phase8: Antimatter not registered");
         require(!v2.paused(), "Phase8: V2 paused");
         require(!v2.claimEnabled(), "Phase8: claimEnabled must be false");
+
+        // Story 084 (audit L-03 option a): static registry sweep, view-compatible so BROADCAST mode gets
+        // an end-state guarantee too. `Pauser.pause()` calls `pause()` on every registrant with no
+        // try/catch, so ONE registrant that is already paused or whose pauser is not the Pauser bricks the
+        // whole breaker. Preview additionally runs the real EYE-funded pause (`_assertGlobalPauseWorks`).
+        address[] memory registrants = IPauserRegistry(PAUSER).getPausableContracts();
+        require(registrants.length > 0, "Phase8: Pauser has no registrants");
+        for (uint256 i = 0; i < registrants.length; i++) {
+            address r = registrants[i];
+            require(r != STABLE_STAKER_V1, "Phase8: V1 is listed by Pauser.getPausableContracts()");
+            require(
+                IPausableLike(r).pauser() == PAUSER,
+                string.concat("Phase8: registrant pauser != Pauser (bricks global pause): ", vm.toString(r))
+            );
+            require(
+                !IPausableLike(r).paused(),
+                string.concat("Phase8: registrant already paused (bricks global pause): ", vm.toString(r))
+            );
+        }
+        console.log("  Pauser registrant sweep OK (every registrant unpaused, pauser == Pauser):", registrants.length);
         console.log("  all wiring assertions passed");
+    }
+
+    // =====================================================================
+    //  STORY 084 - simulated global pause (PREVIEW ONLY)
+    // =====================================================================
+
+    /// @dev Stages (in order) at which the simulated EYE-funded `Pauser.pause()` succeeded. Recorded AFTER
+    ///      the snapshot is reverted so the record survives; the test harness reads it.
+    string[] public globalPauseStagesPassed;
+
+    function globalPauseStageCount() external view returns (uint256) {
+        return globalPauseStagesPassed.length;
+    }
+
+    /// @dev Proves "registered means actually pausable" (audit L-03 clause b, L-04): inside a state snapshot,
+    ///      funds a throwaway actor with the Pauser's EYE burn amount, has it call the permissionless
+    ///      `Pauser.pause()` and requires every registrant to report paused, then reverts the snapshot.
+    ///      PREVIEW ONLY - never deal/prank/snapshot in a broadcast session. The caller must not have an
+    ///      active `startPrank`.
+    ///      `tolerateV1Only`: at Phase 0 of a RESUME from "V1 paused, pauser OWNER, still registered" the
+    ///      breaker is genuinely dead until Phase 1 unregisters V1. That exact, self-healing case is
+    ///      reported loudly and allowed through; any other broken registrant still reverts. The post-Phase-1
+    ///      and post-Phase-8 calls pass `false` and are strict.
+    function _assertGlobalPauseWorks(string memory stage, bool tolerateV1Only) internal {
+        require(isPreview, "simulated global pause is preview-only");
+        IPauserRegistry pauser = IPauserRegistry(PAUSER);
+        address eye = pauser.eyeToken();
+        uint256 burn = pauser.eyeBurnAmount();
+        address[] memory registrants = pauser.getPausableContracts();
+
+        uint256 snap = vm.snapshotState();
+        address actor = makeAddr("story084-global-pause-actor");
+        deal(eye, actor, burn, false);
+        require(IERC20(eye).balanceOf(actor) >= burn, "globalPause: could not fund actor with EYE (deal failed)");
+        vm.prank(actor);
+        IERC20(eye).approve(PAUSER, burn);
+        vm.prank(actor);
+        (bool ok,) = PAUSER.call(abi.encodeWithSignature("pause()"));
+        bool allPaused = ok;
+        if (ok) {
+            for (uint256 i = 0; i < registrants.length; i++) {
+                if (!IPausableLike(registrants[i]).paused()) {
+                    allPaused = false;
+                    break;
+                }
+            }
+        }
+        vm.revertToState(snap);
+
+        if (ok && allPaused) {
+            globalPauseStagesPassed.push(stage);
+            console.log(string.concat("GLOBAL_PAUSE|", stage, "|SUCCEEDED|registered=", vm.toString(registrants.length)));
+            return;
+        }
+
+        // Diagnose: probe each registrant's own pause() as the Pauser, in order, inside a fresh snapshot,
+        // exactly as the Pauser loop would reach them.
+        address culprit = address(0);
+        snap = vm.snapshotState();
+        for (uint256 i = 0; i < registrants.length; i++) {
+            vm.prank(PAUSER);
+            (bool pOk,) = registrants[i].call(abi.encodeWithSignature("pause()"));
+            if (!pOk || !IPausableLike(registrants[i]).paused()) {
+                culprit = registrants[i];
+                break;
+            }
+        }
+        vm.revertToState(snap);
+
+        if (tolerateV1Only && culprit == STABLE_STAKER_V1 && _onlyV1BreaksPause(registrants)) {
+            console.log(
+                string.concat(
+                    "GLOBAL_PAUSE|", stage, "|BROKEN_BY_V1|registered=", vm.toString(registrants.length),
+                    " - WARNING: the permissionless breaker is DEAD right now; Phase 1 unregisters V1 and the post-Phase-1 check is strict"
+                )
+            );
+            return;
+        }
+        console.log(string.concat("GLOBAL_PAUSE|", stage, "|REVERTED|registered=", vm.toString(registrants.length)));
+        revert(
+            string.concat(
+                "globalPause(", stage, "): Pauser.pause() does not pause every registrant; first failing registrant: ",
+                vm.toString(culprit)
+            )
+        );
+    }
+
+    /// @dev True iff V1 is the ONLY registrant whose own pause() fails when called by the Pauser.
+    function _onlyV1BreaksPause(address[] memory registrants) internal returns (bool) {
+        uint256 snap = vm.snapshotState();
+        bool onlyV1 = true;
+        for (uint256 i = 0; i < registrants.length; i++) {
+            if (registrants[i] == STABLE_STAKER_V1) continue;
+            vm.prank(PAUSER);
+            (bool pOk,) = registrants[i].call(abi.encodeWithSignature("pause()"));
+            if (!pOk || !IPausableLike(registrants[i]).paused()) {
+                onlyV1 = false;
+                break;
+            }
+        }
+        vm.revertToState(snap);
+        return onlyV1;
     }
 
     // =====================================================================
@@ -967,4 +1121,8 @@ interface IPauserRegistry {
     function isRegistered(address c) external view returns (bool);
     function register(address c) external;
     function unregister(address pausableContract) external;
+    function getPausableContracts() external view returns (address[] memory);
+    function eyeToken() external view returns (address);
+    function eyeBurnAmount() external view returns (uint256);
+    function pause() external;
 }
