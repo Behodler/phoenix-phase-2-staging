@@ -22,7 +22,20 @@ contract MockAutoDOLA is ERC4626 {
         // ERC4626 automatically handles the asset
     }
 
+    /// @notice Virtual share offset: 10**12 shares per unit of the asset's smallest denomination.
+    /// @dev Without it, yield dust or a donation (DeployMocks Phase 9.6) sitting in the vault after
+    ///      every share is redeemed prices the next deposit against that balance, inflating one share
+    ///      to many cents (seen on Anvil as "ERC4626YieldStrategy: no shares received" for sub-dollar
+    ///      deposits). Real Autopools are too deep for that; this keeps the mock from diverging.
+    ///      12 rather than 6 so a 1000-token donation into an empty vault still leaves shares worth
+    ///      far less than one raw unit. Nothing reads the share decimals (asset decimals + 12).
+    uint8 private constant DECIMALS_OFFSET = 12;
+
     // ============ ERC4626 Overrides for Yield Simulation ============
+
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return DECIMALS_OFFSET;
+    }
 
     /**
      * @notice Override totalAssets to include yield simulation
