@@ -93,6 +93,12 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         );
     }
 
+    function doAssert(PoolPlan memory plan, uint256 maxLossBps, uint256 weiSlack) external view {
+        _assertPoolPostMigration(
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), plan, maxLossBps, weiSlack
+        );
+    }
+
     // ------------------------------------------------------------------ tests
 
     /// credit > 0 but previewDeposit(credit) == 0 -> straggler, left in V1, allow-listed under the cap,
@@ -198,6 +204,105 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         _assertPoolPostMigration(
             ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), again, 0, 20
         );
+    }
+
+    // ------------------------------------------------------------------ story 085: aggregate principal floor
+
+    string constant FLOOR_REVERT = "cutover-post: V2 booked total below pre-migration principal floor (067)";
+
+    /// Clean migration (no loss, no stragglers): the aggregate floor holds exactly and the lockstep holds.
+    function test_aggregateFloor_cleanMigrationPasses() public {
+        this.doInitiate();
+        PoolPlan memory plan = this.doMigrate(CAP);
+        assertEq(plan.stragglers.length, 0, "setup: no stragglers");
+
+        (, uint256 P) = v1.migrationInfo(address(dola));
+        (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
+        uint256 floor = _aggregatePrincipalFloor(P, 0, 0, v2.stakerCount(address(dola)), 0);
+        assertEq(P, 2 * BIG, "snapshot is the pre-migration V1 total");
+        assertEq(floor, 2 * BIG, "zero loss, zero slack: floor is the full snapshot");
+        assertGe(v2Staked, floor, "clean 1:1 migration books the whole snapshot on V2");
+        assertEq(ys.principalOf(address(dola), address(v2)), v2Staked, "lockstep: strategy book == V2 book");
+
+        this.doAssert(plan, 0, 0);
+    }
+
+    /// Injected haircut on the single-leg path: a vault loss before initiation makes R < P, so every credit
+    /// is cut 5 bps. With a 0 bps allowance the post-condition reverts (the per-user loop fires first).
+    function test_aggregateFloor_singleLegHaircutReverts() public {
+        vault.simulateLoss(1e18); // 5 bps of 2000e18
+        this.doInitiate();
+        PoolPlan memory plan = this.doMigrate(CAP);
+        assertEq(plan.migratable.length, 2, "setup: both stakers migrated this leg");
+
+        vm.expectRevert();
+        this.doAssert(plan, 0, 20);
+
+        // Control: the strategy-explained 6 bps allowance passes both the per-user bound and the floor.
+        this.doAssert(plan, 6, 20);
+    }
+
+    /// Injected haircut applied during the FIRST leg, asserted on a RESUME leg with an empty plan: the
+    /// per-user loop sees nothing, the lockstep is equal by construction, and only the aggregate floor
+    /// catches the lost principal.
+    function test_aggregateFloor_resumeLegHaircutReverts() public {
+        vault.simulateLoss(1e18);
+        this.doInitiate();
+        this.doMigrate(CAP); // first leg: no post-assertion run
+
+        this.doInitiate(); // skipped
+        PoolPlan memory again = this.doMigrate(CAP);
+        assertEq(again.migratable.length, 0, "setup: resume plan is empty");
+        (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
+        assertEq(ys.principalOf(address(dola), address(v2)), v2Staked, "lockstep holds - it cannot see the loss");
+
+        vm.expectRevert(bytes(FLOOR_REVERT));
+        this.doAssert(again, 0, 20);
+
+        // Control: the same resume leg passes when the loss is within the allowance.
+        this.doAssert(again, 6, 20);
+    }
+
+    /// Stragglers left behind on V1 do not trip the floor, because their principal is subtracted from the
+    /// snapshot. Slack is set to the tightest value that admits the real rounding deficit, and the test
+    /// proves an un-subtracted (raw-P) floor with that same slack WOULD have reverted.
+    function test_aggregateFloor_stragglersLeftBehindPass() public {
+        _stake(dust, 9_000); // 9,000 wei at 1:1
+        vault.simulateYield(vault.totalAssets() * 99_999); // share price 1e5: 9,000 wei buys 0 shares
+        this.doInitiate();
+        this.doMigrate(CAP);
+        PoolPlan memory again = this.doMigrate(CAP); // resume plan isolates the aggregate floor
+        assertEq(again.stragglers.length, 1, "setup: the dust staker is a straggler");
+
+        (, uint256 P) = v1.migrationInfo(address(dola));
+        (,,, uint256 v1Staked) = v1.poolInfo(address(dola));
+        (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
+        uint256 n = v2.stakerCount(address(dola));
+        assertEq(v1Staked, 9_000, "straggler principal stays on V1");
+        uint256 deficit = P - v1Staked - v2Staked;
+        uint256 slack = (deficit + n - 1) / n; // ceil: smallest per-user slack admitting the deficit
+        assertLt(n * slack, deficit + v1Staked, "setup: slack must not also cover the straggler principal");
+
+        assertLt(v2Staked, _aggregatePrincipalFloor(P, 0, 0, n, slack), "a raw-P floor would false-fail");
+        this.doAssert(again, 0, slack);
+    }
+
+    /// Unit: floor arithmetic - straggler subtraction, bps haircut, saturating slack, loud guards.
+    function test_aggregateFloor_unitMath() public {
+        assertEq(_aggregatePrincipalFloor(10_000, 1_000, 0, 0, 0), 9_000, "stragglers subtracted");
+        assertEq(_aggregatePrincipalFloor(10_000, 0, 61, 0, 0), 9_939, "bps haircut, floored");
+        assertEq(_aggregatePrincipalFloor(10_000, 0, 0, 3, 1_000), 7_000, "slack scales with nMigrated");
+        assertEq(_aggregatePrincipalFloor(10_000, 0, 0, 20, 1_000), 0, "slack saturates at zero");
+        assertEq(_aggregatePrincipalFloor(10_000, 10_000, 0, 0, 0), 0, "all stragglers: nothing due on V2");
+
+        vm.expectRevert(bytes("cutover-post: V1 principalSnapshot is zero"));
+        this.floorExt(0, 0, 0, 0, 0);
+        vm.expectRevert(bytes("cutover-post: V1 principalSnapshot < V1 straggler principal"));
+        this.floorExt(10, 11, 0, 0, 0);
+    }
+
+    function floorExt(uint256 p, uint256 s, uint256 b, uint256 n, uint256 w) external pure returns (uint256) {
+        return _aggregatePrincipalFloor(p, s, b, n, w);
     }
 
     /// Unit: the ERC4626 predicate boundary at share price 10.
