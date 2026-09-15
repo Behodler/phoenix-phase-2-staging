@@ -38,14 +38,28 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *         minter baseline. A live re-read of that baseline would be vacuous post-broadcast, so the verifier
  *         aborts before Phase 0 when the persisted baseline is absent (story 075 precedent).
  *
- *         PER-USER RE-CHECK. The aggregate floor (story 085) bounds the pre -> credit haircut per pool. The
- *         credit -> credited leg is re-checked per `(token, user)` from V1 `MigratedOut` and V2
- *         `DepositedFor` logs fetched with `vm.eth_getLogs` from the persisted cutover start block (env
- *         `CUTOVER_START_BLOCK` overrides it), in `LOG_CHUNK_BLOCKS` windows to stay under RPC range limits.
- *         Self-exits via V1 `userMigrate` (which also emit `MigratedOut` but never deposit into V2) are
- *         excluded by their `UserMigrated` event.
+ *         LOSS GATES AND SELF-EXITS (story 087, audit-33 L-06). Any V1 staker may call the permissionless
+ *         `V1.userMigrate` once a pool is Migrating - including between the broadcast `initiateMigration` and
+ *         `migrate` transactions - and take their credit to their own wallet. That is a designed exit, never a
+ *         loss, and no check here may count it as one:
+ *           1. Phase 6 (view, shared with the cutover): the EXIT-REALIZATION BOUND on V1's immutable
+ *              `migrationInfo` - `min(R, P) * MAX_BPS >= P * (MAX_BPS - bps)`. It bounds the pre -> credit
+ *              haircut of every staker however they exit and reads nothing a self-exit can move, so a self-exit
+ *              no longer reverts Phase 6 and the verifier always reaches Phase 7, the per-user re-check, the
+ *              registrant sweep and Phase 8.
+ *           2. Per user: the credit -> credited leg is re-checked per `(token, user)` from V1 `MigratedOut` and
+ *              V2 `DepositedFor` logs fetched with `vm.eth_getLogs` from the persisted cutover start block (env
+ *              `CUTOVER_START_BLOCK` overrides it), in `LOG_CHUNK_BLOCKS` windows to stay under RPC range
+ *              limits. Self-exits (which also emit `MigratedOut` but never deposit into V2) are excluded by
+ *              their `UserMigrated` event.
+ *           3. Per pool, defence in depth (subtract-from-total): V2's booked total must be at least
+ *              `(P - v1Staked - selfExitedPrincipal) * (MAX_BPS - bps) / MAX_BPS - nMigrated * WEI_SLACK`,
+ *              where `selfExitedPrincipal` is rebuilt from the `UserMigrated` credits as an UPPER bound on each
+ *              exiter's principal (`ceil((credit + 1) * P / min(R, P))`), so the subtraction can never
+ *              under-count an exit into a false alarm. Only this verifier has the logs; the broadcast script
+ *              cannot see a self-exit from state and relies on (1) plus its in-leg per-user bound.
  *
- *         RUN IT IMMEDIATELY AFTER THE BROADCAST. The aggregate floor and the `V2 userInfo >= credited`
+ *         RUN IT IMMEDIATELY AFTER THE BROADCAST. The per-pool aggregate and the `V2 userInfo >= credited`
  *         check read live V2 balances; once migrated users start withdrawing from V2 they can legitimately
  *         fall below what the cutover credited. The `:broadcast` npm key chains this verifier straight after
  *         the address patch, before `:preview`.
@@ -82,7 +96,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         console.log("  (story 086 / audit L-02)");
         console.log("=================================================");
         require(block.chainid == CHAIN_ID, "Wrong chain ID - expected Mainnet (1)");
-        require(!vm.envOr("PREVIEW_MODE", false), "PREVIEW_MODE is meaningless here - the verifier reads LIVE state only");
+        require(!_previewModeFromEnv(), "PREVIEW_MODE is meaningless here - the verifier reads LIVE state only");
 
         _hydrateDeployment();
 
@@ -198,7 +212,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     }
 
     // =====================================================================
-    //  Phase 6 - migration, race detection, aggregate floor
+    //  Phase 6 - migration, race detection, exit-realization bound
     // =====================================================================
 
     function _verifyPhase6_migration() internal view {
@@ -230,8 +244,10 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
                 )
             );
 
-            // Story 085's aggregate floor with the empty plan built from live state: per-user loop is a no-op,
-            // V1 stakerCount / totalStaked must equal the stragglers, V2 books >= the snapshot floor.
+            // Shared post-condition with the empty plan built from live state: per-user loop is a no-op, V1
+            // stakerCount / totalStaked must equal the stragglers, V2 books == sum of its stakers, the lockstep, and
+            // story 087's exit-realization bound on V1's immutable R / P (self-exit-proof, audit-33 L-06). The
+            // self-exit-aware aggregate on V2's booked total needs logs and runs in `_verifyPerUserCredits`.
             _assertPoolPostMigration(v1, ICutoverStaker(address(v2)), t, ys, plan, _maxLossBps(ys), WEI_SLACK);
             console.log("  pool migrated (token / V1 stragglers):", t, plan.stragglers.length);
         }
@@ -269,6 +285,9 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         }
         require(_v1MintRevoked(), "verify: Phase7: phUSD.setMinter(V1, false) revoke not on chain");
         // Phase 7 re-runs the V1 retirement triple as a backstop; Phase 1's checks above already cover it.
+        // Order on chain (story 087, audit-33 L-05): V2 setPauser(Pauser) -> unpause -> register, so V2 was never
+        // registered while paused; the end state checked here is the same either way, and the registrant sweep
+        // below is what proves the breaker is live now.
         require(_doneV2PauseWired(), "verify: Phase7: V2 setPauser(Pauser) + Pauser.register(V2) not on chain");
         require(
             _doneAntimatterPauseWired(), "verify: Phase7: Antimatter setPauser(Pauser) + Pauser.register(Antimatter) not on chain"
@@ -318,11 +337,18 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             address ys = _strategyFor(t);
             uint256 matched = _checkPoolCredits(t, ys, outs, selfExits, deposits);
 
-            // Vacuity guard: a pool that moved principal must show at least one migrated credit, so an empty
-            // log fetch (wrong start block, a silently truncating RPC) cannot pass.
-            (, uint256 principalSnapshot) = v1.migrationInfo(t);
+            // Vacuity guard: a pool that owed principal to V2 must show at least one migrated credit, so an empty
+            // log fetch (wrong start block, a silently truncating RPC) cannot pass. Story 087 sibling sweep: keyed
+            // on the principal due NET OF SELF-EXITS, not on `v2.stakerCount` - organic V2 stakes (a quantity any
+            // user moves) must not make a pool whose V1 stakers ALL self-exited look like a vacuous fetch. An empty
+            // fetch also yields no `UserMigrated` rows, so it still trips this guard.
+            (uint256 realized, uint256 principalSnapshot) = v1.migrationInfo(t);
             (,,, uint256 v1Staked) = v1.poolInfo(t);
-            if (principalSnapshot > v1Staked && v2.stakerCount(t) > 0) {
+            uint256 selfExited = _selfExitedPrincipalUpperBound(
+                t, selfExits, principalSnapshot, realized < principalSnapshot ? realized : principalSnapshot
+            );
+            // Below the 1-cent straggler cap the "due" can be all zero-credit dust, which never deposits.
+            if (principalSnapshot > v1Staked + selfExited + _stragglerCap(t)) {
                 require(
                     matched > 0,
                     string.concat(
@@ -334,6 +360,8 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             }
             verifiedUserCount += matched;
             console.log("  per-user credits OK (token / users):", t, matched);
+
+            _requirePoolAggregateNetOfSelfExits(t, ys, outs, selfExits);
         }
     }
 
@@ -375,6 +403,56 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
                 )
             );
             matched++;
+        }
+    }
+
+    /// @dev Story 087 (audit-33 L-06, option b), defence in depth behind the realization bound. See the contract
+    ///      NatSpec, LOSS GATES AND SELF-EXITS (3). `nMigrated` counts this pool's non-self-exit `MigratedOut` rows
+    ///      (zero-credit users included), one `WEI_SLACK` each.
+    function _requirePoolAggregateNetOfSelfExits(
+        address t,
+        address ys,
+        CutoverEvent[] memory outs,
+        CutoverEvent[] memory selfExits
+    ) internal view {
+        (uint256 R, uint256 P) = ICutoverStaker(STABLE_STAKER_V1).migrationInfo(t);
+        uint256 S = R < P ? R : P;
+        require(S > 0, "verify: aggregate: V1 realized nothing for a Migrating pool (min(R, P) == 0)");
+        (,,, uint256 v1Staked) = ICutoverStaker(STABLE_STAKER_V1).poolInfo(t);
+        (,,, uint256 v2Staked) = v2.poolInfo(t);
+
+        uint256 selfExited = _selfExitedPrincipalUpperBound(t, selfExits, P, S);
+        uint256 nMigrated;
+        for (uint256 j = 0; j < outs.length; j++) {
+            if (outs[j].token == t && !_hasEvent(selfExits, t, outs[j].user)) nMigrated++;
+        }
+        uint256 due = P > v1Staked + selfExited ? P - v1Staked - selfExited : 0;
+        uint256 floor = due * (CUTOVER_MAX_BPS - _maxLossBps(ys)) / CUTOVER_MAX_BPS;
+        uint256 slack = nMigrated * WEI_SLACK;
+        floor = floor > slack ? floor - slack : 0;
+        console.log("  aggregate net of self-exits (token / floor / V2 totalStaked):", t, floor, v2Staked);
+        console.log("    P / V1 stragglers / self-exited principal (upper bound):", P, v1Staked, selfExited);
+        require(
+            v2Staked >= floor,
+            string.concat(
+                "verify: aggregate: V2 booked total ", vm.toString(v2Staked), " below the principal due net of self-exits (floor ",
+                vm.toString(floor), ") for ", IERC20Metadata(t).symbol()
+            )
+        );
+    }
+
+    /// @dev Sum over this pool's `UserMigrated` rows of an UPPER bound on each exiter's V1 principal. V1 credits
+    ///      `credit = floor(amount * S / P)`, so `amount * S < (credit + 1) * P`, i.e.
+    ///      `amount <= ceil((credit + 1) * P / S)`. Rounding up only ever LOOSENS the floor above.
+    function _selfExitedPrincipalUpperBound(address t, CutoverEvent[] memory selfExits, uint256 P, uint256 S)
+        internal
+        pure
+        returns (uint256 total)
+    {
+        for (uint256 k = 0; k < selfExits.length; k++) {
+            if (selfExits[k].token != t) continue;
+            if (S == 0) return P; // nothing realized: any exiter may have held the whole snapshot
+            total += ((selfExits[k].amount + 1) * P + S - 1) / S;
         }
     }
 
