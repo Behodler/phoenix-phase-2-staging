@@ -19,6 +19,9 @@ fs_permissions = [
     # finding L-02 from Low to Medium, and a green verifier run proves nothing without it
     # pinned. Read access only; nothing writes under ./script.
     { access = "read", path = "./script" },
+    # Story 086: READ-ONLY. test/VerifyStableStakerV2CutoverGuards.t.sol pins that the
+    # stable-staker-v2-cutover:broadcast key runs :verify before :preview.
+    { access = "read", path = "./package.json" },
 ]
 
 # Archived one-off scripts. `script/archives/` holds the historical mainnet

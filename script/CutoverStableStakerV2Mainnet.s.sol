@@ -57,10 +57,16 @@ import {
  *   npm run stable-staker-v2-cutover:preview     (impersonates OWNER on live mainnet state)
  *   npm run stable-staker-v2-cutover:broadcast   (Ledger m/44'/60'/46'/0/0; chains to :preview)
  *
- *   PREVIEW DOUBLES AS POST-BROADCAST VERIFICATION. Preview READS the progress file when one exists
- *   (never writes it). After a completed broadcast every phase below detects - from ON-CHAIN state,
- *   with the progress file supplying only the three deployed addresses - that it is already done and
- *   skips, so Phase 8 and the smoke tests then run against the live deployment.
+ *   npm run stable-staker-v2-cutover:verify      (story 086: read-only, asserts every phase on chain)
+ *
+ *   PREVIEW IS NOT THE POST-BROADCAST VERIFICATION (story 086, audit L-02). Preview READS the progress
+ *   file when one exists (never writes it) and re-enters this whole run() under a prank, and every phase
+ *   has the form `if (!done) do();` - so a step that never landed on chain is silently PERFORMED inside
+ *   the simulation and Phase 8 then asserts the simulated state. The post-broadcast verification is
+ *   `script/VerifyStableStakerV2Cutover.s.sol`, which requires each phase's done-condition from live
+ *   chain state and never mutates. The done-conditions are the `_done*` / `_v1*` predicates below,
+ *   shared by this script's phase gates and by the verifier so the two cannot drift. After verify has
+ *   passed, preview is a smoke test of the live deployment.
  *
  *   The progress file is written during forge's LOCAL execution pass, before any transaction is
  *   sent. After a crashed broadcast it can therefore name a contract that never landed. Every
@@ -155,7 +161,15 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(block.chainid == CHAIN_ID, "Wrong chain id - expected Mainnet (1)");
     }
 
-    function run() external {
+    /// @dev Story 086: first block the cutover session could have landed a transaction in. Write-once: taken
+    ///      from `block.number` the first time the progress file is written (forge's LOCAL pass starts at or
+    ///      before every broadcast transaction's block) and adopted verbatim from the file thereafter.
+    ///      `VerifyStableStakerV2Cutover` uses it as the `fromBlock` of its per-user event re-check.
+    uint256 public cutoverStartBlock;
+
+    /// @dev `virtual` since story 086 so `VerifyStableStakerV2Cutover` can replace the entry point with a
+    ///      read-only one. The cutover npm keys name `:CutoverStableStakerV2Mainnet` explicitly.
+    function run() external virtual {
         console.log("=================================================");
         console.log("  MAINNET STABLESTAKER V1 -> V2 CUTOVER (story 082)");
         console.log("=================================================");
@@ -300,7 +314,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     ///      still unregisters V1. Phase 7 calls the same helper as an idempotent backstop.
     function _phase1_pauseV1() internal {
         console.log("\n=== Phase 1: retire V1 (pauser OWNER, unregister, pause) ===");
-        if (address(v2) != address(0) && v2.pauser() == PAUSER) {
+        if (_doneCutoverFinalized()) {
             console.log("  cutover already finalized (V2 pauser == Pauser) - V1 retirement skipped (Phase 7/8 assert it)");
             return;
         }
@@ -314,26 +328,23 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     ///      on-chain state and followed by a read-back require, so any resume converges.
     function _retireV1(string memory phase) internal {
         IPausableLike v1p = IPausableLike(STABLE_STAKER_V1);
-        if (v1p.pauser() != OWNER) {
+        if (!_v1PauserIsOwner()) {
             v1p.setPauser(OWNER);
         }
-        require(v1p.pauser() == OWNER, string.concat(phase, ": V1 pauser not moved to OWNER"));
-        if (IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1)) {
+        require(_v1PauserIsOwner(), string.concat(phase, ": V1 pauser not moved to OWNER"));
+        if (!_v1UnregisteredFromPauser()) {
             IPauserRegistry(PAUSER).unregister(STABLE_STAKER_V1);
             console.log("  Pauser.unregister(V1) - retired staker removed from the global pause registry");
         } else {
             console.log("  V1 already unregistered from Pauser - skipped");
         }
-        require(
-            !IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1),
-            string.concat(phase, ": V1 still registered with Pauser")
-        );
-        if (!v1p.paused()) {
+        require(_v1UnregisteredFromPauser(), string.concat(phase, ": V1 still registered with Pauser"));
+        if (!_v1Paused()) {
             v1p.pause();
         } else {
             console.log("  V1 already paused - pause step skipped");
         }
-        require(v1p.paused(), string.concat(phase, ": V1 not paused"));
+        require(_v1Paused(), string.concat(phase, ": V1 not paused"));
     }
 
     // =====================================================================
@@ -349,9 +360,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         } else {
             console.log("  Antimatter loaded from progress file:", address(antimatter));
         }
-        require(keccak256(bytes(antimatter.name())) == keccak256("Antimatter"), "Phase2: Antimatter name");
-        require(keccak256(bytes(antimatter.symbol())) == keccak256("AM"), "Phase2: Antimatter symbol");
-        require(antimatter.owner() == OWNER, "Phase2: Antimatter owner != OWNER");
+        require(_doneAntimatterIdentity(), "Phase2: Antimatter name / symbol / owner != Antimatter / AM / OWNER");
 
         // ORDER IS LOAD-BEARING: setPhUSDMinter reverts PhUSDNotSet otherwise.
         if (address(antimatter.phUSD()) != PHUSD) {
@@ -361,7 +370,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             antimatter.setPhUSDMinter(PhusdStableMinter(PHUSD_STABLE_MINTER));
         }
         require(address(antimatter.phUSD()) == PHUSD, "Phase2: Antimatter.phUSD did not land");
-        require(address(antimatter.phUSDMinter()) == PHUSD_STABLE_MINTER, "Phase2: Antimatter.phUSDMinter did not land");
+        require(_doneAntimatterWired(), "Phase2: Antimatter.phUSDMinter did not land");
         console.log("  Antimatter wired to phUSD + PhusdStableMinter (read back)");
     }
 
@@ -385,9 +394,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
         require(v2.STAKER_VERSION() == 2, "Phase3: deployed staker is not version 2");
         require(address(v2.antimatter()) == address(antimatter), "Phase3: V2.antimatter != Antimatter");
-        require(v2.owner() == OWNER, "Phase3: V2 owner != OWNER");
+        require(_doneStakerV2Identity(), "Phase3: V2 owner != OWNER");
 
-        if (v2.pauser() == PAUSER) {
+        if (_doneCutoverFinalized()) {
             console.log("  V2 already finalized (pauser == Pauser) - pause step skipped");
             return;
         }
@@ -414,15 +423,15 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         address ys = _strategyFor(t);
         console.log("  -- pool", t, IERC20Metadata(t).symbol());
 
-        if (!_contains(v2.getStakedTokens(), t)) {
+        if (!_donePoolTokenAdded(t)) {
             v2.addToken(t);
         }
-        if (!IClientGetter(ys).authorizedClients(address(v2))) {
+        if (!_donePoolClientSet(t)) {
             IYieldStrategy(ys).setClient(address(v2), true);
         }
-        require(IClientGetter(ys).authorizedClients(address(v2)), "Phase4: strategy.setClient(V2) did not land");
+        require(_donePoolClientSet(t), "Phase4: strategy.setClient(V2) did not land");
 
-        if (address(v2.yieldStrategy(t)) != ys) {
+        if (!_donePoolStrategySet(t)) {
             // Idle-balance guard. `setYieldStrategy` sweeps any idle token balance into a strategy
             // deposit. A donated dust balance to the predictable V2 address could make that deposit
             // revert ("no shares received") and brick the pool setup. Rescue it to OWNER first -
@@ -437,23 +446,22 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             require(IERC20(t).balanceOf(address(v2)) == 0, "Phase4: V2 idle balance != 0 immediately before setYieldStrategy");
             v2.setYieldStrategy(t, IYieldStrategy(ys));
         }
-        require(address(v2.yieldStrategy(t)) == ys, "Phase4: V2 yieldStrategy did not land");
+        require(_donePoolStrategySet(t), "Phase4: V2 yieldStrategy did not land");
 
         uint256 buf = v1BufferPct[t];
-        if (ICutoverBuffer(ys).setAsideBufferSize(address(v2)) != buf) {
+        if (!_donePoolBufferCopied(t)) {
             IYieldStrategy(ys).setSetAsideBuffer(address(v2), buf);
         }
-        require(ICutoverBuffer(ys).setAsideBufferSize(address(v2)) == buf, "Phase4: V2 set-aside buffer != V1's");
+        require(_donePoolBufferCopied(t), "Phase4: V2 set-aside buffer != V1's");
 
         uint256 c = cPerDay[t];
         require(c > 0, "Phase4: V1 phUSD rate for token is 0 - refusing a zero Antimatter emission");
         uint256 newPerDay = c * RATE_NUMERATOR / RATE_DENOMINATOR;
-        (uint256 perSecond,,,) = v2.poolInfo(t);
-        if (perSecond != newPerDay / 86400) {
+        if (!_donePoolRateSet(t)) {
             v2.antimatterPerDay(t, newPerDay);
         }
-        (perSecond,,,) = v2.poolInfo(t);
-        require(perSecond == newPerDay / 86400, "Phase4: V2 antimatterPerSecond != (C * 21 / 10) / 86400");
+        require(_donePoolRateSet(t), "Phase4: V2 antimatterPerSecond != (C * 21 / 10) / 86400");
+        (uint256 perSecond,,,) = v2.poolInfo(t);
         console.log("    C (V1 phUSD/day) / Antimatter/day (2.1x):", c, newPerDay);
         console.log("    antimatterPerSecond / setAsideBuffer %:", perSecond, buf);
 
@@ -479,23 +487,23 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
     function _phase5_mintRights() internal {
         console.log("\n=== Phase 5: mint rights ===");
-        if (!antimatter.isApprovedMinter(address(v2))) {
+        if (!_doneV2AntimatterMinter()) {
             antimatter.setApprovedMinter(address(v2), true);
         }
-        require(antimatter.isApprovedMinter(address(v2)), "Phase5: V2 is not an approved Antimatter minter");
+        require(_doneV2AntimatterMinter(), "Phase5: V2 is not an approved Antimatter minter");
         console.log("  Antimatter.setApprovedMinter(V2) - VERIFIED by read-back");
 
-        if (!v2.phUSDMintAvailable()) {
+        if (!_doneV2PhusdMinter()) {
             IPhUSDOwner(PHUSD).setMinter(address(v2), true);
         }
-        require(v2.phUSDMintAvailable(), "Phase5: V2 cannot mint phUSD (autoAnnihilate shortfall cover dead)");
+        require(_doneV2PhusdMinter(), "Phase5: V2 cannot mint phUSD (autoAnnihilate shortfall cover dead)");
         console.log("  phUSD.setMinter(V2) - VERIFIED via phUSDMintAvailable()");
 
         if (GRANT_ANTIMATTER_PHUSD_MINT) {
-            if (!_canMintPhUSD(address(antimatter))) {
+            if (!_doneAntimatterPhusdMinter()) {
                 IPhUSDOwner(PHUSD).setMinter(address(antimatter), true);
             }
-            require(_canMintPhUSD(address(antimatter)), "Phase5: Antimatter cannot mint phUSD (annihilate dead)");
+            require(_doneAntimatterPhusdMinter(), "Phase5: Antimatter cannot mint phUSD (annihilate dead)");
             console.log("  phUSD.setMinter(Antimatter) - VERIFIED at current mintVersion");
         }
 
@@ -517,9 +525,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         } else {
             console.log("  CrossVersionMigrator loaded from progress file:", address(migrator));
         }
-        require(address(migrator.oldStaker()) == STABLE_STAKER_V1, "Phase6: migrator.oldStaker != V1");
-        require(address(migrator.newStaker()) == address(v2), "Phase6: migrator.newStaker != V2");
-        require(migrator.owner() == OWNER, "Phase6: migrator owner != OWNER");
+        require(_doneMigratorIdentity(), "Phase6: migrator oldStaker / newStaker / owner != V1 / V2 / OWNER");
 
         if (IMigratorRole(STABLE_STAKER_V1).migrator() != address(migrator)) {
             IMigratorRole(STABLE_STAKER_V1).setMigrator(address(migrator));
@@ -527,8 +533,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         if (v2.migrator() != address(migrator)) {
             v2.setMigrator(address(migrator));
         }
-        require(IMigratorRole(STABLE_STAKER_V1).migrator() == address(migrator), "Phase6: V1 migrator not wired");
-        require(v2.migrator() == address(migrator), "Phase6: V2 migrator not wired");
+        require(_doneMigratorWired(), "Phase6: V1 / V2 migrator not wired");
         require(migrator.versionOf(STABLE_STAKER_V1) == 1, "Phase6: source staker did not probe as version 1");
         require(migrator.versionOf(address(v2)) == 2, "Phase6: destination staker is not version 2");
 
@@ -563,18 +568,16 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         for (uint256 i = 0; i < tokens.length; i++) {
             address t = tokens[i];
             address ys = _strategyFor(t);
-            require(v1.poolState(t) == POOL_MIGRATING, "Phase7: a V1 pool is not Migrating");
+            require(_doneV1PoolMigrating(t), "Phase7: a V1 pool is not Migrating");
             PoolPlan memory rest = _planPool(v1, t, ys);
             require(rest.migratable.length == 0, "Phase7: migratable V1 stakers remain - refusing to finalize");
 
             // The recipient is GLOBAL per strategy. Repointed AFTER migration: skimSurplus is the only
             // reader, the migration never skims, and V1 is drained. A pre-story-047 strategy (the live
             // USDe one) has no recipient and pays each client its own buffer, so V2 already receives it.
-            (bool hasRecipient, address recipient) = _bufferRecipient(ys);
-            if (hasRecipient && recipient != address(v2)) {
+            if (!_doneBufferRecipientV2(ys)) {
                 IYieldStrategy(ys).setSetAsideBufferRecipient(address(v2));
-                (, recipient) = _bufferRecipient(ys);
-                require(recipient == address(v2), "Phase7: setAsideBufferRecipient not repointed to V2");
+                require(_doneBufferRecipientV2(ys), "Phase7: setAsideBufferRecipient not repointed to V2");
                 console.log("  setAsideBufferRecipient -> V2 on strategy:", ys);
             }
         }
@@ -582,13 +585,13 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         // Revoke only after every non-straggler has migrated (asserted just above). A straggler's own
         // later `userMigrate` would need to mint its frozen pending phUSD and will revert while that
         // pending is non-zero: accepted, stragglers are sub-cent dust and protocol safety comes first.
-        if (_canMintPhUSD(STABLE_STAKER_V1)) {
+        if (!_v1MintRevoked()) {
             IPhUSDOwner(PHUSD).setMinter(STABLE_STAKER_V1, false);
             console.log("  phUSD.setMinter(V1, false) - retired staker's mint authority REVOKED");
         } else {
             console.log("  V1 phUSD mint already revoked - skipped");
         }
-        require(!_canMintPhUSD(STABLE_STAKER_V1), "Phase7: V1 phUSD mint not revoked");
+        require(_v1MintRevoked(), "Phase7: V1 phUSD mint not revoked");
 
         // V1 retirement BACKSTOP. Story 084 (audit L-04) moved the retirement itself into Phase 1: V1's
         // pauser moves to OWNER, V1 is UNREGISTERED from the Pauser and only THEN paused, so the global
@@ -605,10 +608,12 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         if (!IPauserRegistry(PAUSER).isRegistered(address(antimatter))) {
             IPauserRegistry(PAUSER).register(address(antimatter));
         }
+        require(_doneV2PauseWired(), "Phase7: V2 pauser / Pauser registration did not land");
+        require(_doneAntimatterPauseWired(), "Phase7: Antimatter pauser / Pauser registration did not land");
         // unpause is owner-or-pauser, so it works after the pauser hand-back.
-        if (v2.paused()) v2.unpause();
-        require(!v2.paused(), "Phase7: V2 still paused");
-        require(!v2.claimEnabled(), "Phase7: claimEnabled must stay false");
+        if (!_doneV2Unpaused()) v2.unpause();
+        require(_doneV2Unpaused(), "Phase7: V2 still paused");
+        require(_doneClaimStillDisabled(), "Phase7: claimEnabled must stay false");
         console.log("  V1 pauser -> OWNER, unregistered from Pauser, left paused; V2 + Antimatter registered with Pauser; V2 unpaused");
     }
 
@@ -937,6 +942,129 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     }
 
     // =====================================================================
+    //  STORY 086 - on-chain DONE predicates (audit L-02)
+    // =====================================================================
+    //  Every phase gate above has the form `if (!done) do();`. The `done` half lives here, as a
+    //  `view` predicate over LIVE chain state, and is shared verbatim by
+    //  `script/VerifyStableStakerV2Cutover.s.sol`, which `require`s each one instead of performing the
+    //  step. One definition per condition, so the gate and the verifier cannot drift apart.
+    //  Predicates that dereference `antimatter` / `v2` / `migrator` return false while that address is
+    //  unset, so the verifier reports "not on chain" rather than reverting on a call to address(0).
+
+    // ---- Phase 1 / Phase 7 backstop: V1 retirement triple ----
+    function _v1PauserIsOwner() internal view returns (bool) {
+        return IPausableLike(STABLE_STAKER_V1).pauser() == OWNER;
+    }
+
+    function _v1UnregisteredFromPauser() internal view returns (bool) {
+        return !IPauserRegistry(PAUSER).isRegistered(STABLE_STAKER_V1);
+    }
+
+    function _v1Paused() internal view returns (bool) {
+        return IPausableLike(STABLE_STAKER_V1).paused();
+    }
+
+    /// @dev The finalized marker: V2's pauser is handed to the Pauser in Phase 7 only.
+    function _doneCutoverFinalized() internal view returns (bool) {
+        return address(v2) != address(0) && v2.pauser() == PAUSER;
+    }
+
+    // ---- Phase 2: Antimatter ----
+    function _doneAntimatterIdentity() internal view returns (bool) {
+        return address(antimatter).code.length > 0 && keccak256(bytes(antimatter.name())) == keccak256("Antimatter")
+            && keccak256(bytes(antimatter.symbol())) == keccak256("AM") && antimatter.owner() == OWNER;
+    }
+
+    function _doneAntimatterWired() internal view returns (bool) {
+        return address(antimatter).code.length > 0 && address(antimatter.phUSD()) == PHUSD
+            && address(antimatter.phUSDMinter()) == PHUSD_STABLE_MINTER;
+    }
+
+    // ---- Phase 3: StableStakerV2 ----
+    function _doneStakerV2Identity() internal view returns (bool) {
+        return address(v2).code.length > 0 && v2.STAKER_VERSION() == 2 && address(v2.antimatter()) == address(antimatter)
+            && v2.owner() == OWNER;
+    }
+
+    // ---- Phase 4: per-token pool setup ----
+    function _donePoolTokenAdded(address t) internal view returns (bool) {
+        return _contains(v2.getStakedTokens(), t);
+    }
+
+    function _donePoolClientSet(address t) internal view returns (bool) {
+        return IClientGetter(_strategyFor(t)).authorizedClients(address(v2));
+    }
+
+    function _donePoolStrategySet(address t) internal view returns (bool) {
+        return address(v2.yieldStrategy(t)) == _strategyFor(t);
+    }
+
+    function _donePoolBufferCopied(address t) internal view returns (bool) {
+        return ICutoverBuffer(_strategyFor(t)).setAsideBufferSize(address(v2)) == v1BufferPct[t];
+    }
+
+    /// @dev Requires `cPerDay[t]` hydrated by Phase 0.
+    function _donePoolRateSet(address t) internal view returns (bool) {
+        (uint256 perSecond,,,) = v2.poolInfo(t);
+        return perSecond == (cPerDay[t] * RATE_NUMERATOR / RATE_DENOMINATOR) / 86400;
+    }
+
+    // ---- Phase 5: mint rights ----
+    function _doneV2AntimatterMinter() internal view returns (bool) {
+        return antimatter.isApprovedMinter(address(v2));
+    }
+
+    function _doneV2PhusdMinter() internal view returns (bool) {
+        return v2.phUSDMintAvailable();
+    }
+
+    function _doneAntimatterPhusdMinter() internal view returns (bool) {
+        return _canMintPhUSD(address(antimatter));
+    }
+
+    // ---- Phase 6: migration ----
+    function _doneMigratorIdentity() internal view returns (bool) {
+        return address(migrator).code.length > 0 && address(migrator.oldStaker()) == STABLE_STAKER_V1
+            && address(migrator.newStaker()) == address(v2) && migrator.owner() == OWNER;
+    }
+
+    function _doneMigratorWired() internal view returns (bool) {
+        return address(migrator) != address(0) && IMigratorRole(STABLE_STAKER_V1).migrator() == address(migrator)
+            && v2.migrator() == address(migrator);
+    }
+
+    function _doneV1PoolMigrating(address t) internal view returns (bool) {
+        return ICutoverStaker(STABLE_STAKER_V1).poolState(t) == POOL_MIGRATING;
+    }
+
+    // ---- Phase 7: finalize ----
+    /// @dev A pre-story-047 strategy has no recipient getter and pays each client directly: done by construction.
+    function _doneBufferRecipientV2(address ys) internal view returns (bool) {
+        (bool hasRecipient, address recipient) = _bufferRecipient(ys);
+        return !hasRecipient || recipient == address(v2);
+    }
+
+    function _v1MintRevoked() internal view returns (bool) {
+        return !_canMintPhUSD(STABLE_STAKER_V1);
+    }
+
+    function _doneV2PauseWired() internal view returns (bool) {
+        return v2.pauser() == PAUSER && IPauserRegistry(PAUSER).isRegistered(address(v2));
+    }
+
+    function _doneAntimatterPauseWired() internal view returns (bool) {
+        return antimatter.pauser() == PAUSER && IPauserRegistry(PAUSER).isRegistered(address(antimatter));
+    }
+
+    function _doneV2Unpaused() internal view returns (bool) {
+        return !v2.paused();
+    }
+
+    function _doneClaimStillDisabled() internal view returns (bool) {
+        return !v2.claimEnabled();
+    }
+
+    // =====================================================================
     //  Helpers
     // =====================================================================
 
@@ -1008,6 +1136,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         antimatter = Antimatter(_loadAddress(json, "Antimatter"));
         v2 = StableStakerV2(_loadAddress(json, "StableStakerV2"));
         migrator = CrossVersionMigrator(_loadAddress(json, "CrossVersionMigrator"));
+        if (vm.keyExistsJson(json, ".baselines.cutoverStartBlock")) {
+            cutoverStartBlock = vm.parseUint(vm.parseJsonString(json, ".baselines.cutoverStartBlock"));
+        }
         if (vm.keyExistsJson(json, ".baselines.phusdMinterMask")) {
             phusdMaskAtPhase0 = vm.parseUint(vm.parseJsonString(json, ".baselines.phusdMinterMask"));
             phusdMintVersionAtPhase0 = vm.parseUint(vm.parseJsonString(json, ".baselines.phusdMintVersion"));
@@ -1036,6 +1167,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         c = _serializeEntry("StableStakerV2", address(v2));
         c = _serializeEntry("CrossVersionMigrator", address(migrator));
 
+        // Story 086: write-once lower bound for the verifier's per-user event scan.
+        if (cutoverStartBlock == 0) cutoverStartBlock = block.number;
+        vm.serializeString("s082.baselines", "cutoverStartBlock", vm.toString(cutoverStartBlock));
         vm.serializeString("s082.baselines", "phusdMinterMask", vm.toString(phusdMaskAtPhase0));
         string memory b = vm.serializeString("s082.baselines", "phusdMintVersion", vm.toString(phusdMintVersionAtPhase0));
 
