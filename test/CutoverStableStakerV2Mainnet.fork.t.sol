@@ -1494,10 +1494,11 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
 
     function test_ethBudget_math() public {
         CutoverStableStakerV2MainnetHarness x = new CutoverStableStakerV2MainnetHarness();
-        assertEq(x.CUTOVER_GAS_BUDGET(), 22_000_000, "budget");
-        assertGe(x.CUTOVER_GAS_BUDGET(), 18_317_077 + 3_383_096, "covers rehearsal gasUsed + largest late gas limit");
-        assertEq(x.harnessRequiredOwnerEth(300_000_000), 7_920_000_000_000_000, "0.3 gwei -> 0.00792 ETH");
-        assertEq(x.harnessRequiredOwnerEth(350_000_000), 9_240_000_000_000_000, "0.35 gwei -> 0.00924 ETH");
+        // Story 095 (audit-35 L-10): sized to the 67-tx rehearsal's BINDING PEAK, max_i(sum_{j<i} gasUsed_j + gasLimit_i).
+        assertEq(x.CUTOVER_GAS_BUDGET(), 27_000_000, "budget");
+        assertGe(x.CUTOVER_GAS_BUDGET(), 25_163_101, "covers the binding peak (cumulative gasUsed before tx + its signed limit)");
+        assertEq(x.harnessRequiredOwnerEth(300_000_000), 9_720_000_000_000_000, "0.3 gwei -> 0.00972 ETH");
+        assertEq(x.harnessRequiredOwnerEth(350_000_000), 11_340_000_000_000_000, "0.35 gwei -> 0.01134 ETH");
     }
 
     // =====================================================================

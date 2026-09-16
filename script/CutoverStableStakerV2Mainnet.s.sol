@@ -41,9 +41,10 @@ import {
  *      pause(), each step state-gated. V1 is UNREGISTERED BEFORE it is paused so the permissionless
  *      global `Pauser.pause()` (which loops every registrant with no try/catch) is not bricked by V1.
  *      BREAKER LIVENESS (stories 084 + 087 + 088, audit L-04 / audit-33 L-05): `Pauser.pause()` never REVERTS
- *      after any transaction of the session EXCEPT ONE forced window - the single tx between
+ *      after any transaction of the session EXCEPT TWO forced one-tx windows - here, the single tx between
  *      `V1.setPauser(OWNER)` and `Pauser.unregister(V1)` (unregister requires V1.pauser() != Pauser, and a
- *      registered V1 whose pauser is OWNER reverts `only pauser`). A live breaker only pauses REGISTRANTS,
+ *      registered V1 whose pauser is OWNER reverts `only pauser`), and the same shape when Phase 6b retires the
+ *      autoDOLA strategy (story 092; PHASE 6b HALT POINTS (g)). A live breaker only pauses REGISTRANTS,
  *      though, and Phase 7 has two further one-tx COVERAGE gaps where a contract is unpaused, its pauser is
  *      already the Pauser, and it is not yet registered, so a global pause succeeds but MISSES it (story 088):
  *      V2 between its unpause and Pauser.register(V2), and Antimatter between its setPauser(Pauser) and
@@ -123,12 +124,17 @@ import {
  *   address loaded from it is required to have code; one that does not aborts with an instruction
  *   to trim the file to the on-chain-confirmed deployments (run-latest.json receipts + `cast nonce`).
  *
- *   HALTED RUNS (stories 084 + 087): the ONE halt point that leaves the global permissionless pause DEAD is
- *   between Phase 1's `V1.setPauser(OWNER)` and `Pauser.unregister(V1)` (or a V1 paused manually while still
- *   registered). Do not walk away from such a halt: resume it (Phase 1 converges from any partial state), or
- *   at minimum have OWNER call `Pauser.unregister(V1)`. A preview on such a state reports
- *   `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`. Every Phase 7 halt point keeps `Pauser.pause()` from reverting, because
- *   V2 is unpaused before it is registered (audit-33 L-05), and a resume from any of them converges.
+ *   HALTED RUNS (stories 084 + 087 + 092 + 095): TWO halt points leave the global permissionless pause DEAD
+ *   (`Pauser.pause()` reverts), each for one forced tx:
+ *     (1) between Phase 1's `V1.setPauser(OWNER)` and `Pauser.unregister(V1)` (txs 1 -> 2; or a V1 paused manually
+ *         while still registered). REMEDY: resume (Phase 1 converges from any partial state), or at minimum OWNER
+ *         calls `Pauser.unregister(V1)`. A preview on such a state reports `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`.
+ *     (2) between Phase 6b's autoDOLA strategy (0x1760...) `setPauser(OWNER)` and `Pauser.unregister(0x1760...)`
+ *         (leg-2 txs 11 -> 12 with no re-approve; see PHASE 6b HALT POINTS (g)). REMEDY FIRST: OWNER calls
+ *         `Pauser.unregister(0x1760...)`; a preview on the un-remedied halt reverts `globalPause(phase0)`.
+ *   Do not walk away from either. Every Phase 7 halt point keeps `Pauser.pause()` from reverting, because V2 is
+ *   unpaused before it is registered (audit-33 L-05), and a resume from any of them converges - but two of them are
+ *   COVERAGE gaps where the pause succeeds while MISSING one contract (see PHASE 7 COVERAGE GAPS below).
  *
  *   PHASE 3b HALT POINTS (story 091, 088's pattern). Nothing in Phase 3b makes `Pauser.pause()` revert: the new
  *   strategy is never paused and is registered only once its pauser is the Pauser. Halts:
@@ -269,9 +275,10 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     uint256 public constant DOLA_WITHDRAWAL_WAITING_PERIOD = 6 hours;
     uint256 public constant DOLA_WITHDRAWAL_EXECUTION_WINDOW = 72 hours;
     /// @dev Story 092. Phase 0 refuses to START the session unless at least this long remains before the minter's
-    ///      execution window closes. Phase 6b's execute is transaction ~40 of a `--slow` Ledger session (46 transactions,
-    ///      each needing a physical confirmation; story 087 measured the rehearsal) and a halted session may need a
-    ///      resume leg; 6 hours covers a slow session plus one halt-and-resume with room to spare, and still leaves a
+    ///      execution window closes. Phase 6b's execute is the 44th and LAST transaction of broadcast leg 1 of a `--slow`
+    ///      Ledger session (65-67 transactions over two legs since story 094, each needing a physical confirmation;
+    ///      the audit-35 rehearsal measured 67 before the leg split), leg 2 must follow once it mines, and a halted
+    ///      session may need a resume leg; 6 hours covers a slow session plus one halt-and-resume with room to spare, and still leaves a
     ///      66-hour start window. Too late to start means: wait for expiry, re-initiate, wait 6h.
     uint256 public constant WINDOW_SAFETY_MARGIN = 6 hours;
     /// @dev AYieldStrategy.WithdrawalStatus ordinals (enum { None, Initiated, Executable, Expired }).
@@ -466,14 +473,21 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     //  STORY 087 - OWNER ETH preflight (audit-33 L-07)
     // =====================================================================
 
-    /// @dev Gas budget for the WHOLE cutover, in gas units. Derived from the audit-33 anvil rehearsal
-    ///      (fork block 25981150, `fork-logs/anvil-broadcast-gas-budget.txt`): 46 transactions, total
-    ///      gasUsed 18,317,077. A node checks `balance >= gasLimit * price` UPFRONT per transaction, and
-    ///      `--gas-estimate-multiplier 200` roughly doubles each limit, so the balance must also cover the
-    ///      unused limit headroom of the largest LATE transaction: #37 USDe `migrate`, actual limit 3,383,096.
-    ///      18,317,077 + 3,383,096 = 21,700,173, rounded UP to 22,000,000. The preflight then adds 20% on top.
-    ///      A RESUME requires the full budget too (conservative: a top-up is cheap, a second halt is not).
-    uint256 public constant CUTOVER_GAS_BUDGET = 22_000_000;
+    /// @dev Gas budget for the WHOLE cutover, in gas units (story 095, audit-35 L-10; replaces story 087's 22,000,000,
+    ///      which was sized to the 46-transaction audit-33 rehearsal before stories 091 + 092 added 21 transactions).
+    ///      SIZING RULE (the BINDING PEAK): a node checks `balance >= gasLimit * price` UPFRONT for each transaction, and
+    ///      `--gas-estimate-multiplier 200` roughly doubles each limit, so the balance OWNER needs is not the total gasUsed
+    ///      but max over transactions i of (sum of gasUsed of every tx before i + the signed gasLimit of i).
+    ///      Measured on the audit-35 anvil broadcast at fork block 25990689 (the pre-story-094 single-leg session,
+    ///      67 transactions; V1 stakers DOLA 9 / USDC 13 / USDe 7): total gasUsed 22,982,701; binding peak 25,163,101 on
+    ///      the USDe `migrate` (42nd tx, signed limit 6,706,846). Rounded UP to 27,000,000 (~7% headroom over the peak),
+    ///      and the preflight then adds 20% on top. The peak grows with V1 stakers: each extra USDe staker adds ~0.38M
+    ///      gasUsed and ~0.77M limit to that migrate - re-derive if the staker counts grow materially.
+    ///      TWO LEGS (story 094): the session is now broadcast in two legs (leg 1 ends after the minter execute, 44 txs;
+    ///      leg 2 re-seeds and finishes, 21 txs, or up to 23 if OWNER's DOLA allowance to the minter must be re-approved).
+    ///      Splitting only removes gas from any single leg, so the 67-tx figure stays an upper bound. EACH LEG's
+    ///      preflight checks this FULL budget, as does any RESUME (conservative: a top-up is cheap, a second halt is not).
+    uint256 public constant CUTOVER_GAS_BUDGET = 27_000_000;
     /// @dev Env var carrying the broadcast gas price in wei. `:broadcast` exports it and feeds the SAME value to
     ///      forge's `--with-gas-price`, so the preflight and the signed transactions cannot disagree.
     string public constant GAS_PRICE_ENV = "CUTOVER_GAS_PRICE_WEI";
