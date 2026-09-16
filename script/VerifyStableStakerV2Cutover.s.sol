@@ -78,6 +78,14 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *         PENDING 6b (story 096, audit-35 L-11). A resume past Phase 6 with a lapsed minter window finalizes V2 and leaves
  *         Phase 6b pending (progress status `awaiting_minter_window`). The verifier REFUSES that state with
  *         `verify: Phase6b: PENDING` - it never reports success until the minter withdrawal has executed and 6b is complete.
+ *         It does not stop at the first 6b check, though: it skips the 6b block, verifies Phase 7, the per-user credits
+ *         (INCLUDING the live `V2 userInfo >= credited` and per-pool aggregate checks - this run is the one chained
+ *         immediately after V2 went live) and Phase 8's pending shape, and only THEN reverts `verify: Phase6b: PENDING`.
+ *         Once 6b completes (V2 has then been live for >= 6h: expiry, re-initiate, 6h wait), the progress file's sticky
+ *         `minterMove.v2LiveBeforeMinterMove` makes the verifier SKIP exactly those two live-balance comparisons - migrated
+ *         users may legitimately have withdrawn - and keep every event-based check (a `DepositedFor` per `MigratedOut`,
+ *         the per-user loss bound, the vacuity guard) plus the full 6b block. Without the marker the live checks run as
+ *         before, so a normal cutover is verified exactly as strictly as it was.
  *
  *         RUN IT IMMEDIATELY AFTER THE BROADCAST. The per-pool aggregate and the `V2 userInfo >= credited`
  *         check read live V2 balances; once migrated users start withdrawing from V2 they can legitimately
@@ -145,8 +153,19 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         _verifyPhase7_finalize();
         _verifyPerUserCredits();
 
-        // Absolute end-state wiring (view-only), including story 084's registrant sweep.
+        // Absolute end-state wiring (view-only), including story 084's registrant sweep. While 6b is pending it asserts
+        // the pending shape (config recorded, DOLA minting disabled, source still registered).
         _phase8_wiringAssertions();
+
+        // Story 096: everything but 6b verified - still NOT a verified cutover.
+        require(
+            !minterMovePending,
+            string.concat(
+                "verify: Phase6b: PENDING - the minter DOLA totalWithdrawal has not executed (story 096 lapsed-window resume: V2 is live, DOLA minting disabled). Phases 1-7, Phase 8's pending shape and ",
+                vm.toString(verifiedUserCount),
+                " per-user credits (incl. live V2 balances) verified. Re-initiate (initiate-dola-ys-withdrawal:broadcast), wait 6h, run :preview + :broadcast to complete 6b, then verify again"
+            )
+        );
 
         console.log("");
         console.log("=================================================");
@@ -331,11 +350,12 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     function _verifyPhase6b_minterMove() internal {
         console.log("\n=== verify Phase 6b: minter DOLA collateral, SYA, retired autoDOLA strategy ===");
         // Story 096 (audit-35 L-11): a lapsed-window resume finalizes V2 (Phase 7) while 6b waits for a re-initiated minter
-        // window. That state is NOT a verified cutover - say so first, before any record or step check.
-        require(
-            !minterMovePending && _doneMinterWithdrawalExecuted(),
-            "verify: Phase6b: PENDING - the minter DOLA totalWithdrawal has not executed (story 096 lapsed-window resume: V2 is live, DOLA minting disabled). Re-initiate (initiate-dola-ys-withdrawal:broadcast), wait 6h, run :preview + :broadcast to complete 6b, then verify again"
-        );
+        // window. That state is NOT a verified cutover: the 6b block is skipped here and `run()` reverts
+        // `verify: Phase6b: PENDING` after the remaining phases and the live per-user checks have been verified.
+        if (minterMovePending) {
+            console.log("  Phase 6b PENDING (story 096) - 6b checks deferred; this run WILL end with verify: Phase6b: PENDING");
+            return;
+        }
         require(
             minterConfigRecorded && minterRecoveredRecorded && minterExecRecorded,
             "verify: Phase6b: minterMove records (pre-repoint minter config / execution record / recovered R) absent from the progress file - refusing to guess them"
@@ -467,6 +487,11 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             "verify: per-user: no cutover start block (baselines.cutoverStartBlock absent and CUTOVER_START_BLOCK unset)"
         );
         require(cutoverStartBlock <= block.number, "verify: per-user: cutover start block is in the future");
+        if (v2LiveBeforeMinterMove && !minterMovePending) {
+            console.log("  story 096: V2 went live before Phase 6b completed (minterMove.v2LiveBeforeMinterMove) - live");
+            console.log("  V2 userInfo >= credited and V2 totalStaked >= floor SKIPPED (checked on the pending-state verify);");
+            console.log("  event-based credit checks (DepositedFor per MigratedOut, loss bound, vacuity guard) still enforced");
+        }
 
         CutoverEvent[] memory outs = _decode(_fetchLogs(STABLE_STAKER_V1, MIGRATED_OUT_TOPIC));
         CutoverEvent[] memory selfExits = _decode(_fetchLogs(STABLE_STAKER_V1, USER_MIGRATED_TOPIC));
@@ -534,6 +559,9 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
                     vm.toString(credited), " exceeds the strategy loss bound"
                 )
             );
+            matched++;
+            // Story 096: V2 went live before 6b completed - the live balance comparison ran on the pending-state verify.
+            if (v2LiveBeforeMinterMove && !minterMovePending) continue;
             (uint256 held,) = v2.userInfo(t, o.user);
             require(
                 held >= credited,
@@ -542,7 +570,6 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
                     " < credited ", vm.toString(credited)
                 )
             );
-            matched++;
         }
     }
 
@@ -571,6 +598,12 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         floor = floor > slack ? floor - slack : 0;
         console.log("  aggregate net of self-exits (token / floor / V2 totalStaked):", t, floor, v2Staked);
         console.log("    P / V1 stragglers / self-exited principal (upper bound):", P, v1Staked, selfExited);
+        if (v2LiveBeforeMinterMove && !minterMovePending) {
+            // Story 096: V2 was live for >= 6h before 6b completed; migrated users may have withdrawn. The aggregate ran
+            // on the pending-state verify chained immediately after V2 went live.
+            console.log("    SKIPPED (story 096 v2LiveBeforeMinterMove): live V2 total vs floor - checked on the pending-state verify");
+            return;
+        }
         require(
             v2Staked >= floor,
             string.concat(

@@ -101,7 +101,16 @@ contract VerifyStableStakerV2CutoverHarness is VerifyStableStakerV2Cutover {
             ownerDolaBeforeExec = c.ownerDolaBeforeExec();
             minterRecoveredRecorded = c.minterRecoveredRecorded();
             minterRecovered = c.minterRecovered();
+            v2LiveBeforeMinterMove = c.v2LiveBeforeMinterMove();
         }
+        if (injClearV2LiveMarker) v2LiveBeforeMinterMove = false;
+    }
+
+    bool internal injClearV2LiveMarker;
+
+    /// Story 096 revision: simulate a progress file WITHOUT `minterMove.v2LiveBeforeMinterMove`.
+    function clearV2LiveMarker() external {
+        injClearV2LiveMarker = true;
     }
 
     /// Story 087: the per-pool aggregate with the self-exit list withheld, to prove the subtraction is load-bearing.
@@ -269,6 +278,27 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
 
     function resetTokens() external {
         delete tokens;
+    }
+
+    /// Story 096 revision: the on-chain effect of a preview `run()` resume (Phase 0 .. Phase 8, same order), without the
+    /// preview breaker stages / smoke probes (a second preview `run()` in one fork trips over the first's probes).
+    function resumeAllPhases() external {
+        isPreview = true;
+        minterMovePending = false;
+        delete tokens;
+        _phase0_preconditions();
+        vm.startPrank(OWNER);
+        _phase1_pauseV1();
+        _phase2_antimatter();
+        _phase3_stakerV2();
+        _phase3b_sdolaStrategy();
+        _phase4_pools();
+        _phase5_mintRights();
+        _phase6_migration();
+        _phase6b_minterSyaRetireSource();
+        _phase7_finalize();
+        vm.stopPrank();
+        _phase8_wiringAssertions();
     }
 }
 
@@ -666,22 +696,68 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     }
 
     /// Story 096 (audit-35 L-11): a resume past Phase 6 with a lapsed minter window finalizes V2 (Phase 7) and leaves 6b
-    /// pending. That state must NOT verify: the verifier names the pending 6b instead of reporting success.
+    /// pending. That state must NOT verify: the verifier names the pending 6b instead of reporting success - but only
+    /// AFTER it has verified everything else, including the per-user credits against live V2 balances (this is the
+    /// `:verify` the lapsed-window `:broadcast` tail runs immediately after V2 goes live).
     function test_fork_096_minterMovePending_verifierReverts() public {
         if (!_forkPhases()) return;
+        vm.recordLogs();
         ph.throughPhase5();
         ph.phase6All();
         _ageMinterWithdrawalTo(78 hours + 1);
         ph.resetTokens();
         ph.run(); // the lapsed-window resume (preview-pinned)
+        Vm.Log[] memory logs = vm.getRecordedLogs();
         assertTrue(ph.minterMovePending(), "setup: 6b pending");
+        assertTrue(ph.v2LiveBeforeMinterMove(), "setup: the sticky V2-live-before-6b marker is recorded");
         assertFalse(ph.v2().paused(), "setup: V2 unpaused by the resume");
 
-        vf = new VerifyStableStakerV2CutoverHarness();
-        vf.inject(address(ph.antimatter()), address(ph.v2()), address(ph.migrator()), ph.phusdMaskAtPhase0(), ph.phusdMintVersionAtPhase0());
-        vf.injectSdola(address(ph.sdolaStrategy()));
-        vf.injectMinterMoveFrom(ph);
-        _runExpectingRevertContaining("verify: Phase6b: PENDING");
+        vf = _verifierFrom(logs);
+        string memory reason = _runExpectingRevertContaining("verify: Phase6b: PENDING");
+        assertTrue(_contains(reason, "per-user credits (incl. live V2 balances) verified"), reason);
+        assertFalse(_contains(reason, " and 0 per-user credits"), "the pending-state per-user re-check was not vacuous");
+    }
+
+    /// Story 096 revision (review finding): pending -> V2 live -> a migrated staker WITHDRAWS -> re-initiate, 6h -> 6b
+    /// completes -> the verifier PASSES (as the runbook promises). The live `V2 userInfo >= credited` / aggregate checks
+    /// are skipped because the progress file carries `v2LiveBeforeMinterMove`; without the marker the same state fails on
+    /// exactly that check, so the relaxation is load-bearing and scoped to this path.
+    function test_fork_096_pendingWithdrawThenCompleted_verifierPasses() public {
+        if (!_forkPhases()) return;
+        vm.recordLogs();
+        ph.throughPhase5();
+        ph.phase6All();
+        _ageMinterWithdrawalTo(78 hours + 1);
+        ph.resumeAllPhases(); // lapsed-window resume: 6b pending, V2 unpaused
+        assertTrue(ph.minterMovePending(), "setup: 6b pending");
+        assertTrue(ph.v2LiveBeforeMinterMove(), "setup: marker recorded");
+        StableStakerV2 v2 = ph.v2();
+        assertFalse(v2.paused(), "setup: V2 live");
+
+        // A migrated DOLA staker withdraws everything while 6b is pending.
+        address staker = v2.getStakers(DOLA)[0];
+        (uint256 principal,) = v2.userInfo(DOLA, staker);
+        assertGt(principal, 0, "setup: migrated staker holds principal");
+        vm.prank(staker);
+        v2.withdraw(DOLA, principal);
+
+        // Re-initiate the lapsed window, age 6h, resume: 6b completes (preview: one leg).
+        new InitiateDolaStrategyWithdrawalHarness().run();
+        _ageMinterWithdrawalTo(6 hours + 60);
+        ph.resumeAllPhases();
+        assertFalse(ph.minterMovePending(), "6b no longer pending");
+        assertTrue(ph.v2LiveBeforeMinterMove(), "marker is sticky across the completing resume");
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        vf = _verifierFrom(logs);
+        vf.run();
+        assertGt(vf.verifiedUserCount(), 0, "event-based per-user re-check still ran and was not vacuous");
+        assertGt(vf.verifiedMinedRecovered(), 0, "full 6b block verified (mined R)");
+
+        // Without the marker (a normal cutover's strictness) the withdrawal trips the live per-user check.
+        vf = _verifierFrom(logs);
+        vf.clearV2LiveMarker();
+        _runExpectingRevertContaining(string.concat("verify: per-user: V2 userInfo for ", vm.toString(staker)));
     }
 
     /// Story 092: a progress file without `minterMove` -> the verifier refuses rather than guessing the previous config.

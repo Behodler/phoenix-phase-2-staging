@@ -178,13 +178,17 @@ import {
  *   holds every migrated staker in a paused V2; resume IMMEDIATELY. Phase 0 sees V1 drained and the window not executable
  *   and defers 6b instead of reverting: step (a) runs (config recorded, DOLA minting DISABLED - V2's autoAnnihilate(DOLA)
  *   would otherwise mint into the autoDOLA source), the rest of 6b is skipped, Phase 7 unpauses and registers V2, Phase 8
- *   asserts the pending shape, and the progress status is `awaiting_minter_window` (never `completed`; :verify refuses it
- *   with `verify: Phase6b: PENDING`). 6b and DOLA minting stay pending until the re-initiated window opens; the next
+ *   asserts the pending shape, and the progress status is `awaiting_minter_window` (never `completed`). The :broadcast
+ *   tail's :verify then checks every other phase INCLUDING the live per-user / per-pool V2 balance checks (V2 has only
+ *   just gone live) and ends with `verify: Phase6b: PENDING`, never success. The run persists the sticky
+ *   `minterMove.v2LiveBeforeMinterMove`; once 6b completes :verify passes with those two live-balance comparisons skipped
+ *   (V2 was live >= 6h, so withdrawals legitimately break them) and every event-based credit check kept. 6b and DOLA minting stay pending until the re-initiated window opens; the next
  *   resume inside it completes 6b through story 094's two legs. Phase 7 needs no 6b output: its buffer recipient is set on
  *   the sDOLA destination (Phase 3b), and the V1 revoke / V1 backstop / V2 + Antimatter pauser steps never read the minter,
  *   SYA or the source. The source stays registered and unpaused under the breaker while 6b is pending.
  *     (a) after setStablecoinEnabled(DOLA, false), before the execute: DOLA minting is off (V2's autoAnnihilate(DOLA)
- *         reverts - V2 is still paused, so nobody can call it). Nothing is exposed. Resume.
+ *         reverts - on the normal path V2 is still paused, so nobody can call it; on story 096's lapsed-window path V2 is
+ *         already live and the call simply reverts). Nothing is exposed. Resume.
  *     (b) after the execute, before noMintDeposit: THE MINTER'S DOLA COLLATERAL SITS ON THE OWNER EOA. Since story 094
  *         (audit-35 L-09) this is the DELIBERATE end of every broadcast that executes: forge's local pass computes R
  *         before the execute mines at the live autoDOLA price, so an amount signed in the same session could strand
@@ -354,6 +358,13 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     bool public minterMovePending;
     /// @dev Story 096: progress status of a run that finalized V2 while Phase 6b waits for a (re-)opened minter window.
     string public constant PROGRESS_STATUS_AWAITING_MINTER_WINDOW = "awaiting_minter_window";
+    /// @dev Story 096 revision (review finding): STICKY record that Phase 7 ran while 6b was pending, i.e. V2 went live
+    ///      (unpaused, migrated stakers free to withdraw) BEFORE the minter move completed. Persisted as
+    ///      `minterMove.v2LiveBeforeMinterMove` and never cleared. The verifier reads it: after such a sequence the live
+    ///      `V2 userInfo >= credited` / per-pool `V2 totalStaked >= floor` comparisons can no longer hold (V2 was live
+    ///      for >= 6h), so on completion they are skipped - they ran instead on the pending-state `:verify` that the
+    ///      lapsed-window `:broadcast` tail chains immediately after V2 went live. Every event-based credit check stays.
+    bool public v2LiveBeforeMinterMove;
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "Wrong chain id - expected Mainnet (1)");
@@ -1169,7 +1180,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
     /// @dev Step 1-2: persist the pre-repoint DOLA config (write-once), then stop new DOLA deposits into the source.
     ///      `setStablecoinEnabled` is the minter's real toggle (lib/phUSD-stable-minter PhusdStableMinter.sol); `mint`
-    ///      requires `config.enabled`. V2 is paused through Phase 6b, so its autoAnnihilate(DOLA) is not affected.
+    ///      requires `config.enabled`. On the normal path V2 is paused through Phase 6b, so its autoAnnihilate(DOLA) is not
+    ///      affected; on story 096's pending path V2 is unpaused while minting stays disabled, so autoAnnihilate(DOLA)
+    ///      REVERTS until 6b completes (by design - nothing may mint into the autoDOLA source the execute drains).
     function _minterRecordConfigAndDisable() internal {
         (address ys, uint256 rate, uint8 dec, bool enabled, uint256 maxPerDay,,) =
             PhusdStableMinter(PHUSD_STABLE_MINTER).stablecoinConfigs(DOLA);
@@ -1422,6 +1435,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         // already the Pauser, unregistered. Remedy there is OWNER setPauser(OWNER) then pause() on that contract
         // (a direct pause() reverts onlyPauser); do not resume until cleared. See HALTED RUNS in the header.
         if (v2.pauser() != PAUSER) v2.setPauser(PAUSER);
+        // Story 096: V2 goes (or stays) live while 6b is pending - record it for the verifier (sticky, persisted).
+        if (minterMovePending) v2LiveBeforeMinterMove = true;
         // Unpause BEFORE registering: a paused registrant makes Pauser.pause() revert EnforcedPause (audit-33 L-05).
         if (!_doneV2Unpaused()) v2.unpause();
         require(_doneV2Unpaused(), "Phase7: V2 still paused");
@@ -2156,6 +2171,10 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             minterRecovered = vm.parseUint(vm.parseJsonString(json, ".minterMove.recovered"));
             minterRecoveredRecorded = true;
         }
+        // Story 096 revision: sticky - once a run finalized V2 while 6b was pending, every later write keeps it.
+        if (vm.keyExistsJson(json, ".minterMove.v2LiveBeforeMinterMove") && _jsonFlag(json, ".minterMove.v2LiveBeforeMinterMove")) {
+            v2LiveBeforeMinterMove = true;
+        }
     }
 
     function _jsonFlag(string memory json, string memory key) internal pure returns (bool) {
@@ -2201,6 +2220,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         vm.serializeString("s092.minter", "principalBeforeExec", vm.toString(minterPrincipalBeforeExec));
         vm.serializeString("s092.minter", "ownerDolaBeforeExec", vm.toString(ownerDolaBeforeExec));
         vm.serializeString("s092.minter", "recoveredRecorded", minterRecoveredRecorded ? "true" : "false");
+        vm.serializeString("s092.minter", "v2LiveBeforeMinterMove", v2LiveBeforeMinterMove ? "true" : "false");
         string memory mm = vm.serializeString("s092.minter", "recovered", vm.toString(minterRecovered));
 
         vm.serializeUint("s082.root", "chainId", CHAIN_ID);
