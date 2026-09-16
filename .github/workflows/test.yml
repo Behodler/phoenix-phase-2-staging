@@ -22,15 +22,6 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-
-      - name: Show Forge version
-        run: forge --version
-
-      - name: Run Forge fmt
-        run: forge fmt --check
-
       - name: Check for conflict markers and unparseable deployment JSON
         run: |
           if git grep -nE '^(<<<<<<<|=======|>>>>>>>)( |$)' -- ':!lib'; then
@@ -47,6 +38,15 @@ jobs:
             }
             if (failed) process.exit(1);
           '
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Show Forge version
+        run: forge --version
+
+      - name: Run Forge fmt
+        run: forge fmt --check
 
       - name: Run Forge build
         run: forge build --sizes
