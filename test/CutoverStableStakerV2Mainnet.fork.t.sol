@@ -11,8 +11,12 @@ import {
     CutoverStableStakerV2Mainnet,
     IPausableLike,
     IPauserRegistry,
-    IPhUSDOwner
+    IPhUSDOwner,
+    ISourceDolaStrategy,
+    ISyaStrategyList
 } from "../script/CutoverStableStakerV2Mainnet.s.sol";
+import {PhusdStableMinter} from "@phUSDMinter/PhusdStableMinter.sol";
+import {InitiateDolaStrategyWithdrawalHarness} from "./InitiateDolaStrategyWithdrawal.fork.t.sol";
 
 /// @dev Exposes the internal phases of the mainnet cutover script so single phases can be driven.
 contract CutoverStableStakerV2MainnetHarness is CutoverStableStakerV2Mainnet {
@@ -25,6 +29,14 @@ contract CutoverStableStakerV2MainnetHarness is CutoverStableStakerV2Mainnet {
         isPreview = preview;
         _loadProgressFile();
         _phase0_preconditions();
+    }
+
+    /// Story 092: Phase 0 WITHOUT the minter withdrawal-window preflight - ONLY for the V1-exit-vs-pending-withdrawal
+    /// cases (a)-(c), which must run Phase 6 inside the 6h waiting period. Production never calls the half.
+    function harnessPhase0ReadChecksOnly(bool preview) external {
+        isPreview = preview;
+        _loadProgressFile();
+        _phase0_readChecks();
     }
 
     function harnessPhase1AsOwner() external {
@@ -95,6 +107,50 @@ contract CutoverStableStakerV2MainnetHarness is CutoverStableStakerV2Mainnet {
         vm.startPrank(OWNER);
         _phase6_migration();
         vm.stopPrank();
+    }
+
+    // ---- story 092: Phase 6b whole and by sub-step ----
+    function harnessPhase6bAsOwner() external {
+        vm.startPrank(OWNER);
+        _phase6b_minterSyaRetireSource();
+        vm.stopPrank();
+    }
+
+    function harnessMinterRecordAndDisableAsOwner() external {
+        vm.startPrank(OWNER);
+        _minterRecordConfigAndDisable();
+        vm.stopPrank();
+    }
+
+    function harnessMinterExecuteAsOwner() external {
+        vm.startPrank(OWNER);
+        _minterExecuteWithdrawal();
+        vm.stopPrank();
+    }
+
+    function harnessMinterReseedAsOwner() external {
+        vm.startPrank(OWNER);
+        _minterReseedSdola();
+        vm.stopPrank();
+    }
+
+    function harnessMinterRegisterAsOwner() external {
+        vm.startPrank(OWNER);
+        _minterRegisterSdola();
+        vm.stopPrank();
+    }
+
+    function harnessSyaRepointAsOwner() external {
+        vm.startPrank(OWNER);
+        _syaRepointDola();
+        vm.stopPrank();
+    }
+
+    /// A resume whose progress file lost the execution record (and R).
+    function harnessForgetMinterExecRecord() external {
+        minterExecRecorded = false;
+        minterRecoveredRecorded = false;
+        minterRecovered = 0;
     }
 
     function harnessPhase7AsOwner() external {
@@ -195,7 +251,20 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     address V1;
     address PAUSER;
 
+    /// @dev Story 092: every full-cutover test now needs the minter's DOLA totalWithdrawal initiated (story 090's script)
+    ///      and the clock inside its execution window, exactly as the mainnet runbook orders it.
+    ///      TIME IS MOVED BY AGEING `initiatedAt`, NOT BY `vm.warp`: the minter's execute redeems enough autoDOLA to hit
+    ///      Tokemak's debt path, whose Chainlink feeds are frozen at the fork block and revert `InvalidDataReturned()` as
+    ///      stale after an hours-long warp (on mainnet they keep updating). The strategy only compares `block.timestamp`
+    ///      with `initiatedAt`, so rewinding `initiatedAt` by N seconds is the same contract state as waiting N seconds.
     function _fork() internal returns (bool) {
+        if (!_forkNoInitiate()) return false;
+        _initiateMinterWithdrawal();
+        _ageWithdrawal(6 hours + 60);
+        return true;
+    }
+
+    function _forkNoInitiate() internal returns (bool) {
         string memory rpc = vm.envOr("RPC_MAINNET", string(""));
         if (bytes(rpc).length == 0) {
             vm.skip(true);
@@ -207,6 +276,40 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         V1 = h.STABLE_STAKER_V1();
         PAUSER = h.PAUSER();
         return true;
+    }
+
+    /// @dev Storage, not a local: via_ir folds a `block.timestamp` local into reads after a warp (story 090 note).
+    uint256 initiatedAt;
+
+    /// Story 090's initiate script itself (preview harness: OWNER prank), not a hand-written copy of its call.
+    function _initiateMinterWithdrawal() internal {
+        InitiateDolaStrategyWithdrawalHarness init = new InitiateDolaStrategyWithdrawalHarness();
+        init.run();
+        (initiatedAt,,) = ISourceDolaStrategy(YS_DOLA_SOURCE).withdrawalStates(DOLA_T, MINTER);
+        assertGt(initiatedAt, 0, "setup: minter DOLA withdrawal initiated");
+    }
+
+    function _warpTo(uint256 ts) internal {
+        vm.warp(ts);
+    }
+
+    /// @dev Rewrites the minter's `withdrawalStates(DOLA, minter).initiatedAt` to `block.timestamp - secondsAgo` (see
+    ///      `_fork`). The slot is discovered with `vm.record` on the public getter, then read back through the getter.
+    function _ageWithdrawal(uint256 secondsAgo) internal {
+        vm.record();
+        ISourceDolaStrategy(YS_DOLA_SOURCE).withdrawalStates(DOLA_T, MINTER);
+        (bytes32[] memory reads,) = vm.accesses(YS_DOLA_SOURCE);
+        uint256 target = block.timestamp - secondsAgo;
+        bool done;
+        for (uint256 i = 0; i < reads.length && !done; i++) {
+            if (uint256(vm.load(YS_DOLA_SOURCE, reads[i])) != initiatedAt) continue;
+            vm.store(YS_DOLA_SOURCE, reads[i], bytes32(target));
+            (uint256 at,,) = ISourceDolaStrategy(YS_DOLA_SOURCE).withdrawalStates(DOLA_T, MINTER);
+            if (at == target) done = true;
+            else vm.store(YS_DOLA_SOURCE, reads[i], bytes32(initiatedAt));
+        }
+        require(done, "test setup: initiatedAt slot not found");
+        initiatedAt = target;
     }
 
     /// Permissionless EYE-funded pause from a fresh actor. Returns whether Pauser.pause() succeeded.
@@ -286,9 +389,9 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertFalse(IPauserRegistry(PAUSER).isRegistered(V1), "V1 must end unregistered");
         assertTrue(IPausableLike(V1).paused(), "V1 must end paused");
         // Phase 0 is the tolerated BROKEN_BY_V1 case (not recorded); every strict stage must pass.
-        string[9] memory expected = _strictStages();
-        assertEq(h.globalPauseStageCount(), 9, "strict stages after-phase1 .. after-phase8 incl. after-phase3b");
-        for (uint256 i = 0; i < 9; i++) {
+        string[10] memory expected = _strictStages();
+        assertEq(h.globalPauseStageCount(), 10, "strict stages after-phase1 .. after-phase8 incl. after-phase3b / after-phase6b");
+        for (uint256 i = 0; i < 10; i++) {
             assertEq(h.globalPauseStagesPassed(i), expected[i]);
         }
     }
@@ -296,7 +399,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     /// Full preview run() passes with the GLOBAL_PAUSE simulation succeeding at phase0 and after EVERY phase 1..8
     /// (story 087 class check: story 084 sampled only phase0 / after-phase1 / after-phase8).
     /// Strict stages in run() order. Story 091 adds after-phase3b (the sDOLA strategy registration).
-    function _strictStages() internal pure returns (string[9] memory) {
+    function _strictStages() internal pure returns (string[10] memory) {
         return [
             "after-phase1",
             "after-phase2",
@@ -305,6 +408,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
             "after-phase4",
             "after-phase5",
             "after-phase6",
+            "after-phase6b",
             "after-phase7",
             "after-phase8"
         ];
@@ -313,10 +417,10 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     function test_fork_fullPreview_globalPauseAfterEveryPhase() public {
         if (!_fork()) return;
         h.run();
-        string[9] memory expected = _strictStages();
-        assertEq(h.globalPauseStageCount(), 10, "phase0 + after-phase1 .. after-phase8 incl. after-phase3b");
+        string[10] memory expected = _strictStages();
+        assertEq(h.globalPauseStageCount(), 11, "phase0 + after-phase1 .. after-phase8 incl. after-phase3b / after-phase6b");
         assertEq(h.globalPauseStagesPassed(0), "phase0");
-        for (uint256 i = 0; i < 9; i++) {
+        for (uint256 i = 0; i < 10; i++) {
             assertEq(h.globalPauseStagesPassed(i + 1), expected[i]);
         }
         assertFalse(IPauserRegistry(PAUSER).isRegistered(V1), "V1 unregistered");
@@ -387,7 +491,8 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         console.log(string.concat("BREAKER|", step, ok ? "|LIVE" : "|DEAD"));
     }
 
-    function _toPhase6() internal {
+    /// Story 092: through Phase 6b (the minter move / SYA / source retirement runs between Phase 6 and Phase 7).
+    function _toPhase6b() internal {
         h.harnessPhase0(true);
         h.harnessPhase1AsOwner();
         h.harnessPhase2AsOwner();
@@ -396,6 +501,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         h.harnessPhase4AsOwner();
         h.harnessPhase5AsOwner();
         h.harnessPhase6AsOwner();
+        h.harnessPhase6bAsOwner();
     }
 
     /// Phase 7's pauser block, one state-changing call at a time, in the script's order (pinned to the source
@@ -430,7 +536,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     /// `EnforcedPause()` - the audit-33 L-05 window this story closes.
     function test_fork_phase7_oldOrder_bricksBreaker() public {
         if (!_fork()) return;
-        _toPhase6();
+        _toPhase6b();
         h.harnessPhase7Preamble();
         address v2 = address(h.v2());
         vm.startPrank(OWNER);
@@ -446,7 +552,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     /// every step and the real Phase 8 passes on the result.
     function test_fork_phase7_breakerLiveAfterEveryStep() public {
         if (!_fork()) return;
-        _toPhase6();
+        _toPhase6b();
         assertTrue(_breakerLive("P7-start"), "P7 start");
         h.harnessPhase7Preamble();
         assertTrue(_breakerLive("P7-after-preamble"), "P7 preamble");
@@ -516,13 +622,43 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         h.harnessPhase6AsOwner();
         assertTrue(_breakerLive("after-phase6"), "phase 6");
 
+        // ---- Phase 6b (story 092): minter move and SYA touch no pause state; the source retirement repeats Phase 1's rule ----
+        h.harnessMinterRecordAndDisableAsOwner();
+        assertTrue(_breakerLive("P6b-after-minter-disable"), "P6b disable");
+        h.harnessMinterExecuteAsOwner();
+        assertTrue(_breakerLive("P6b-after-execute"), "P6b execute");
+        h.harnessMinterReseedAsOwner();
+        assertTrue(_breakerLive("P6b-after-reseed"), "P6b reseed");
+        h.harnessMinterRegisterAsOwner();
+        assertTrue(_breakerLive("P6b-after-register"), "P6b register");
+        h.harnessSyaRepointAsOwner();
+        assertTrue(_breakerLive("P6b-after-SYA"), "P6b SYA");
+        vm.startPrank(OWNER);
+        ISourceDolaStrategy(YS_DOLA_SOURCE).setClient(V1, false);
+        ISourceDolaStrategy(YS_DOLA_SOURCE).setClient(MINTER, false);
+        vm.stopPrank();
+        assertTrue(_breakerLive("P6b-after-source-clients-revoked"), "P6b clients");
+        vm.prank(OWNER);
+        IPausableLike(YS_DOLA_SOURCE).setPauser(OWNER);
+        bool afterSourceSetPauser = _breakerLive("P6b-after-source.setPauser(OWNER)");
+        assertFalse(afterSourceSetPauser, "the second forced window: registered autoDOLA strategy whose pauser is OWNER");
+        if (!afterSourceSetPauser) dead++;
+        vm.prank(OWNER);
+        IPauserRegistry(PAUSER).unregister(YS_DOLA_SOURCE);
+        assertTrue(_breakerLive("P6b-after-unregister(source)"), "P6b unregister");
+        vm.prank(OWNER);
+        IPausableLike(YS_DOLA_SOURCE).pause();
+        assertTrue(_breakerLive("P6b-after-source.pause()"), "P6b pause");
+        h.harnessPhase6bAsOwner(); // real Phase 6b on the stepped state: every step skips, read-backs pass
+        assertTrue(_breakerLive("after-phase6b"), "phase 6b");
+
         // ---- Phase 7 ----
         h.harnessPhase7Preamble();
         _phase7PauserSteps(5, true);
         h.harnessPhase7AsOwner();
         h.harnessPhase8();
         assertTrue(_breakerLive("after-phase8"), "end state");
-        assertEq(dead, 1, "exactly one dead point in the whole session");
+        assertEq(dead, 2, "exactly two dead points: V1 (Phase 1) and the autoDOLA source (Phase 6b), each between setPauser(OWNER) and unregister");
     }
 
     // =====================================================================
@@ -533,7 +669,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     /// The breaker is live at the halt; a PREVIEW run() over the halted state passes (its phase0 simulation does
     /// not revert); and a broadcast-shaped resume (the real phases as OWNER) converges to the Phase 8 end state.
     function _haltedPhase7ResumeConverges(uint256 haltAfter) internal {
-        _toPhase6();
+        _toPhase6b();
         h.harnessPhase7Preamble();
         _phase7PauserSteps(haltAfter, false);
         assertTrue(_breakerLive(string.concat("HALT-P7-after-step-", vm.toString(haltAfter))), "breaker live at halt");
@@ -546,7 +682,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         vm.revertToState(snap);
 
         h.harnessResetTokens();
-        _toPhase6(); // resume leg: every step state-gated
+        _toPhase6b(); // resume leg: every step state-gated
         h.harnessPhase7AsOwner();
         h.harnessPhase8();
         assertFalse(IPausableLike(address(h.v2())).paused(), "V2 unpaused after resume");
@@ -577,7 +713,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     /// setPauser(OWNER) then pause() works. A resume afterwards re-runs Phase 7 and UNPAUSES V2 (resume hazard).
     function test_fork_phase7Gap_V2_afterUnpause_globalPauseMissesV2_remedyWorks() public {
         if (!_fork()) return;
-        _toPhase6();
+        _toPhase6b();
         h.harnessPhase7Preamble();
         _phase7PauserSteps(2, false);
         address v2 = address(h.v2());
@@ -620,7 +756,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     /// Halt after step 4 (Antimatter pauser == Pauser, not yet registered): same gap and same remedy.
     function test_fork_phase7Gap_Antimatter_afterSetPauser_globalPauseMissesIt_remedyWorks() public {
         if (!_fork()) return;
-        _toPhase6();
+        _toPhase6b();
         h.harnessPhase7Preamble();
         _phase7PauserSteps(4, false);
         address am = address(h.antimatter());
@@ -659,6 +795,8 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
 
     address constant DOLA_T = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
     address constant YS_DOLA_SOURCE = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2;
+    address constant MINTER = 0x94855ACA13952D81507C92D3CdBb2e25D3bbE60C;
+    address constant SYA = 0x0cD353bfda674D04823B2826ffafB83B560D21B6;
 
     /// Full preview end state: V2's DOLA principal sits in the NEW sDOLA strategy, V1 books nothing on 0x1760, the
     /// sDOLA strategy is Pauser-registered with SYA as withdrawer, the other pools keep source == destination, and
@@ -681,8 +819,8 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertTrue(sys.authorizedClients(v2), "V2 client");
         assertEq(sys.setAsideBufferSize(v2), IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferSize(V1), "V1's buffer pct copied");
         assertEq(sys.setAsideBufferRecipient(), v2, "destination recipient V2");
-        assertEq(IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferRecipient(), V1, "source recipient left as V1 (story 092 retires it)");
-        assertFalse(sys.authorizedClients(h.PHUSD_STABLE_MINTER()), "minter client wiring is story 092, not 091");
+        assertEq(IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferRecipient(), V1, "source recipient left as V1 (story 092 retires the strategy)");
+        assertTrue(sys.authorizedClients(h.PHUSD_STABLE_MINTER()), "story 092: the minter is a client of the sDOLA strategy");
 
         assertEq(address(StableStakerV2(v2).yieldStrategy(DOLA_T)), address(sys), "V2 DOLA -> sDOLA strategy");
         (,,, uint256 v2DolaStaked) = StableStakerV2(v2).poolInfo(DOLA_T);
@@ -779,6 +917,349 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         uint256 p4 = _indexOf(src, "_phase4_pools();", _indexOf(src, "function run()", 0));
         uint256 p3 = _indexOf(src, "_phase3_stakerV2();", _indexOf(src, "function run()", 0));
         assertTrue(p3 < p3b && p3b < p4, "Phase 3b runs after Phase 3 and before Phase 4");
+    }
+
+    // =====================================================================
+    //  Story 092: minter DOLA collateral + SYA onto the sDOLA strategy, autoDOLA source retired
+    // =====================================================================
+
+    struct MinterCfg {
+        address ys;
+        uint256 rate;
+        uint8 dec;
+        bool enabled;
+        uint256 maxPerDay;
+    }
+
+    function _minterCfg() internal view returns (MinterCfg memory c) {
+        (c.ys, c.rate, c.dec, c.enabled, c.maxPerDay,,) = PhusdStableMinter(MINTER).stablecoinConfigs(DOLA_T);
+    }
+
+    function _withdrawalState() internal view returns (uint256 at, uint8 status, uint256 bal) {
+        return ISourceDolaStrategy(YS_DOLA_SOURCE).withdrawalStates(DOLA_T, MINTER);
+    }
+
+    /// Asserts the complete Phase 6b end state against the pre-cutover minter config.
+    function _assertMinterMoved(MinterCfg memory pre, uint256 ownerDolaPre) internal view {
+        ERC4626YieldStrategy sys = h.sdolaStrategy();
+        MinterCfg memory post = _minterCfg();
+        assertEq(pre.ys, YS_DOLA_SOURCE, "setup: minter DOLA was on the autoDOLA strategy");
+        assertEq(post.ys, address(sys), "minter DOLA registration -> sDOLA strategy");
+        assertEq(post.rate, pre.rate, "exchangeRate unchanged");
+        assertEq(post.dec, pre.dec, "decimals unchanged");
+        assertEq(post.maxPerDay, pre.maxPerDay, "maxMintPerDay restored");
+        assertEq(post.enabled, pre.enabled, "enabled restored");
+        uint256 r = h.minterRecovered();
+        assertGt(r, 0, "R recorded");
+        uint256 principal = sys.principalOf(DOLA_T, MINTER);
+        assertGe(principal + r * 5 / 10_000 + 1000, r, "minter principal on sDOLA strategy within bound of R");
+        assertEq(IERC20(DOLA_T).balanceOf(OWNER), ownerDolaPre, "OWNER DOLA back to its pre-cutover level");
+        assertTrue(sys.authorizedClients(MINTER), "minter is a sDOLA strategy client");
+        address[] memory list = ISyaStrategyList(SYA).getYieldStrategies();
+        bool hasNew;
+        bool hasOld;
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i] == address(sys)) hasNew = true;
+            if (list[i] == YS_DOLA_SOURCE) hasOld = true;
+        }
+        assertTrue(hasNew && !hasOld, "SYA list: +sDOLA strategy, -autoDOLA strategy");
+        assertTrue(sys.authorizedWithdrawers(SYA), "SYA withdrawer on sDOLA strategy");
+        assertFalse(ISourceDolaStrategy(YS_DOLA_SOURCE).authorizedWithdrawers(SYA), "SYA withdrawer revoked on source");
+        assertFalse(ISourceDolaStrategy(YS_DOLA_SOURCE).authorizedClients(V1), "source client V1 revoked");
+        assertFalse(ISourceDolaStrategy(YS_DOLA_SOURCE).authorizedClients(MINTER), "source client minter revoked");
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, V1), 0, "source V1 principal 0");
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER), 0, "source minter principal 0");
+        assertEq(IPausableLike(YS_DOLA_SOURCE).pauser(), OWNER, "source pauser OWNER");
+        assertFalse(IPauserRegistry(PAUSER).isRegistered(YS_DOLA_SOURCE), "source unregistered");
+        assertTrue(IPausableLike(YS_DOLA_SOURCE).paused(), "source paused");
+        assertTrue(IPauserRegistry(PAUSER).isRegistered(address(sys)), "sDOLA strategy registered");
+        assertFalse(sys.paused(), "sDOLA strategy unpaused");
+        (, uint8 status,) = _withdrawalState();
+        assertEq(status, 0, "withdrawal state reset (executed once)");
+    }
+
+    /// Happy path: initiate (story 090 script) -> warp 6h + 60s -> full preview cutover -> every Phase 6b assert, then
+    /// V2 autoAnnihilate(DOLA) deposits the minter's DOLA into the sDOLA strategy.
+    function test_fork_092_fullCutover_minterSyaRepointed_sourceRetired() public {
+        if (!_fork()) return;
+        MinterCfg memory pre = _minterCfg();
+        uint256 ownerDolaPre = IERC20(DOLA_T).balanceOf(OWNER);
+        uint256 minterPrincipalPre = ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER);
+        assertGt(minterPrincipalPre, 0, "setup: minter holds DOLA principal on the autoDOLA strategy");
+
+        h.run();
+
+        _assertMinterMoved(pre, ownerDolaPre);
+        assertEq(h.minterPrincipalBeforeExec(), minterPrincipalPre, "P recorded");
+        console.log("092|P / R / minter principal on sDOLA strategy:", minterPrincipalPre, h.minterRecovered(), h.sdolaStrategy().principalOf(DOLA_T, MINTER));
+
+        // autoAnnihilate(DOLA) after the cutover lands its minter deposit in the sDOLA strategy.
+        StableStakerV2 v2 = h.v2();
+        address actor = makeAddr("story092-annihilator");
+        deal(DOLA_T, actor, 1000e18);
+        vm.startPrank(actor);
+        IERC20(DOLA_T).approve(address(v2), 1000e18);
+        v2.stake(DOLA_T, 1000e18);
+        vm.stopPrank();
+        _warpTo(block.timestamp + 10 minutes);
+        uint256 before = h.sdolaStrategy().principalOf(DOLA_T, MINTER);
+        vm.prank(actor);
+        v2.autoAnnihilate(DOLA_T);
+        assertGt(h.sdolaStrategy().principalOf(DOLA_T, MINTER), before, "autoAnnihilate(DOLA) deposits into the sDOLA strategy");
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER), 0, "nothing lands on the retired source");
+    }
+
+    // ---- Phase 0 negative window tests ----
+
+    function test_fork_092_phase0_notInitiated_reverts() public {
+        if (!_forkNoInitiate()) return;
+        vm.expectRevert(
+            bytes(
+                "Phase0: PhusdStableMinter DOLA totalWithdrawal is NOT initiated on the autoDOLA strategy - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+            )
+        );
+        h.run();
+    }
+
+    function test_fork_092_phase0_waitingPeriod_reverts() public {
+        if (!_forkNoInitiate()) return;
+        _initiateMinterWithdrawal();
+        _warpTo(initiatedAt + 6 hours - 1);
+        vm.expectRevert(
+            bytes(
+                string.concat(
+                    "Phase0: minter DOLA withdrawal still in its 6h waiting period - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status); executable at ",
+                    vm.toString(initiatedAt + 6 hours)
+                )
+            )
+        );
+        h.run();
+    }
+
+    function test_fork_092_phase0_expiredWindow_reverts() public {
+        if (!_forkNoInitiate()) return;
+        _initiateMinterWithdrawal();
+        _warpTo(initiatedAt + 78 hours + 1);
+        vm.expectRevert(
+            bytes(
+                "Phase0: minter DOLA withdrawal window EXPIRED - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+            )
+        );
+        h.run();
+    }
+
+    function test_fork_092_phase0_pastSafetyMargin_reverts() public {
+        if (!_forkNoInitiate()) return;
+        _initiateMinterWithdrawal();
+        uint256 closesAt = initiatedAt + 78 hours;
+        _warpTo(closesAt - h.WINDOW_SAFETY_MARGIN());
+        vm.expectRevert(
+            bytes(
+                string.concat(
+                    "Phase0: fewer than WINDOW_SAFETY_MARGIN seconds left in the minter DOLA withdrawal window - too late to start the session. Wait for expiry at ",
+                    vm.toString(closesAt),
+                    ", then run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+                )
+            )
+        );
+        h.run();
+    }
+
+    /// Boundary control: one second inside the margin the preflight passes (Phase 0 only).
+    function test_fork_092_phase0_justInsideMargin_passes() public {
+        if (!_forkNoInitiate()) return;
+        _initiateMinterWithdrawal();
+        _warpTo(initiatedAt + 78 hours - h.WINDOW_SAFETY_MARGIN() - 1);
+        h.harnessPhase0(true);
+    }
+
+    // ---- Resume ----
+
+    function _throughPhase6() internal {
+        h.harnessPhase0(true);
+        h.harnessPhase1AsOwner();
+        h.harnessPhase2AsOwner();
+        h.harnessPhase3AsOwner();
+        h.harnessPhase3bAsOwner();
+        h.harnessPhase4AsOwner();
+        h.harnessPhase5AsOwner();
+        h.harnessPhase6AsOwner();
+    }
+
+    /// Halt after the EXECUTE (DOLA on OWNER), resume: no second execution, R preserved and re-seeded, converges.
+    function test_fork_092_haltAfterExecute_resumeConverges() public {
+        if (!_fork()) return;
+        MinterCfg memory pre = _minterCfg();
+        uint256 ownerDolaPre = IERC20(DOLA_T).balanceOf(OWNER);
+        _throughPhase6();
+        h.harnessMinterRecordAndDisableAsOwner();
+        h.harnessMinterExecuteAsOwner();
+        uint256 r = h.minterRecovered();
+        assertGt(r, 0, "R recorded at the halt");
+        assertEq(IERC20(DOLA_T).balanceOf(OWNER), ownerDolaPre + r, "HALT: the minter's collateral sits on OWNER");
+        assertFalse(_minterCfg().enabled, "HALT: DOLA minting disabled");
+
+        // Fail closed: a resume whose progress file lost the execution record cannot recover R.
+        uint256 snap = vm.snapshotState();
+        h.harnessForgetMinterExecRecord();
+        vm.expectRevert(
+            bytes(
+                "Phase6b: minter withdrawal executed but the progress file has no execution record (minterMove.ownerDolaBeforeExec) - R cannot be recovered. STOP: reconstruct it from the WithdrawalExecuted tx before resuming"
+            )
+        );
+        h.harnessMinterReseedAsOwner();
+        vm.revertToState(snap);
+
+        // Resume leg: the real phases from Phase 0, every step state-gated.
+        h.harnessResetTokens();
+        _toPhase6b();
+        h.harnessPhase7AsOwner();
+        h.harnessPhase8();
+        assertEq(h.minterRecovered(), r, "R preserved across the resume");
+        _assertMinterMoved(pre, ownerDolaPre);
+    }
+
+    /// Halt after registerStablecoin (maxMintPerDay reset to 0, enabled forced true), resume: cap and flag restored, no
+    /// second execution, no second deposit.
+    function test_fork_092_haltAfterRepoint_resumeConverges() public {
+        if (!_fork()) return;
+        MinterCfg memory pre = _minterCfg();
+        uint256 ownerDolaPre = IERC20(DOLA_T).balanceOf(OWNER);
+        _throughPhase6();
+        h.harnessMinterRecordAndDisableAsOwner();
+        h.harnessMinterExecuteAsOwner();
+        h.harnessMinterReseedAsOwner();
+        address sys = address(h.sdolaStrategy());
+        vm.prank(OWNER);
+        PhusdStableMinter(MINTER).registerStablecoin(DOLA_T, sys, pre.rate, pre.dec); // the halt: only the repoint landed
+        assertEq(_minterCfg().maxPerDay, 0, "HALT: registerStablecoin reset maxMintPerDay");
+        uint256 principalAtHalt = h.sdolaStrategy().principalOf(DOLA_T, MINTER);
+
+        h.harnessResetTokens();
+        _toPhase6b();
+        h.harnessPhase7AsOwner();
+        h.harnessPhase8();
+        assertEq(h.sdolaStrategy().principalOf(DOLA_T, MINTER), principalAtHalt, "no second re-seed");
+        _assertMinterMoved(pre, ownerDolaPre);
+    }
+
+    /// Halt point (g): autoDOLA source pauser moved to OWNER while still registered - the breaker is DEAD. A PREVIEW over
+    /// the un-remedied halt reverts at phase0 naming the source (not tolerated); after the documented remedy (OWNER
+    /// Pauser.unregister(source)) the breaker is live and the preview resume converges through every strict stage.
+    function test_fork_092_haltAtSourceDeadWindow_remedyThenResumeConverges() public {
+        if (!_fork()) return;
+        MinterCfg memory pre = _minterCfg();
+        uint256 ownerDolaPre = IERC20(DOLA_T).balanceOf(OWNER);
+        _throughPhase6();
+        h.harnessMinterRecordAndDisableAsOwner();
+        h.harnessMinterExecuteAsOwner();
+        h.harnessMinterReseedAsOwner();
+        h.harnessMinterRegisterAsOwner();
+        h.harnessSyaRepointAsOwner();
+        vm.startPrank(OWNER);
+        ISourceDolaStrategy(YS_DOLA_SOURCE).setClient(V1, false);
+        ISourceDolaStrategy(YS_DOLA_SOURCE).setClient(MINTER, false);
+        IPausableLike(YS_DOLA_SOURCE).setPauser(OWNER);
+        vm.stopPrank();
+        assertFalse(_breakerLive("HALT-P6b-source-dead-window"), "setup: breaker dead at halt point (g)");
+
+        h.harnessResetTokens();
+        vm.expectRevert(
+            bytes(
+                string.concat(
+                    "globalPause(phase0): Pauser.pause() does not pause every registrant; first failing registrant: ",
+                    vm.toString(YS_DOLA_SOURCE)
+                )
+            )
+        );
+        h.run();
+
+        vm.prank(OWNER);
+        IPauserRegistry(PAUSER).unregister(YS_DOLA_SOURCE); // the remedy
+        assertTrue(_breakerLive("HALT-P6b-remedied"), "breaker live after the remedy");
+
+        h.harnessResetTokens();
+        h.run(); // PREVIEW resume (in-memory records stand in for the progress file)
+        string[10] memory expected = _strictStages();
+        assertEq(h.globalPauseStageCount(), 11, "phase0 + every strict stage");
+        for (uint256 i = 0; i < 10; i++) {
+            assertEq(h.globalPauseStagesPassed(i + 1), expected[i]);
+        }
+        _assertMinterMoved(pre, ownerDolaPre);
+    }
+
+    // ---- V1 exit vs pending minter withdrawal (human-requested proof), cases (a) - (c) ----
+
+    /// Phases 0 (read checks only - Phase 0's window gate is untouched) .. 6 with the minter withdrawal pending, then
+    /// (c): the pending state is untouched by V1's exit, and Phase 6b executes it.
+    function _v1ExitWithPendingWithdrawal(bool warpIntoWindowBeforePhase6) internal {
+        if (!_forkNoInitiate()) return;
+        _initiateMinterWithdrawal();
+        (uint256 at0, uint8 st0, uint256 bal0) = _withdrawalState();
+        assertEq(st0, 1, "setup: Initiated");
+        uint256 minterPrincipal0 = ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER);
+        (,,, uint256 v1DolaBefore) = ICutoverStakerLike(V1).poolInfo(DOLA_T);
+        assertGt(v1DolaBefore, 0, "setup: V1 holds DOLA");
+
+        h.harnessPhase0ReadChecksOnly(true);
+        h.harnessPhase1AsOwner();
+        h.harnessPhase2AsOwner();
+        h.harnessPhase3AsOwner();
+        h.harnessPhase3bAsOwner();
+        h.harnessPhase4AsOwner();
+        h.harnessPhase5AsOwner();
+        if (warpIntoWindowBeforePhase6) {
+            _ageWithdrawal(6 hours + 60); // into the 72h execution window (see `_fork` on why not vm.warp)
+        } else {
+            assertLt(block.timestamp, initiatedAt + 6 hours, "case (a): still inside the 6h waiting period");
+        }
+        // The V1 exit runs `initiateMigration` for DOLA through CrossVersionMigrator; Phase 6's own post-conditions bound
+        // every migrated user (autoDOLA exit 5 + sDOLA entry 5 bps + 1000 wei) and the exit realization.
+        h.harnessPhase6AsOwner();
+
+        assertEq(ICutoverStakerLike(V1).poolState(DOLA_T), 1, "V1 DOLA pool Migrating: initiateMigration succeeded");
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, V1), 0, "V1 drained off the autoDOLA strategy");
+        StableStakerV2 v2 = h.v2();
+        (,,, uint256 v2Dola) = v2.poolInfo(DOLA_T);
+        assertGe(v2Dola + 1e16, v1DolaBefore * (10_000 - 10) / 10_000, "V2 credited within the 10 bps DOLA bound (+1-cent straggler cap)");
+
+        // (c) V1's exit neither consumed nor reset the minter's pending withdrawal.
+        (uint256 at1, uint8 st1, uint256 bal1) = _withdrawalState();
+        assertEq(at1, initiatedAt, "(c) initiatedAt unchanged by the V1 exit");
+        if (!warpIntoWindowBeforePhase6) assertEq(at1, at0, "(c) initiatedAt unchanged since initiation");
+        assertEq(st1, 1, "(c) still Initiated, not executed");
+        assertEq(bal1, bal0, "(c) snapshot balance unchanged");
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER), minterPrincipal0, "(c) minter principal untouched");
+
+        // (c) then the minter execution phase succeeds inside the window.
+        if (!warpIntoWindowBeforePhase6) _ageWithdrawal(6 hours + 60);
+        (at1,,) = _withdrawalState();
+        h.harnessPhase6bAsOwner();
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER), 0, "(c) minter withdrawal executed by Phase 6b");
+        assertGt(h.sdolaStrategy().principalOf(DOLA_T, MINTER), 0, "(c) minter collateral re-seeded into the sDOLA strategy");
+    }
+
+    function test_fork_092_caseA_v1ExitDuringWaitingPeriod() public {
+        _v1ExitWithPendingWithdrawal(false);
+    }
+
+    function test_fork_092_caseB_v1ExitInsideExecutionWindow() public {
+        _v1ExitWithPendingWithdrawal(true);
+    }
+
+    /// Source guard: Phase 6b sits between Phase 6 and Phase 7 in run(), and the execute requires V1 drained first.
+    function test_092_phase6bOrder_andV1DrainGate() public view {
+        string memory src = vm.readFile(SCRIPT_SRC);
+        uint256 runAt = _indexOf(src, "function run()", 0);
+        uint256 p6 = _indexOf(src, "_phase6_migration();", runAt);
+        uint256 p6b = _indexOf(src, "_phase6b_minterSyaRetireSource();", runAt);
+        uint256 p7 = _indexOf(src, "_phase7_finalize();", runAt);
+        assertTrue(p6 < p6b && p6b < p7, "Phase 6b runs after Phase 6 and before Phase 7");
+        uint256 body = _indexOf(src, "function _phase6b_minterSyaRetireSource()", 0);
+        uint256 gate = _indexOf(src, "ICutoverStrategy(YS_DOLA).principalOf(DOLA, STABLE_STAKER_V1) == 0", body);
+        uint256 exec = _indexOf(src, "_minterExecuteWithdrawal();", body);
+        assertTrue(gate < exec, "V1-drained require precedes the execute");
+        assertEq(_count(src, "_phase0_readChecks();"), 1, "the window-free half is called only from _phase0_preconditions");
     }
 
     // =====================================================================
@@ -920,7 +1401,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     function test_pauseStateCallSites_enumerated() public view {
         string memory src = vm.readFile(SCRIPT_SRC);
         assertEq(_count(src, "v1p.setPauser(OWNER);"), 1, "P1 setPauser");
-        assertEq(_count(src, "IPauserRegistry(PAUSER).unregister("), 1, "P1 unregister");
+        assertEq(_count(src, "IPauserRegistry(PAUSER).unregister("), 2, "P1 unregister V1 + P6b unregister autoDOLA source");
         assertEq(_count(src, "v1p.pause();"), 1, "P1 pause");
         assertEq(_count(src, "v2.setPauser(OWNER);"), 1, "P3 setPauser");
         assertEq(_count(src, "v2.pause();"), 1, "P3 pause");
@@ -929,6 +1410,10 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertEq(_count(src, "IPauserRegistry(PAUSER).register("), 3, "P3b register sDOLA strategy + P7 register x2");
         assertEq(_count(src, "sdolaStrategy.setPauser(PAUSER);"), 1, "P3b sDOLA strategy setPauser");
         assertEq(_count(src, "antimatter.setPauser(PAUSER);"), 1, "P7 Antimatter setPauser");
+        // Story 092: the autoDOLA source retirement (probed tx by tx in test_fork_breakerProbe_everyPauseStateTx_phases1_3_7).
+        assertEq(_count(src, "IPauserRegistry(PAUSER).unregister(YS_DOLA);"), 1, "P6b unregister source");
+        assertEq(_count(src, "IPausableLike(YS_DOLA).setPauser(OWNER);"), 1, "P6b source setPauser");
+        assertEq(_count(src, "IPausableLike(YS_DOLA).pause();"), 1, "P6b source pause");
     }
 
     /// L-07: the preflight is called from run() only in broadcast mode and never from Phase 0 (the verifier runs
@@ -964,6 +1449,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
 
 interface ICutoverStakerLike {
     function poolInfo(address token) external view returns (uint256, uint256, uint256, uint256);
+    function poolState(address token) external view returns (uint8);
 }
 
 interface IStrategyBufferLike {

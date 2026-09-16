@@ -65,6 +65,14 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *         uses the source bound; the per-user re-check and the per-pool aggregate use the per-user bound (source +
  *         destination bps, counted once when they are the same strategy), the same rule as the cutover's in-leg check.
  *
+ *         MINTER COLLATERAL / SYA / RETIRED SOURCE (story 092). Phase 6b's records - the pre-repoint minter DOLA config
+ *         and R, the DOLA the minter's `totalWithdrawal` delivered - come from the progress file key `minterMove` (the
+ *         verifier refuses to run without them); every property is read from chain: the minter's DOLA registration is
+ *         the sDOLA strategy with the previous exchangeRate / decimals / maxMintPerDay / enabled, the minter is its client
+ *         with principal within the destination bound of R, SYA lists the sDOLA strategy and not the autoDOLA one, SYA
+ *         is a withdrawer on the sDOLA strategy only, and the autoDOLA strategy has no clients, no V1 / minter principal,
+ *         pauser OWNER, is unregistered from the Pauser and paused.
+ *
  *         RUN IT IMMEDIATELY AFTER THE BROADCAST. The per-pool aggregate and the `V2 userInfo >= credited`
  *         check read live V2 balances; once migrated users start withdrawing from V2 they can legitimately
  *         fall below what the cutover credited. The `:broadcast` npm key chains this verifier straight after
@@ -120,6 +128,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         _verifyPhase4_pools();
         _verifyPhase5_mintRights();
         _verifyPhase6_migration();
+        _verifyPhase6b_minterMove();
         _verifyPhase7_finalize();
         _verifyPerUserCredits();
 
@@ -300,6 +309,40 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
                 " the V1 mint again. Token: ", vm.toString(t)
             )
         );
+    }
+
+    // =====================================================================
+    //  Phase 6b - minter collateral, SYA, retired autoDOLA source (story 092)
+    // =====================================================================
+
+    function _verifyPhase6b_minterMove() internal view {
+        console.log("\n=== verify Phase 6b: minter DOLA collateral, SYA, retired autoDOLA strategy ===");
+        require(
+            minterConfigRecorded && minterRecoveredRecorded,
+            "verify: Phase6b: minterMove records (pre-repoint minter config / recovered R) absent from the progress file - refusing to guess them"
+        );
+        require(
+            _doneMinterWithdrawalExecuted(), "verify: Phase6b: autoDOLA totalWithdrawal(DOLA, minter) execution not on chain"
+        );
+        require(_doneMinterClientOnSdola(), "verify: Phase6b: sDOLA strategy setClient(minter) not on chain");
+        require(_doneMinterApprovedSdola(), "verify: Phase6b: minter approveYS(DOLA, sDOLA strategy) not on chain");
+        require(
+            _doneMinterReseeded(),
+            string.concat(
+                "verify: Phase6b: minter noMintDeposit into the sDOLA strategy not on chain (principal below the bound of R ",
+                vm.toString(minterRecovered), ")"
+            )
+        );
+        require(
+            _doneMinterRepointed(),
+            "verify: Phase6b: minter registerStablecoin(DOLA, sDOLA strategy) with previous rate / decimals + maxMintPerDay + enabled restore not on chain"
+        );
+        require(_doneSyaListRepointed(), "verify: Phase6b: SYA addYieldStrategy(sDOLA strategy) / removeYieldStrategy(autoDOLA strategy) not on chain");
+        require(_doneSourceWithdrawerRevoked(), "verify: Phase6b: autoDOLA strategy setWithdrawer(SYA, false) not on chain");
+        require(_doneSdolaStrategyWithdrawer(), "verify: Phase6b: SYA is not a withdrawer on the sDOLA strategy");
+        require(_sourceDolaRetirementStarted(), "verify: Phase6b: autoDOLA strategy setClient(V1 / minter, false) not on chain");
+        require(_doneSourceDolaRetired(), "verify: Phase6b: autoDOLA strategy setPauser(OWNER) + Pauser.unregister + pause not on chain");
+        console.log("  minter DOLA -> sDOLA strategy (R / minter principal):", minterRecovered, sdolaStrategy.principalOf(DOLA, PHUSD_STABLE_MINTER));
     }
 
     // =====================================================================

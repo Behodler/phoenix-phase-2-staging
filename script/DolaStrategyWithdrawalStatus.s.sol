@@ -15,6 +15,12 @@ import {
  *           npm run dola-ys-withdrawal:status
  *         The stored status is LAZY (Executable/Expired are only written inside a totalWithdrawal call), so the
  *         effective phase is derived here from initiatedAt and block.timestamp.
+ *
+ *         AFTER THE CUTOVER (story 092): Phase 6b of script/CutoverStableStakerV2Mainnet.s.sol executes this withdrawal,
+ *         repoints the minter's DOLA registration to the sDOLA strategy and retires 0x1760 (paused, unregistered). The
+ *         script still reads cleanly then - status None, principal 0, strategy paused, registration no longer 0x1760 -
+ *         and prints a `withdrawal completed / strategy retired` line instead of a pending phase. Kept, not obsoleted: it
+ *         is the operator's check between the initiate broadcast and the cutover, and a post-cutover sanity read.
  */
 contract DolaStrategyWithdrawalStatus is DolaStrategyWithdrawalBase {
     function run() external view {
@@ -62,5 +68,12 @@ contract DolaStrategyWithdrawalStatus is DolaStrategyWithdrawalBase {
         console.log("minter DOLA yieldStrategy:", ys);
         console.log("minter DOLA enabled:      ", enabled);
         console.log("still registered to 0x1760:", ys == YIELD_STRATEGY_DOLA);
+        if (status == STATUS_NONE && principal == 0 && ys != YIELD_STRATEGY_DOLA) {
+            console.log(
+                strategy.paused()
+                    ? "RESULT: withdrawal completed / strategy retired (story 092 cutover Phase 6b) - nothing left to execute"
+                    : "RESULT: withdrawal completed, minter repointed; strategy NOT yet paused (cutover Phase 6b retirement outstanding)"
+            );
+        }
     }
 }

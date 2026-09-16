@@ -32,6 +32,11 @@ import {
  * ================================= PHASES =================================================
  *   0  Preconditions (require-gated, no mutation). Live token list off V1, per-token reads,
  *      owners, V1 phUSD mint, PhusdStableMinter registration, strategy map, phUSD minter baseline.
+ *      Story 092: the PhusdStableMinter's DOLA `totalWithdrawal` on the autoDOLA strategy (story 090's initiate) must be
+ *      Initiated with `initiatedAt + 6h <= now < initiatedAt + 78h - WINDOW_SAFETY_MARGIN`; skipped once it has
+ *      executed (minter principal on the autoDOLA strategy == 0). The minter's DOLA registration may point at the
+ *      autoDOLA strategy (before the Phase 6b repoint) or the sDOLA strategy (after it); a retired DOLA source is
+ *      accepted unpaused-check-free.
  *   1  Retire V1 for the window (story 084, audit L-04): setPauser(OWNER) -> Pauser.unregister(V1) ->
  *      pause(), each step state-gated. V1 is UNREGISTERED BEFORE it is paused so the permissionless
  *      global `Pauser.pause()` (which loops every registrant with no try/catch) is not bricked by V1.
@@ -66,7 +71,16 @@ import {
  *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus + initiate on the SOURCE,
  *      plan (dust predicate) + batch-migrate into the DESTINATION, allow-list stragglers under a cap,
  *      post-conditions (exit bound on the source, per-user bound source + destination).
- *   7  Finalize: repoint set-aside buffer recipient on the DESTINATION, revoke V1 phUSD mint, V1 retirement BACKSTOP (the
+ *   6b (story 092) Minter collateral, SYA, retire the autoDOLA source - AFTER Phase 6 (V1 must be drained first:
+ *      `_totalWithdraw` redeems pro-rata of ALL the strategy's shares). Record the minter's DOLA config (rate, decimals,
+ *      enabled, maxMintPerDay) -> setStablecoinEnabled(DOLA, false) -> source.totalWithdrawal(DOLA, minter) EXECUTES
+ *      (DOLA R lands on OWNER, bounded against the principal P) -> sDOLA strategy setClient(minter) -> minter.approveYS ->
+ *      OWNER approve + minter.noMintDeposit(sDOLA strategy, DOLA, R) (OWNER back to its pre-execution DOLA) ->
+ *      registerStablecoin(DOLA, sDOLA strategy, same rate, same decimals) -> setMaxMintPerDay(previous) -> restore
+ *      enabled -> SYA addYieldStrategy(sDOLA strategy) / removeYieldStrategy(autoDOLA strategy) -> source
+ *      setWithdrawer(SYA, false) -> source setClient(V1 / minter, false) -> source setPauser(OWNER) ->
+ *      Pauser.unregister(source) -> source pause(). Each step `if (!done) do();`, resumable; P / OWNER's pre-execution
+ *      DOLA / R and the pre-repoint minter config are persisted in the progress file (`minterMove`). repoint set-aside buffer recipient on the DESTINATION, revoke V1 phUSD mint, V1 retirement BACKSTOP (the
  *      same state-gated triple Phase 1 ran; normally every step skips - story 083/084), then (story 087,
  *      audit-33 L-05) V2 setPauser(Pauser) -> V2 unpause -> Pauser.register(V2) -> Antimatter
  *      setPauser(Pauser) -> Pauser.register(Antimatter). V2 is never registered while paused. Consequence
@@ -141,6 +155,34 @@ import {
  *   RESUME HAZARD after the setPauser(OWNER) remedy on V2: the finalized marker (`_doneCutoverFinalized`,
  *   V2 pauser == Pauser) is cleared, so a resume re-runs Phase 7 from the pauser hand-back and UNPAUSES V2.
  *   Do not resume until the incident is cleared; then a resume converges.
+ *
+ *   PHASE 6b HALT POINTS (story 092, 088's pattern). Timing first: the minter's `totalWithdrawal` executes only inside
+ *   [initiatedAt + 6h, initiatedAt + 78h] and is whenNotPaused, so a halt that outlives the window (or a global pause
+ *   during it) leaves the step undone: wait for expiry, rerun `initiate-dola-ys-withdrawal:broadcast`, wait 6h, resume.
+ *     (a) after setStablecoinEnabled(DOLA, false), before the execute: DOLA minting is off (V2's autoAnnihilate(DOLA)
+ *         reverts - V2 is still paused, so nobody can call it). Nothing is exposed. Resume.
+ *     (b) after the execute, before noMintDeposit: THE MINTER'S DOLA COLLATERAL SITS ON THE OWNER EOA. Resume promptly:
+ *         R is re-derived ON CHAIN as OWNER's DOLA balance minus the persisted pre-execution balance
+ *         (`minterMove.ownerDolaBeforeExec`), bounded against the persisted P, so a local-pass R that differs from the
+ *         mined one cannot strand or over-deposit. Do not move OWNER's DOLA before resuming. The script FAILS CLOSED
+ *         if the progress file lacks the execution record or OWNER holds less DOLA than before execution.
+ *     (c) after setClient / approveYS, before noMintDeposit: same as (b); both calls are idempotent.
+ *     (d) after noMintDeposit, before registerStablecoin: the collateral is in the sDOLA strategy booked to the minter,
+ *         DOLA minting is still off. Nothing is exposed.
+ *     (e) after registerStablecoin, before setMaxMintPerDay: ONE-TX GAP - registration re-enables DOLA minting with
+ *         maxMintPerDay reset to 0 (uncapped). Mints land in the correct (sDOLA) strategy; only the daily cap is
+ *         missing. The previous cap is persisted (`minterMove.prevMaxMintPerDay`) and a resume restores it.
+ *     (f) during the SYA / withdrawer / client steps: SYA may list both strategies or neither for a tx; `claim` skims
+ *         every listed strategy and the source is still unpaused, so nothing reverts.
+ *     (g) between source setPauser(OWNER) and Pauser.unregister(source): the SECOND forced dead window of the session
+ *         (Phase 1's V1 rule, audit L-04): the global `Pauser.pause()` REVERTS for one tx because a registrant's pauser
+ *         is OWNER. The source holds no client and no principal by then. Do not walk away. REMEDY FIRST: OWNER calls
+ *         Pauser.unregister(<autoDOLA strategy>) (valid: its pauser is already OWNER). A PREVIEW on the un-remedied halt
+ *         REVERTS `globalPause(phase0)` naming 0x1760 - deliberately not tolerated like V1's Phase 1 halt, because the
+ *         source would stay unpausable through every strict stage up to Phase 6b. A broadcast resume (no simulation)
+ *         converges either way; after the remedy, preview and resume both converge.
+ *     (h) after unregister, before pause: the source is unregistered and unpaused with no clients - nothing to pause.
+ *   Pausing the source makes its `totalWithdrawal` unusable; the minter's withdrawal has already executed by then.
  */
 contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverCore {
     // =====================================================================
@@ -209,6 +251,21 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     ///      unaffected.
     uint256 public constant ERC4626_MAX_LOSS_BPS = 5;
 
+    /// @dev Story 092. The autoDOLA strategy's two-phase `totalWithdrawal` delays, lib/vault/src/AYieldStrategy.sol
+    ///      `WAITING_PERIOD` / `EXECUTION_WINDOW` (vault story-048; story 090 verified them against the 0x1760 bytecode).
+    ///      Phase 0 re-asserts both on chain. Execution is valid while `initiatedAt + 6h <= now <= initiatedAt + 78h`.
+    uint256 public constant DOLA_WITHDRAWAL_WAITING_PERIOD = 6 hours;
+    uint256 public constant DOLA_WITHDRAWAL_EXECUTION_WINDOW = 72 hours;
+    /// @dev Story 092. Phase 0 refuses to START the session unless at least this long remains before the minter's
+    ///      execution window closes. Phase 6b's execute is transaction ~40 of a `--slow` Ledger session (46 transactions,
+    ///      each needing a physical confirmation; story 087 measured the rehearsal) and a halted session may need a
+    ///      resume leg; 6 hours covers a slow session plus one halt-and-resume with room to spare, and still leaves a
+    ///      66-hour start window. Too late to start means: wait for expiry, re-initiate, wait 6h.
+    uint256 public constant WINDOW_SAFETY_MARGIN = 6 hours;
+    /// @dev AYieldStrategy.WithdrawalStatus ordinals (enum { None, Initiated, Executable, Expired }).
+    uint8 internal constant WITHDRAWAL_INITIATED = 1;
+    uint8 internal constant WITHDRAWAL_EXECUTABLE = 2;
+
     string constant PROGRESS_FILE = "server/deployments/progress.stable-staker-v2-cutover.1.json";
     uint256 constant CHAIN_ID = 1;
     string constant NETWORK_NAME = "mainnet";
@@ -231,6 +288,23 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
     mapping(address => uint256) public cPerDay; // token -> V1 phUSD per day (floored)
     mapping(address => uint256) public v1BufferPct; // token -> V1 setAsideBufferSize on its strategy
+
+    /// @dev Story 092 - Phase 6b records, persisted under `minterMove` in the progress file and adopted on resume.
+    ///      Pre-repoint minter DOLA config: `registerStablecoin` resets maxMintPerDay to 0 and enabled to true, so the
+    ///      previous values must survive a halt after the re-registration.
+    bool public minterConfigRecorded;
+    uint256 public minterPrevExchangeRate;
+    uint8 public minterPrevDecimals;
+    bool public minterPrevEnabled;
+    uint256 public minterPrevMaxMintPerDay;
+    /// @dev Execution record, taken immediately before the execute (re-taken while the minter's source principal is
+    ///      still non-zero, i.e. while the execute has provably not landed): the minter principal P and OWNER's DOLA.
+    bool public minterExecRecorded;
+    uint256 public minterPrincipalBeforeExec;
+    uint256 public ownerDolaBeforeExec;
+    /// @dev R: the DOLA the execute delivered to OWNER and noMintDeposit re-seeds (OWNER's balance delta).
+    bool public minterRecoveredRecorded;
+    uint256 public minterRecovered;
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "Wrong chain id - expected Mainnet (1)");
@@ -292,6 +366,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         _previewBreakerStage("after-phase5");
         _phase6_migration();
         _previewBreakerStage("after-phase6");
+        _phase6b_minterSyaRetireSource();
+        _previewBreakerStage("after-phase6b");
         _phase7_finalize();
         _previewBreakerStage("after-phase7");
 
@@ -417,7 +493,15 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     //  PHASE 0 - Preconditions
     // =====================================================================
 
+    /// @dev Story 092: the read-only checks, then the minter withdrawal-window preflight. Split only so a fork test can
+    ///      drive the V1 exit during the 6h waiting period (story 092 cases a-c) without the window gate; production and
+    ///      the verifier always call this function, never the halves.
     function _phase0_preconditions() internal {
+        _phase0_readChecks();
+        _phase0_minterWithdrawalWindow();
+    }
+
+    function _phase0_readChecks() internal {
         console.log("\n=== Phase 0: preconditions ===");
         ICutoverStaker v1 = ICutoverStaker(STABLE_STAKER_V1);
 
@@ -425,8 +509,15 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(_owner(PHUSD) == OWNER, "Phase0: phUSD owner != OWNER");
         require(_owner(PAUSER) == OWNER, "Phase0: Pauser owner != OWNER");
         require(_owner(PHUSD_STABLE_MINTER) == OWNER, "Phase0: PhusdStableMinter owner != OWNER");
+        require(_owner(STABLE_YIELD_ACCUMULATOR) == OWNER, "Phase0: StableYieldAccumulator owner != OWNER (story 092 repoints its strategy list)");
         address v1Pauser = IPausableLike(STABLE_STAKER_V1).pauser();
         require(v1Pauser == PAUSER || v1Pauser == OWNER, "Phase0: V1 pauser is neither Pauser nor OWNER");
+        // Story 092: the delays the Phase 0 window preflight and the Phase 6b execute rely on, read off the live source.
+        require(
+            ISourceDolaStrategy(YS_DOLA).WAITING_PERIOD() == DOLA_WITHDRAWAL_WAITING_PERIOD
+                && ISourceDolaStrategy(YS_DOLA).EXECUTION_WINDOW() == DOLA_WITHDRAWAL_EXECUTION_WINDOW,
+            "Phase0: autoDOLA strategy WAITING_PERIOD / EXECUTION_WINDOW != 6h / 72h"
+        );
 
         address[] memory live = IStakerTokens(STABLE_STAKER_V1).getStakedTokens();
         require(live.length > 0, "Phase0: V1 has no staked tokens");
@@ -436,11 +527,18 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             tokens.push(t);
             address ys = _sourceStrategyFor(t); // V1's exit side; reverts on a token with no known strategy
             require(_owner(ys) == OWNER, "Phase0: strategy owner != OWNER");
-            require(!IPausableLike(ys).paused(), "Phase0: strategy paused - its withdraw/deposit are whenNotPaused");
-            // Story 088: the Phase 7 V2 coverage gap (V2 unpaused, unregistered for one tx) exposes nothing ONLY
-            // because a global pause stops every strategy V2 routes through. Assert that, read-only.
-            require(IPauserRegistry(PAUSER).isRegistered(ys), "Phase0: strategy not registered with the global Pauser");
-            require(IPausableLike(ys).pauser() == PAUSER, "Phase0: strategy pauser != Pauser");
+            if (t == DOLA && _sourceDolaRetirementStarted()) {
+                // Story 092 resume / verifier: Phase 6b already drained both clients off the autoDOLA source and is
+                // retiring it (pauser OWNER -> unregistered -> paused). V2 routes nothing through it, so the
+                // unpaused / registered checks below no longer apply; Phase 6b and Phase 8 assert the retired state.
+                console.log("  autoDOLA source strategy retirement started (no clients) - pause/registration checks skipped");
+            } else {
+                require(!IPausableLike(ys).paused(), "Phase0: strategy paused - its withdraw/deposit are whenNotPaused");
+                // Story 088: the Phase 7 V2 coverage gap (V2 unpaused, unregistered for one tx) exposes nothing ONLY
+                // because a global pause stops every strategy V2 routes through. Assert that, read-only.
+                require(IPauserRegistry(PAUSER).isRegistered(ys), "Phase0: strategy not registered with the global Pauser");
+                require(IPausableLike(ys).pauser() == PAUSER, "Phase0: strategy pauser != Pauser");
+            }
 
             (uint256 perSecond,,, uint256 staked) = v1.poolInfo(t);
             uint8 state = v1.poolState(t);
@@ -459,6 +557,14 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             // token registered on the stable minter. All three were registered at planning time.
             require(minterYs != address(0), "Phase0: token NOT registered on PhusdStableMinter - STOP (do not register silently)");
             require(dec == IERC20Metadata(t).decimals(), "Phase0: PhusdStableMinter decimals != token decimals");
+            if (t == DOLA) {
+                // Story 092 resume: before the Phase 6b repoint the minter's DOLA points at the autoDOLA source; after it,
+                // at the sDOLA strategy (recovered from the progress file). Anything else is out-of-band: STOP.
+                require(
+                    minterYs == YS_DOLA || (address(sdolaStrategy) != address(0) && minterYs == address(sdolaStrategy)),
+                    "Phase0: PhusdStableMinter DOLA registration is neither the autoDOLA strategy nor the recorded sDOLA strategy - STOP"
+                );
+            }
 
             console.log("  token:", t, IERC20Metadata(t).symbol());
             console.log("    V1 poolState / stakerCount / totalStaked:", uint256(state), v1.stakerCount(t), staked);
@@ -483,6 +589,58 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         console.log("  V1 phUSD mint authorized:", _canMintPhUSD(STABLE_STAKER_V1));
 
         _snapshotPhusdMinterSet();
+    }
+
+    /// @dev Story 092. Skipped once the minter's withdrawal has executed (its autoDOLA principal is 0), which covers every
+    ///      resume past the execute and the post-broadcast verifier. Otherwise the session may only START with at least
+    ///      WINDOW_SAFETY_MARGIN left in the execution window.
+    function _phase0_minterWithdrawalWindow() internal view {
+        if (_doneMinterWithdrawalExecuted()) {
+            console.log("  minter DOLA withdrawal already executed (autoDOLA principal 0) - window preflight skipped");
+            return;
+        }
+        _requireMinterWithdrawalExecutable("Phase0", WINDOW_SAFETY_MARGIN);
+        (uint256 initiatedAt,,) = ISourceDolaStrategy(YS_DOLA).withdrawalStates(DOLA, PHUSD_STABLE_MINTER);
+        console.log("  minter DOLA withdrawal window OK (initiatedAt / closes at):", initiatedAt, initiatedAt + DOLA_WITHDRAWAL_WAITING_PERIOD + DOLA_WITHDRAWAL_EXECUTION_WINDOW);
+    }
+
+    /// @dev Reverts with operator guidance unless the minter's `totalWithdrawal` would EXECUTE now and stays executable for
+    ///      `margin` more seconds. A None / Expired state is fatal, not merely late: a `totalWithdrawal` call there would
+    ///      silently INITIATE (and move nothing).
+    function _requireMinterWithdrawalExecutable(string memory phase, uint256 margin) internal view {
+        (uint256 initiatedAt, uint8 status,) = ISourceDolaStrategy(YS_DOLA).withdrawalStates(DOLA, PHUSD_STABLE_MINTER);
+        require(
+            status == WITHDRAWAL_INITIATED || status == WITHDRAWAL_EXECUTABLE,
+            string.concat(
+                phase,
+                ": PhusdStableMinter DOLA totalWithdrawal is NOT initiated on the autoDOLA strategy - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+            )
+        );
+        uint256 closesAt = initiatedAt + DOLA_WITHDRAWAL_WAITING_PERIOD + DOLA_WITHDRAWAL_EXECUTION_WINDOW;
+        require(
+            block.timestamp >= initiatedAt + DOLA_WITHDRAWAL_WAITING_PERIOD,
+            string.concat(
+                phase,
+                ": minter DOLA withdrawal still in its 6h waiting period - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status); executable at ",
+                vm.toString(initiatedAt + DOLA_WITHDRAWAL_WAITING_PERIOD)
+            )
+        );
+        require(
+            block.timestamp <= closesAt,
+            string.concat(
+                phase,
+                ": minter DOLA withdrawal window EXPIRED - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+            )
+        );
+        require(
+            block.timestamp + margin < closesAt || margin == 0,
+            string.concat(
+                phase,
+                ": fewer than WINDOW_SAFETY_MARGIN seconds left in the minter DOLA withdrawal window - too late to start the session. Wait for expiry at ",
+                vm.toString(closesAt),
+                ", then run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+            )
+        );
     }
 
     // =====================================================================
@@ -838,6 +996,211 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     }
 
     // =====================================================================
+    //  PHASE 6b - minter DOLA collateral + SYA onto the sDOLA strategy, retire the autoDOLA source (story 092)
+    // =====================================================================
+
+    /// @dev Runs after Phase 6 and before Phase 7 (Phase 7's order is untouched). Every sub-step is `if (!done) do();`
+    ///      over a shared on-chain predicate; see PHASE 6b HALT POINTS in the header.
+    function _phase6b_minterSyaRetireSource() internal {
+        console.log("\n=== Phase 6b: minter DOLA collateral -> sDOLA strategy, SYA repoint, retire autoDOLA strategy (story 092) ===");
+        require(address(sdolaStrategy) != address(0), "Phase6b: sDOLA strategy unknown - Phase 3b has not run");
+        // ORDER IS LOAD-BEARING (script/archives/MigrateSaga2Migrate.s.sol precedent). `ERC4626YieldStrategy._totalWithdraw`
+        // redeems `totalShares * minterPrincipal / totalDeposited` - a pro-rata cut of ALL the strategy's shares. Run while
+        // V1 still booked principal here, it would pull V1 stakers' value to OWNER. Phase 6 must have drained V1 first.
+        require(_doneV1PoolMigrating(DOLA), "Phase6b: V1 DOLA pool is not Migrating - Phase 6 has not drained V1");
+        require(
+            ICutoverStrategy(YS_DOLA).principalOf(DOLA, STABLE_STAKER_V1) == 0,
+            "Phase6b: V1 still books DOLA principal on the autoDOLA strategy - the minter totalWithdrawal must run AFTER Phase 6"
+        );
+        _minterRecordConfigAndDisable();
+        _minterExecuteWithdrawal();
+        _minterReseedSdola();
+        _minterRegisterSdola();
+        _syaRepointDola();
+        _retireSourceDola();
+    }
+
+    /// @dev Step 1-2: persist the pre-repoint DOLA config (write-once), then stop new DOLA deposits into the source.
+    ///      `setStablecoinEnabled` is the minter's real toggle (lib/phUSD-stable-minter PhusdStableMinter.sol); `mint`
+    ///      requires `config.enabled`. V2 is paused through Phase 6b, so its autoAnnihilate(DOLA) is not affected.
+    function _minterRecordConfigAndDisable() internal {
+        (address ys, uint256 rate, uint8 dec, bool enabled, uint256 maxPerDay,,) =
+            PhusdStableMinter(PHUSD_STABLE_MINTER).stablecoinConfigs(DOLA);
+        if (!minterConfigRecorded) {
+            require(
+                ys == YS_DOLA,
+                "Phase6b: minter DOLA registration already moved but the progress file holds no pre-repoint config (minterMove) - STOP: recover exchangeRate / decimals / enabled / maxMintPerDay from the minter's event history and add them before resuming"
+            );
+            require(rate > 0, "Phase6b: minter DOLA exchangeRate is 0 - refusing to carry a zero rate onto the sDOLA strategy");
+            minterPrevExchangeRate = rate;
+            minterPrevDecimals = dec;
+            minterPrevEnabled = enabled;
+            minterPrevMaxMintPerDay = maxPerDay;
+            minterConfigRecorded = true;
+            _writeProgress("in_progress");
+            console.log("  recorded minter DOLA config (exchangeRate / decimals / maxMintPerDay):", rate, dec, maxPerDay);
+            console.log("  recorded minter DOLA enabled:", enabled);
+        }
+        if (ys != YS_DOLA) {
+            console.log("  minter DOLA already repointed - disable step skipped");
+            return;
+        }
+        if (enabled) PhusdStableMinter(PHUSD_STABLE_MINTER).setStablecoinEnabled(DOLA, false);
+        require(!_minterDolaEnabled(), "Phase6b: setStablecoinEnabled(DOLA, false) did not land");
+        console.log("  minter DOLA minting disabled for the collateral move");
+    }
+
+    /// @dev Step 3: EXECUTE the delayed withdrawal. DOLA R goes to `owner()` (OWNER). Bounded against P with the source's
+    ///      loss bound: `P - R <= P * _maxLossBps(source) / MAX_BPS + WEI_SLACK`. R above P (the V1-drained strategy's
+    ///      remaining surplus shares all belong to the minter now) is not a loss.
+    function _minterExecuteWithdrawal() internal {
+        if (_doneMinterWithdrawalExecuted()) {
+            console.log("  minter DOLA withdrawal already executed - skipped");
+            return;
+        }
+        _requireMinterWithdrawalExecutable("Phase6b", 0);
+        // (Re-)taken while the minter's source principal is non-zero, i.e. while the execute has provably not landed.
+        minterPrincipalBeforeExec = ICutoverStrategy(YS_DOLA).principalOf(DOLA, PHUSD_STABLE_MINTER);
+        ownerDolaBeforeExec = IERC20(DOLA).balanceOf(OWNER);
+        minterExecRecorded = true;
+        minterRecoveredRecorded = false;
+        minterRecovered = 0;
+        _writeProgress("in_progress");
+        console.log("  execute: minter principal P / OWNER DOLA before:", minterPrincipalBeforeExec, ownerDolaBeforeExec);
+
+        ISourceDolaStrategy(YS_DOLA).totalWithdrawal(DOLA, PHUSD_STABLE_MINTER);
+
+        require(
+            _doneMinterWithdrawalExecuted(),
+            "Phase6b: totalWithdrawal did not zero the minter's autoDOLA principal - it did not EXECUTE (see dola-ys-withdrawal:status)"
+        );
+        (, uint8 status,) = ISourceDolaStrategy(YS_DOLA).withdrawalStates(DOLA, PHUSD_STABLE_MINTER);
+        require(status == 0, "Phase6b: minter withdrawal state not reset to None after execution");
+        uint256 r = _recoveredDolaOnChain();
+        _requireRecoveryWithinBound(r);
+        minterRecovered = r;
+        minterRecoveredRecorded = true;
+        _writeProgress("in_progress");
+        console.log("  executed: R (DOLA delivered to OWNER) / P:", r, minterPrincipalBeforeExec);
+    }
+
+    /// @dev R re-derived from chain: OWNER's DOLA now minus its persisted pre-execution balance. FAILS CLOSED when the
+    ///      execution record is missing or OWNER holds less DOLA than before (the collateral moved out of band).
+    function _recoveredDolaOnChain() internal view returns (uint256 r) {
+        require(
+            minterExecRecorded,
+            "Phase6b: minter withdrawal executed but the progress file has no execution record (minterMove.ownerDolaBeforeExec) - R cannot be recovered. STOP: reconstruct it from the WithdrawalExecuted tx before resuming"
+        );
+        uint256 bal = IERC20(DOLA).balanceOf(OWNER);
+        require(
+            bal > ownerDolaBeforeExec,
+            "Phase6b: OWNER holds no DOLA above its pre-execution balance - the recovered collateral is not on OWNER. STOP"
+        );
+        r = bal - ownerDolaBeforeExec;
+    }
+
+    function _requireRecoveryWithinBound(uint256 r) internal view {
+        uint256 p = minterPrincipalBeforeExec;
+        require(p > 0, "Phase6b: recorded minter principal P is 0");
+        if (r < p) {
+            require(
+                p - r <= p * _maxLossBps(YS_DOLA) / CUTOVER_MAX_BPS + WEI_SLACK,
+                "Phase6b: minter totalWithdrawal recovered less DOLA than the autoDOLA loss bound allows - STOP AND REPORT"
+            );
+        }
+    }
+
+    /// @dev Steps 4 (client + approval) and 5 (re-seed), deliberately BEFORE the registration: `noMintDeposit` takes the
+    ///      strategy as an argument and needs only client + approval, so the collateral leaves the OWNER EOA one
+    ///      transaction sooner and the registration never points the minter at an empty strategy.
+    function _minterReseedSdola() internal {
+        if (_doneMinterReseeded()) {
+            console.log("  minter collateral already re-seeded into the sDOLA strategy - skipped");
+            return;
+        }
+        require(_doneMinterWithdrawalExecuted(), "Phase6b: re-seed before the minter withdrawal executed");
+        if (!_doneMinterClientOnSdola()) sdolaStrategy.setClient(PHUSD_STABLE_MINTER, true);
+        require(_doneMinterClientOnSdola(), "Phase6b: sDOLA strategy setClient(minter) did not land");
+        if (!_doneMinterApprovedSdola()) PhusdStableMinter(PHUSD_STABLE_MINTER).approveYS(DOLA, address(sdolaStrategy));
+        require(_doneMinterApprovedSdola(), "Phase6b: minter approveYS(DOLA, sDOLA strategy) did not land");
+
+        uint256 r = _recoveredDolaOnChain();
+        _requireRecoveryWithinBound(r);
+        if (minterRecoveredRecorded && minterRecovered != r) {
+            console.log("  NOTE: recorded R differs from OWNER's live DOLA delta - re-seeding the live delta (recorded / live):", minterRecovered, r);
+        }
+        minterRecovered = r;
+        minterRecoveredRecorded = true;
+        _writeProgress("in_progress");
+
+        // forceApprove semantics by hand (OWNER is an EOA, SafeERC20 is a library for contracts): zero first if set.
+        if (IERC20(DOLA).allowance(OWNER, PHUSD_STABLE_MINTER) != 0) IERC20(DOLA).approve(PHUSD_STABLE_MINTER, 0);
+        IERC20(DOLA).approve(PHUSD_STABLE_MINTER, r);
+        PhusdStableMinter(PHUSD_STABLE_MINTER).noMintDeposit(address(sdolaStrategy), DOLA, r);
+
+        require(_doneMinterReseeded(), "Phase6b: minter principal on the sDOLA strategy not within bound of R after noMintDeposit");
+        require(IERC20(DOLA).balanceOf(OWNER) == ownerDolaBeforeExec, "Phase6b: OWNER DOLA not back to its pre-execution level");
+        console.log("  re-seeded (R / minter principal on sDOLA strategy):", r, sdolaStrategy.principalOf(DOLA, PHUSD_STABLE_MINTER));
+    }
+
+    /// @dev Step 4 (registration): same exchangeRate and decimals, then restore maxMintPerDay (reset to 0 by
+    ///      registerStablecoin) and the previous enabled flag (registerStablecoin sets true).
+    function _minterRegisterSdola() internal {
+        require(minterConfigRecorded, "Phase6b: no recorded pre-repoint minter config - STOP");
+        require(_doneMinterReseeded(), "Phase6b: refusing to register the minter on the sDOLA strategy before its collateral is re-seeded");
+        PhusdStableMinter m = PhusdStableMinter(PHUSD_STABLE_MINTER);
+        (address ys,,,,,,) = m.stablecoinConfigs(DOLA);
+        if (ys != address(sdolaStrategy)) {
+            m.registerStablecoin(DOLA, address(sdolaStrategy), minterPrevExchangeRate, minterPrevDecimals);
+            console.log("  registerStablecoin(DOLA, sDOLA strategy, previous rate, previous decimals)");
+        }
+        (, , , bool enabled, uint256 maxPerDay,,) = m.stablecoinConfigs(DOLA);
+        if (maxPerDay != minterPrevMaxMintPerDay) m.setMaxMintPerDay(DOLA, minterPrevMaxMintPerDay);
+        if (enabled != minterPrevEnabled) m.setStablecoinEnabled(DOLA, minterPrevEnabled);
+        require(_doneMinterRepointed(), "Phase6b: minter DOLA registration / rate / decimals / maxMintPerDay / enabled not restored on the sDOLA strategy");
+        console.log("  minter DOLA -> sDOLA strategy; maxMintPerDay restored:", minterPrevMaxMintPerDay);
+    }
+
+    /// @dev SYA: add the sDOLA strategy, remove the autoDOLA source (SYA's removeYieldStrategy finds it BY VALUE and
+    ///      swap-and-pops - no index is assumed here), then revoke SYA as a withdrawer on the source. `claim` skims every
+    ///      listed strategy with a whenNotPaused `skimSurplus`, so the source must leave the list BEFORE it is paused.
+    function _syaRepointDola() internal {
+        ISyaStrategyList sya = ISyaStrategyList(STABLE_YIELD_ACCUMULATOR);
+        if (!sya.isRegisteredStrategy(address(sdolaStrategy))) sya.addYieldStrategy(address(sdolaStrategy), DOLA);
+        if (sya.isRegisteredStrategy(YS_DOLA)) sya.removeYieldStrategy(YS_DOLA);
+        require(_doneSyaListRepointed(), "Phase6b: SYA strategy list does not hold the sDOLA strategy (token DOLA) without the autoDOLA strategy");
+        if (ISourceDolaStrategy(YS_DOLA).authorizedWithdrawers(STABLE_YIELD_ACCUMULATOR)) {
+            ISourceDolaStrategy(YS_DOLA).setWithdrawer(STABLE_YIELD_ACCUMULATOR, false);
+        }
+        require(_doneSourceWithdrawerRevoked(), "Phase6b: SYA still a withdrawer on the autoDOLA strategy");
+        require(_doneSdolaStrategyWithdrawer(), "Phase6b: SYA is not a withdrawer on the sDOLA strategy (Phase 3b)");
+        console.log("  SYA: +sDOLA strategy, -autoDOLA strategy; autoDOLA withdrawer revoked");
+    }
+
+    /// @dev Retire the source (recorded decision, story 092): clients off, then the story-084 rule - setPauser(OWNER) ->
+    ///      Pauser.unregister -> pause. The unregister requires the pauser to have left the Pauser, which forces ONE tx
+    ///      where the global pause reverts (halt point g).
+    function _retireSourceDola() internal {
+        ISourceDolaStrategy src = ISourceDolaStrategy(YS_DOLA);
+        if (src.authorizedClients(STABLE_STAKER_V1)) src.setClient(STABLE_STAKER_V1, false);
+        if (src.authorizedClients(PHUSD_STABLE_MINTER)) src.setClient(PHUSD_STABLE_MINTER, false);
+        require(_sourceDolaRetirementStarted(), "Phase6b: autoDOLA strategy clients V1 / minter not revoked");
+        require(
+            src.principalOf(DOLA, STABLE_STAKER_V1) == 0 && src.principalOf(DOLA, PHUSD_STABLE_MINTER) == 0,
+            "Phase6b: autoDOLA strategy still books V1 / minter principal"
+        );
+        console.log("  autoDOLA strategy residual vault shares (expect dust):", ICutoverVault(src.vault()).balanceOf(YS_DOLA));
+
+        if (IPausableLike(YS_DOLA).pauser() != OWNER) IPausableLike(YS_DOLA).setPauser(OWNER);
+        require(IPausableLike(YS_DOLA).pauser() == OWNER, "Phase6b: autoDOLA strategy pauser not moved to OWNER");
+        if (IPauserRegistry(PAUSER).isRegistered(YS_DOLA)) IPauserRegistry(PAUSER).unregister(YS_DOLA);
+        require(!IPauserRegistry(PAUSER).isRegistered(YS_DOLA), "Phase6b: autoDOLA strategy still registered with Pauser");
+        if (!IPausableLike(YS_DOLA).paused()) IPausableLike(YS_DOLA).pause();
+        require(_doneSourceDolaRetired(), "Phase6b: autoDOLA strategy not retired (pauser OWNER, unregistered, paused)");
+        console.log("  autoDOLA strategy retired: no clients, pauser OWNER, unregistered from Pauser, paused");
+    }
+
+    // =====================================================================
     //  PHASE 7 - finalize
     // =====================================================================
 
@@ -970,6 +1333,19 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(_doneSdolaStrategyPauseWired(), "Phase8: sDOLA strategy pauser / Pauser registration");
         require(_doneSdolaStrategyWithdrawer(), "Phase8: StableYieldAccumulator not a withdrawer on the sDOLA strategy");
         require(address(v2.yieldStrategy(DOLA)) == address(sdolaStrategy), "Phase8: V2 DOLA strategy != sDOLA strategy");
+        require(!sdolaStrategy.paused(), "Phase8: sDOLA strategy paused");
+
+        // Story 092: minter collateral, SYA, retired source.
+        require(minterConfigRecorded && minterRecoveredRecorded, "Phase8: minterMove records (pre-repoint config / R) absent");
+        require(_doneMinterRepointed(), "Phase8: minter DOLA registration != sDOLA strategy with previous rate / decimals / maxMintPerDay / enabled");
+        require(_doneMinterClientOnSdola(), "Phase8: minter not a client of the sDOLA strategy");
+        require(sdolaStrategy.principalOf(DOLA, PHUSD_STABLE_MINTER) > 0, "Phase8: minter has no principal on the sDOLA strategy");
+        require(_doneMinterReseeded(), "Phase8: minter principal on the sDOLA strategy below the bound of the recorded R");
+        require(_doneSyaListRepointed(), "Phase8: SYA strategy list != (+sDOLA strategy, -autoDOLA strategy)");
+        require(_doneSourceWithdrawerRevoked(), "Phase8: SYA still a withdrawer on the autoDOLA strategy");
+        require(_sourceDolaRetirementStarted(), "Phase8: autoDOLA strategy clients V1 / minter not revoked");
+        require(_doneMinterWithdrawalExecuted(), "Phase8: minter still books principal on the autoDOLA strategy");
+        require(_doneSourceDolaRetired(), "Phase8: autoDOLA strategy not retired (pauser OWNER, unregistered, paused)");
 
         require(v2.pauser() == PAUSER, "Phase8: V2 pauser");
         require(antimatter.pauser() == PAUSER, "Phase8: Antimatter pauser");
@@ -985,11 +1361,13 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         // an end-state guarantee too. `Pauser.pause()` calls `pause()` on every registrant with no
         // try/catch, so ONE registrant that is already paused or whose pauser is not the Pauser bricks the
         // whole breaker. Preview additionally runs the real EYE-funded pause (`_assertGlobalPauseWorks`).
+        // Story 092: the retired autoDOLA strategy is expected OUTSIDE the registry (unregistered, paused, pauser OWNER).
         address[] memory registrants = IPauserRegistry(PAUSER).getPausableContracts();
         require(registrants.length > 0, "Phase8: Pauser has no registrants");
         for (uint256 i = 0; i < registrants.length; i++) {
             address r = registrants[i];
             require(r != STABLE_STAKER_V1, "Phase8: V1 is listed by Pauser.getPausableContracts()");
+            require(r != YS_DOLA, "Phase8: retired autoDOLA strategy is listed by Pauser.getPausableContracts()");
             require(
                 IPausableLike(r).pauser() == PAUSER,
                 string.concat("Phase8: registrant pauser != Pauser (bricks global pause): ", vm.toString(r))
@@ -1179,10 +1557,18 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         uint256 owed = v2.claimableReward(t, actor);
         require(owed > 0, "smoke: no Antimatter accrued after the warp");
         uint256 phBefore = IERC20(PHUSD).balanceOf(actor);
+        address minterYs = _minterYieldStrategy(t);
+        uint256 minterPrincipalBefore = ICutoverStrategy(minterYs).principalOf(t, PHUSD_STABLE_MINTER);
         vm.prank(actor);
         v2.autoAnnihilate(t);
         uint256 phAfter = IERC20(PHUSD).balanceOf(actor);
         require(phAfter > phBefore, "smoke: autoAnnihilate paid no phUSD");
+        // Story 092: the annihilation's minter.mint deposit must land in the sDOLA strategy for DOLA.
+        if (t == DOLA) require(minterYs == address(sdolaStrategy), "smoke: minter DOLA registration is not the sDOLA strategy");
+        require(
+            ICutoverStrategy(minterYs).principalOf(t, PHUSD_STABLE_MINTER) > minterPrincipalBefore,
+            "smoke: autoAnnihilate did not deposit into the minter's registered strategy"
+        );
         console.log("  autoAnnihilate OK (Antimatter owed / phUSD paid):", owed, phAfter - phBefore);
     }
 
@@ -1383,6 +1769,70 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         return !v2.claimEnabled();
     }
 
+    // ---- Phase 6b: minter collateral, SYA, retired source (story 092) ----
+    function _minterYieldStrategy(address t) internal view returns (address ys) {
+        (ys,,,,,,) = PhusdStableMinter(PHUSD_STABLE_MINTER).stablecoinConfigs(t);
+    }
+
+    function _minterDolaEnabled() internal view returns (bool enabled) {
+        (,,, enabled,,,) = PhusdStableMinter(PHUSD_STABLE_MINTER).stablecoinConfigs(DOLA);
+    }
+
+    /// @dev The minter's autoDOLA principal is zero. True only after the execute: Phase 0 of a fresh run requires it
+    ///      non-zero implicitly (the window preflight), and DOLA minting is disabled before the execute.
+    function _doneMinterWithdrawalExecuted() internal view returns (bool) {
+        return ICutoverStrategy(YS_DOLA).principalOf(DOLA, PHUSD_STABLE_MINTER) == 0;
+    }
+
+    function _doneMinterClientOnSdola() internal view returns (bool) {
+        return address(sdolaStrategy).code.length > 0 && sdolaStrategy.authorizedClients(PHUSD_STABLE_MINTER);
+    }
+
+    /// @dev approveYS grants type(uint256).max; half of it tolerates a token that decrements max allowances.
+    function _doneMinterApprovedSdola() internal view returns (bool) {
+        return address(sdolaStrategy) != address(0)
+            && IERC20(DOLA).allowance(PHUSD_STABLE_MINTER, address(sdolaStrategy)) >= type(uint256).max / 2;
+    }
+
+    /// @dev R recorded and the minter's sDOLA principal is within the destination's loss bound of it (the lower side
+    ///      only: organic DOLA mints after the repoint only add principal).
+    function _doneMinterReseeded() internal view returns (bool) {
+        if (!minterRecoveredRecorded || address(sdolaStrategy).code.length == 0) return false;
+        uint256 principal = sdolaStrategy.principalOf(DOLA, PHUSD_STABLE_MINTER);
+        uint256 r = minterRecovered;
+        return principal > 0 && principal + r * _maxLossBps(address(sdolaStrategy)) / CUTOVER_MAX_BPS + WEI_SLACK >= r;
+    }
+
+    function _doneMinterRepointed() internal view returns (bool) {
+        if (!minterConfigRecorded || address(sdolaStrategy) == address(0)) return false;
+        (address ys, uint256 rate, uint8 dec, bool enabled, uint256 maxPerDay,,) =
+            PhusdStableMinter(PHUSD_STABLE_MINTER).stablecoinConfigs(DOLA);
+        return ys == address(sdolaStrategy) && rate == minterPrevExchangeRate && dec == minterPrevDecimals
+            && enabled == minterPrevEnabled && maxPerDay == minterPrevMaxMintPerDay;
+    }
+
+    function _doneSyaListRepointed() internal view returns (bool) {
+        ISyaStrategyList sya = ISyaStrategyList(STABLE_YIELD_ACCUMULATOR);
+        address[] memory list = sya.getYieldStrategies();
+        return address(sdolaStrategy) != address(0) && _contains(list, address(sdolaStrategy)) && !_contains(list, YS_DOLA)
+            && sya.strategyTokens(address(sdolaStrategy)) == DOLA;
+    }
+
+    function _doneSourceWithdrawerRevoked() internal view returns (bool) {
+        return !ISourceDolaStrategy(YS_DOLA).authorizedWithdrawers(STABLE_YIELD_ACCUMULATOR);
+    }
+
+    /// @dev Neither V1 nor the minter is a client of the autoDOLA source any more: its retirement has begun.
+    function _sourceDolaRetirementStarted() internal view returns (bool) {
+        ISourceDolaStrategy src = ISourceDolaStrategy(YS_DOLA);
+        return !src.authorizedClients(STABLE_STAKER_V1) && !src.authorizedClients(PHUSD_STABLE_MINTER);
+    }
+
+    function _doneSourceDolaRetired() internal view returns (bool) {
+        return _sourceDolaRetirementStarted() && IPausableLike(YS_DOLA).pauser() == OWNER
+            && !IPauserRegistry(PAUSER).isRegistered(YS_DOLA) && IPausableLike(YS_DOLA).paused();
+    }
+
     // =====================================================================
     //  Helpers
     // =====================================================================
@@ -1493,6 +1943,27 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             phusdMintVersionAtPhase0 = vm.parseUint(vm.parseJsonString(json, ".baselines.phusdMintVersion"));
             phusdBaselineRecorded = true;
         }
+        // Story 092: Phase 6b records. Each group is adopted only when its flag says it was recorded.
+        if (vm.keyExistsJson(json, ".minterMove.configRecorded") && _jsonFlag(json, ".minterMove.configRecorded")) {
+            minterPrevExchangeRate = vm.parseUint(vm.parseJsonString(json, ".minterMove.prevExchangeRate"));
+            minterPrevDecimals = uint8(vm.parseUint(vm.parseJsonString(json, ".minterMove.prevDecimals")));
+            minterPrevEnabled = _jsonFlag(json, ".minterMove.prevEnabled");
+            minterPrevMaxMintPerDay = vm.parseUint(vm.parseJsonString(json, ".minterMove.prevMaxMintPerDay"));
+            minterConfigRecorded = true;
+        }
+        if (vm.keyExistsJson(json, ".minterMove.execRecorded") && _jsonFlag(json, ".minterMove.execRecorded")) {
+            minterPrincipalBeforeExec = vm.parseUint(vm.parseJsonString(json, ".minterMove.principalBeforeExec"));
+            ownerDolaBeforeExec = vm.parseUint(vm.parseJsonString(json, ".minterMove.ownerDolaBeforeExec"));
+            minterExecRecorded = true;
+        }
+        if (vm.keyExistsJson(json, ".minterMove.recoveredRecorded") && _jsonFlag(json, ".minterMove.recoveredRecorded")) {
+            minterRecovered = vm.parseUint(vm.parseJsonString(json, ".minterMove.recovered"));
+            minterRecoveredRecorded = true;
+        }
+    }
+
+    function _jsonFlag(string memory json, string memory key) internal pure returns (bool) {
+        return keccak256(bytes(vm.parseJsonString(json, key))) == keccak256("true");
     }
 
     function _loadAddress(string memory json, string memory name) internal view returns (address addr) {
@@ -1523,10 +1994,23 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         vm.serializeString("s082.baselines", "phusdMinterMask", vm.toString(phusdMaskAtPhase0));
         string memory b = vm.serializeString("s082.baselines", "phusdMintVersion", vm.toString(phusdMintVersionAtPhase0));
 
+        // Story 092: Phase 6b records (strings, flag-gated on load).
+        vm.serializeString("s092.minter", "configRecorded", minterConfigRecorded ? "true" : "false");
+        vm.serializeString("s092.minter", "prevExchangeRate", vm.toString(minterPrevExchangeRate));
+        vm.serializeString("s092.minter", "prevDecimals", vm.toString(uint256(minterPrevDecimals)));
+        vm.serializeString("s092.minter", "prevEnabled", minterPrevEnabled ? "true" : "false");
+        vm.serializeString("s092.minter", "prevMaxMintPerDay", vm.toString(minterPrevMaxMintPerDay));
+        vm.serializeString("s092.minter", "execRecorded", minterExecRecorded ? "true" : "false");
+        vm.serializeString("s092.minter", "principalBeforeExec", vm.toString(minterPrincipalBeforeExec));
+        vm.serializeString("s092.minter", "ownerDolaBeforeExec", vm.toString(ownerDolaBeforeExec));
+        vm.serializeString("s092.minter", "recoveredRecorded", minterRecoveredRecorded ? "true" : "false");
+        string memory mm = vm.serializeString("s092.minter", "recovered", vm.toString(minterRecovered));
+
         vm.serializeUint("s082.root", "chainId", CHAIN_ID);
         vm.serializeString("s082.root", "networkName", NETWORK_NAME);
         vm.serializeString("s082.root", "deploymentStatus", status);
         vm.serializeString("s082.root", "baselines", b);
+        vm.serializeString("s082.root", "minterMove", mm);
         string memory json = vm.serializeString("s082.root", "contracts", c);
 
         // Preview serialises (same code path, same cost) but NEVER writes: a preview CREATE address is
@@ -1554,7 +2038,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         console.log("Antimatter:           ", address(antimatter));
         console.log("StableStakerV2:       ", address(v2));
         console.log("CrossVersionMigrator: ", address(migrator), "(transient, no address-book key)");
-        console.log("sDOLA strategy:       ", address(sdolaStrategy), "(V2 DOLA destination; address book is story 092)");
+        console.log("sDOLA strategy:       ", address(sdolaStrategy), "(V2 DOLA destination + minter DOLA collateral; patched into YieldStrategyDola)");
         string memory mode = isPreview ? string("PREVIEW") : string("BROADCAST");
         console.log("Mode:                 ", mode);
     }
@@ -1614,4 +2098,30 @@ interface IPauserRegistry {
     function eyeToken() external view returns (address);
     function eyeBurnAmount() external view returns (uint256);
     function pause() external;
+}
+
+/// @dev Story 092: the live autoDOLA strategy 0x1760 (plain ERC4626YieldStrategy). Copied, not imported (archive precedent).
+interface ISourceDolaStrategy {
+    function WAITING_PERIOD() external view returns (uint256);
+    function EXECUTION_WINDOW() external view returns (uint256);
+    function withdrawalStates(address token, address client)
+        external
+        view
+        returns (uint256 initiatedAt, uint8 status, uint256 balance);
+    function totalWithdrawal(address token, address client) external;
+    function principalOf(address token, address account) external view returns (uint256);
+    function authorizedClients(address client) external view returns (bool);
+    function authorizedWithdrawers(address withdrawer) external view returns (bool);
+    function setClient(address client, bool auth) external;
+    function setWithdrawer(address withdrawer, bool auth) external;
+    function vault() external view returns (address);
+}
+
+/// @dev Story 092: lib/stable-yield-accumulator StableYieldAccumulator strategy registry.
+interface ISyaStrategyList {
+    function addYieldStrategy(address strategy, address token) external;
+    function removeYieldStrategy(address strategy) external;
+    function getYieldStrategies() external view returns (address[] memory);
+    function isRegisteredStrategy(address strategy) external view returns (bool);
+    function strategyTokens(address strategy) external view returns (address);
 }
