@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 // Generated interface from local.json on 2026-09-15T22:12:39.260Z
+=======
+// Generated interface from local.json on 2026-09-16T12:33:37.433Z
+>>>>>>> sprint/stable-staker-v2
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -17,6 +21,8 @@ export interface ContractAddresses {
   WBTC: string;
   Pauser: string;
   AutoDOLA: string;
+  YieldStrategyDolaLegacy: string;
+  SDOLA: string;
   YieldStrategyDola: string;
   AutoUSDC: string;
   YieldStrategyUSDC: string;

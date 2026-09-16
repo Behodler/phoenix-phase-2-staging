@@ -73,7 +73,9 @@ app.get('/', (req, res) => {
             'YieldStrategyUSDS',
             'YieldStrategyUSDe',
             'AutoDOLA',
+            'SDOLA',
             'YieldStrategyDola',
+            'YieldStrategyDolaLegacy',
             'PhusdStableMinter',
             'StableYieldAccumulator',
             'PhlimboV3'

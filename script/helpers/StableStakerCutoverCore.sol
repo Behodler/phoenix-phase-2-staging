@@ -416,6 +416,20 @@ abstract contract StableStakerCutoverCore {
     //  Post-conditions
     // =====================================================================
 
+    /// @notice Story 091: the per-user pre -> credited loss bound in bps for a V1 exit through `sourceStrategy` and a
+    ///         V2 re-deposit into `destinationStrategy`. Different strategies: the two legs' bounds ADD (e.g. autoDOLA
+    ///         exit 5 + sDOLA entry 5 = 10 bps). Same contract: the bound counts ONCE - a single strategy's bound
+    ///         already covers its own round trip (`_maxLossBps` doubles the market haircut for that reason).
+    function _perUserLossBps(
+        address sourceStrategy,
+        address destinationStrategy,
+        uint256 sourceLossBps,
+        uint256 destinationLossBps
+    ) internal pure returns (uint256) {
+        if (sourceStrategy == destinationStrategy) return sourceLossBps;
+        return sourceLossBps + destinationLossBps;
+    }
+
     /// @notice The exit-realization loss bound (story 087, audit-33 L-06; replaces story 085's aggregate floor).
     ///         True iff V1's terminal exit of `token` realized at least `(MAX_BPS - maxLossBps)` of its principal
     ///         snapshot, less one `weiSlack`: `(min(R, P) + weiSlack) * MAX_BPS >= P * (MAX_BPS - maxLossBps)`.
@@ -438,7 +452,7 @@ abstract contract StableStakerCutoverCore {
     ///         R > P (a strategy exit that realized a gain) is capped at par, exactly as V1 caps the credit.
     ///         ONE `weiSlack` for the pool, not one per user: the exit is a single strategy withdraw of `P`, whose
     ///         vault share rounding can realize a few wei under par even with no economic loss (unit-tested at a
-    ///         high share price). On mainnet 1000 wei is below 1e-9 of a 2 bps allowance on any live pool.
+    ///         high share price). On mainnet 1000 wei is below 1e-9 of a 5 bps allowance on any live pool.
     ///         Multiplication, not division: no rounding in either direction.
     function _exitRealizationWithinBound(
         uint256 realized,
@@ -463,25 +477,44 @@ abstract contract StableStakerCutoverCore {
     ///         The per-user in-leg bound below still covers the full pre -> credited loss of THIS leg's users.
     ///         Organic stakes: V2 is paused until Phase 7; checks here that read V2 totals are equalities over
     ///         V2's own staker set, which organic stakes keep true.
+    ///         SOURCE / DESTINATION (story 091). V1 exits through `sourceStrategy` and V2 re-deposits into
+    ///         `destinationStrategy`. They are the same contract for USDC / USDe and different for DOLA (autoDOLA
+    ///         strategy -> sDOLA strategy). The exit-realization bound uses the SOURCE bound only (it measures V1's
+    ///         exit). The per-user pre -> credited bound spans both legs, so it uses `_perUserLossBps`: source +
+    ///         destination bps when the strategies differ, and the bound ONCE when they are the same contract (the
+    ///         existing single-strategy bound already covers that strategy's round trip, so non-DOLA pools do not
+    ///         quietly loosen). The lockstep reads the destination; V1's booked principal is asserted zero on the
+    ///         source.
     /// @param plan The plan `_migratePool` executed in THIS leg (per-user checks cover its users).
-    /// @param maxLossBps Principal loss allowed in bps, per user and on the exit leg (`_maxLossBps`: 2 for the
-    ///        ERC4626 autopools, 2 * slippageToleranceBps + 1 for the market strategy).
+    /// @param sourceStrategy The strategy V1 exited (`_initiatePool`).
+    /// @param destinationStrategy The strategy V2 deposits into (`_migratePool` / `_planPool`).
+    /// @param sourceLossBps Loss bound of the source strategy in bps (`_maxLossBps(source)`: 5 for the ERC4626
+    ///        autopools, 2 * slippageToleranceBps + 1 for the market strategy). Exit-realization bound.
+    /// @param destinationLossBps Loss bound of the destination strategy in bps (`_maxLossBps(destination)`).
     /// @param weiSlack Absolute rounding slack, in token wei: per user in the per-user bound, and once for the pool's
     ///        single V1 exit in the realization bound.
     function _assertPoolPostMigration(
         ICutoverStaker v1,
         ICutoverStaker v2,
         address token,
-        address strategy,
+        address sourceStrategy,
+        address destinationStrategy,
         PoolPlan memory plan,
-        uint256 maxLossBps,
+        uint256 sourceLossBps,
+        uint256 destinationLossBps,
         uint256 weiSlack
     ) internal view {
+        uint256 perUserLossBps =
+            _perUserLossBps(sourceStrategy, destinationStrategy, sourceLossBps, destinationLossBps);
         // ---- V1 holds the stragglers and nothing else ----
         require(v1.poolState(token) == POOL_MIGRATING, "cutover-post: V1 pool not Migrating");
         require(v1.stakerCount(token) == plan.stragglers.length, "cutover-post: V1 stakerCount != stragglers");
         (,,, uint256 v1Staked) = v1.poolInfo(token);
         require(v1Staked == plan.stragglerAmountTotal, "cutover-post: V1 totalStaked != straggler principal");
+        require(
+            ICutoverStrategy(sourceStrategy).principalOf(token, address(v1)) == 0,
+            "cutover-post: V1 still books principal on the source strategy"
+        );
 
         // ---- Per migrated user (this leg) ----
         for (uint256 i = 0; i < plan.migratable.length; i++) {
@@ -497,7 +530,7 @@ abstract contract StableStakerCutoverCore {
             require(post > 0, "cutover-post: a migrated staker was not credited on V2");
             require(post <= pre, "cutover-post: a staker gained principal in the cutover");
             require(
-                pre - post <= pre * maxLossBps / CUTOVER_MAX_BPS + weiSlack,
+                pre - post <= pre * perUserLossBps / CUTOVER_MAX_BPS + weiSlack,
                 "cutover-post: cutover lost more principal than the strategy can explain"
             );
         }
@@ -517,9 +550,9 @@ abstract contract StableStakerCutoverCore {
         {
             (uint256 realized, uint256 principalSnapshot) = v1.migrationInfo(token);
             console.log("  exit realization (token / R realized / P snapshot):", token, realized, principalSnapshot);
-            console.log("    loss bound bps / V2 totalStaked:", maxLossBps, v2Staked);
+            console.log("    exit bound bps (source) / per-user bound bps / V2 totalStaked:", sourceLossBps, perUserLossBps, v2Staked);
             require(
-                _exitRealizationWithinBound(realized, principalSnapshot, maxLossBps, weiSlack),
+                _exitRealizationWithinBound(realized, principalSnapshot, sourceLossBps, weiSlack),
                 "cutover-post: V1 exit realization below loss bound"
             );
         }
@@ -529,7 +562,7 @@ abstract contract StableStakerCutoverCore {
         // on a clean cutover these are equal by construction. This detects a booking desync between V2 and
         // its strategy; it cannot detect principal lost in the cutover (the realization bound above and the
         // per-user bounds do that).
-        uint256 stratPrincipal = ICutoverStrategy(strategy).principalOf(token, address(v2));
+        uint256 stratPrincipal = ICutoverStrategy(destinationStrategy).principalOf(token, address(v2));
         require(
             stratPrincipal >= v2Staked, "cutover-post: strategy principal for V2 below V2 booked totalStaked (lockstep)"
         );

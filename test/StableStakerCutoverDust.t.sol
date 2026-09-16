@@ -95,7 +95,15 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
 
     function doAssert(PoolPlan memory plan, uint256 maxLossBps, uint256 weiSlack) external view {
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), plan, maxLossBps, weiSlack
+            ICutoverStaker(address(v1)),
+            ICutoverStaker(address(v2)),
+            address(dola),
+            address(ys),
+            address(ys),
+            plan,
+            maxLossBps,
+            maxLossBps,
+            weiSlack
         );
     }
 
@@ -128,7 +136,7 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
 
         // Loss: exit + re-deposit at price 10 rounds by < 10 wei per leg.
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), plan, 0, 20
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), address(ys), plan, 0, 0, 20
         );
         (uint256 v2Dust,) = v2.userInfo(address(dola), dust);
         assertEq(v2Dust, 0, "straggler has no V2 position");
@@ -153,7 +161,7 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
 
         // 1e18 loss on 2000e18 = 5 bps socialised by min(R,P)/P.
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), plan, 6, 2
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), address(ys), plan, 6, 6, 2
         );
     }
 
@@ -202,7 +210,56 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         assertEq(again.migratable.length, 0, "nothing left to migrate on a resume leg");
         assertEq(again.stragglers.length, 1, "straggler still allow-listed on a resume leg");
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), again, 0, 20
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), address(ys), again, 0, 0, 20
+        );
+    }
+
+    // ------------------------------------------------------------------ story 091: source != destination
+
+    /// The per-user bound: source + destination when the strategies differ, the bound ONCE when they are the same.
+    function test_perUserLossBps_sourcePlusDestination_onceWhenEqual() public view {
+        assertEq(_perUserLossBps(address(ys), address(ys), 5, 5), 5, "same strategy: counted once");
+        assertEq(_perUserLossBps(address(ys), address(0xBEEF), 5, 5), 10, "different strategies: 5 + 5");
+        assertEq(_perUserLossBps(address(ys), address(0xBEEF), 61, 5), 66, "legs add");
+    }
+
+    /// V1 exits through the SOURCE strategy and V2 re-deposits into a DIFFERENT destination strategy over another
+    /// vault (the DOLA autoDOLA -> sDOLA shape): the plan and migration use the destination, the post-condition uses
+    /// the source for V1's booked principal and the exit bound, and the destination for the lockstep.
+    function test_sourceDestinationSplit_v2LandsInDestination() public {
+        MockERC4626Vault vault2 = new MockERC4626Vault("sDOLA", "sDOLA", address(dola));
+        ERC4626YieldStrategy dst = new ERC4626YieldStrategy(address(this), address(dola), address(vault2));
+        StableStakerV2 v2b = new StableStakerV2(IAntimatter(address(new Antimatter(address(this)))), address(this));
+        CrossVersionMigrator migB = new CrossVersionMigrator(
+            IStableStakerMigratable(address(v1)), IStableStakerMigratable(address(v2b)), address(this)
+        );
+        v2b.addToken(address(dola));
+        dst.setClient(address(v2b), true);
+        v2b.setYieldStrategy(address(dola), IYieldStrategy(address(dst)));
+        v1.setMigrator(address(migB));
+        v2b.setMigrator(address(migB));
+
+        _initiatePool(ICutoverMigrator(address(migB)), ICutoverStaker(address(v1)), address(dola), address(ys));
+        PoolPlan memory plan = _migratePool(
+            ICutoverMigrator(address(migB)), ICutoverStaker(address(v1)), address(dola), address(dst), 25, CAP
+        );
+        assertEq(plan.migratable.length, 2, "both stakers migrated");
+        _assertPoolPostMigration(
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2b)), address(dola), address(ys), address(dst), plan, 5, 5, 1_000
+        );
+        assertEq(ys.principalOf(address(dola), address(v1)), 0, "V1 books nothing on the source");
+        assertEq(ys.principalOf(address(dola), address(v2b)), 0, "V2 never touched the source");
+        assertEq(dst.principalOf(address(dola), address(v2b)), 2 * BIG, "V2 principal booked on the destination");
+        assertGt(vault2.balanceOf(address(dst)), 0, "destination holds the new vault's shares");
+
+        // Passing the SAME strategy for both sides must fail: V2 books nothing on the source (lockstep).
+        vm.expectRevert(bytes("cutover-post: strategy principal for V2 below V2 booked totalStaked (lockstep)"));
+        this.doAssertSplit(plan, address(ys), address(ys), address(v2b));
+    }
+
+    function doAssertSplit(PoolPlan memory plan, address src, address dst, address v2x) external view {
+        _assertPoolPostMigration(
+            ICutoverStaker(address(v1)), ICutoverStaker(v2x), address(dola), src, dst, plan, 5, 5, 1_000
         );
     }
 
@@ -271,7 +328,7 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         PoolPlan memory live = this.doMigrate(CAP); // resume leg: empty plan
         assertEq(live.migratable.length, 0, "setup: resume plan is empty");
         this.doAssert(live, 0, 20);
-        this.doAssert(live, 2, 1_000); // the mainnet ERC4626 parameters
+        this.doAssert(live, 5, 1_000); // the mainnet ERC4626 parameters (story 088: 5 bps)
     }
 
     /// (i-b) Same self-exit, fresh leg: `_migratePool` re-plans from live state after the exit and asserts.
@@ -294,7 +351,7 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         PoolPlan memory again = this.doMigrate(CAP); // resume/verifier shape: the per-user loop sees nothing
 
         vm.expectRevert(bytes(BOUND_REVERT));
-        this.doAssert(again, 2, 1_000);
+        this.doAssert(again, 5, 1_000);
     }
 
     /// Single-leg haircut: a vault loss before initiation makes R < P, so every credit is cut 5 bps. With a
@@ -315,7 +372,7 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
     /// plan. The per-user loop sees nothing, the lockstep is equal by construction, and the realization bound
     /// catches the lost principal.
     function test_realizationBound_resumeLegHaircutReverts() public {
-        vault.simulateLoss(1e18); // 5 bps
+        vault.simulateLoss(2e18); // 10 bps
         this.doInitiate();
         this.doMigrate(CAP); // first leg: no post-assertion run
 
@@ -326,20 +383,20 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         assertEq(ys.principalOf(address(dola), address(v2)), v2Staked, "lockstep holds - it cannot see the loss");
 
         vm.expectRevert(bytes(BOUND_REVERT));
-        this.doAssert(again, 2, 1_000); // the mainnet ERC4626 bound: 5 bps is beyond it
+        this.doAssert(again, 5, 1_000); // the mainnet ERC4626 bound (5 bps): 10 bps is beyond it
 
-        this.doAssert(again, 6, 20);
+        this.doAssert(again, 11, 20);
     }
 
-    /// (iv) A 1 bps haircut is within the mainnet 2 bps ERC4626 bound on a resume leg.
+    /// (iv) A 4 bps haircut is within the mainnet 5 bps ERC4626 bound on a resume leg.
     function test_realizationBound_withinBoundHaircutPasses() public {
-        vault.simulateLoss(2e17); // 1 bps of 2000e18
+        vault.simulateLoss(8e17); // 4 bps of 2000e18
         this.doInitiate();
         this.doMigrate(CAP);
         PoolPlan memory again = this.doMigrate(CAP);
         (uint256 R, uint256 P) = v1.migrationInfo(address(dola));
         assertLt(R, P, "setup: the exit realized less than the snapshot");
-        this.doAssert(again, 2, 1_000);
+        this.doAssert(again, 5, 1_000);
     }
 
     /// Stragglers left behind on V1 do not trip the bound: R / P is pool-wide and says nothing about who stayed.
@@ -359,8 +416,8 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
     function test_realizationBound_unitMath() public {
         assertTrue(_exitRealizationWithinBound(10_000, 10_000, 0, 0), "par passes 0 bps");
         assertFalse(_exitRealizationWithinBound(9_999, 10_000, 0, 0), "1 bps short fails 0 bps");
-        assertTrue(_exitRealizationWithinBound(9_998, 10_000, 2, 0), "exactly at the 2 bps boundary passes");
-        assertFalse(_exitRealizationWithinBound(9_997, 10_000, 2, 0), "3 bps short fails 2 bps");
+        assertTrue(_exitRealizationWithinBound(9_995, 10_000, 5, 0), "exactly at the 5 bps boundary passes");
+        assertFalse(_exitRealizationWithinBound(9_994, 10_000, 5, 0), "6 bps short fails 5 bps");
         assertTrue(_exitRealizationWithinBound(9_939, 10_000, 61, 0), "61 bps boundary (market strategy)");
         assertFalse(_exitRealizationWithinBound(9_938, 10_000, 61, 0), "62 bps short fails 61 bps");
         assertTrue(_exitRealizationWithinBound(20_000, 10_000, 0, 0), "R > P is capped at par and passes");
@@ -370,10 +427,10 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         assertTrue(_exitRealizationWithinBound(1e24 - 7, 1e24, 0, 7), "7 wei of exit rounding within 7 wei slack");
         assertFalse(_exitRealizationWithinBound(1e24 - 8, 1e24, 0, 7), "8 wei short fails 7 wei slack");
         // No rounding: 1e18-scale values at the exact bps boundary.
-        assertTrue(_exitRealizationWithinBound(1e24 - 2e20, 1e24, 2, 0), "large values, exact boundary");
-        assertFalse(_exitRealizationWithinBound(1e24 - 2e20 - 1, 1e24, 2, 0), "large values, 1 wei past the boundary");
-        assertTrue(_exitRealizationWithinBound(1e24 - 2e20 - 1000, 1e24, 2, 1_000), "mainnet params: bps + 1000 wei");
-        assertFalse(_exitRealizationWithinBound(1e24 - 2e20 - 1001, 1e24, 2, 1_000), "mainnet params: 1 wei past");
+        assertTrue(_exitRealizationWithinBound(1e24 - 5e20, 1e24, 5, 0), "large values, exact boundary");
+        assertFalse(_exitRealizationWithinBound(1e24 - 5e20 - 1, 1e24, 5, 0), "large values, 1 wei past the boundary");
+        assertTrue(_exitRealizationWithinBound(1e24 - 5e20 - 1000, 1e24, 5, 1_000), "mainnet params: bps + 1000 wei");
+        assertFalse(_exitRealizationWithinBound(1e24 - 5e20 - 1001, 1e24, 5, 1_000), "mainnet params: 1 wei past");
 
         vm.expectRevert(bytes("cutover-post: V1 principalSnapshot is zero"));
         this.boundExt(0, 0, 0);

@@ -15,6 +15,9 @@ import {
 import {VerifyStableStakerV2Cutover} from "../script/VerifyStableStakerV2Cutover.s.sol";
 import {ICutoverStaker, ICutoverStrategy, ICutoverMigrator} from "../script/helpers/StableStakerCutoverCore.sol";
 import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
+import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
+import {PhusdStableMinter} from "@phUSDMinter/PhusdStableMinter.sol";
+import {InitiateDolaStrategyWithdrawalHarness} from "./InitiateDolaStrategyWithdrawal.fork.t.sol";
 
 interface IV1Admin {
     function finalizeAndReset(address token) external;
@@ -44,8 +47,26 @@ contract VerifyStableStakerV2CutoverHarness is VerifyStableStakerV2Cutover {
     address internal injAntimatter;
     address internal injV2;
     address internal injMigrator;
+    address internal injSdola;
     uint256 internal injMask;
     uint256 internal injVersion;
+    CutoverStableStakerV2Mainnet internal injMinterFrom;
+    bool internal injMinterSkip;
+
+    /// Story 092: adopt the Phase 6b records (the progress file's `minterMove`) from a fork-local cutover.
+    function injectMinterMoveFrom(CutoverStableStakerV2Mainnet c) external {
+        injMinterFrom = c;
+    }
+
+    /// Story 092: simulate a progress file with no `minterMove` records.
+    function withholdMinterMove() external {
+        injMinterSkip = true;
+    }
+
+    /// Story 091: the fork-local sDOLA destination strategy, recovered like the progress-file address.
+    function injectSdola(address sd) external {
+        injSdola = sd;
+    }
 
     function inject(address a, address s, address m, uint256 mask, uint256 version) external {
         injAntimatter = a;
@@ -63,16 +84,30 @@ contract VerifyStableStakerV2CutoverHarness is VerifyStableStakerV2Cutover {
         antimatter = Antimatter(injAntimatter);
         v2 = StableStakerV2(injV2);
         migrator = CrossVersionMigrator(injMigrator);
+        sdolaStrategy = ERC4626YieldStrategy(injSdola);
         phusdMaskAtPhase0 = injMask;
         phusdMintVersionAtPhase0 = injVersion;
         phusdBaselineRecorded = true;
         cutoverStartBlock = block.number;
+        if (address(injMinterFrom) != address(0) && !injMinterSkip) {
+            CutoverStableStakerV2Mainnet c = injMinterFrom;
+            minterConfigRecorded = c.minterConfigRecorded();
+            minterPrevExchangeRate = c.minterPrevExchangeRate();
+            minterPrevDecimals = c.minterPrevDecimals();
+            minterPrevEnabled = c.minterPrevEnabled();
+            minterPrevMaxMintPerDay = c.minterPrevMaxMintPerDay();
+            minterExecRecorded = c.minterExecRecorded();
+            minterPrincipalBeforeExec = c.minterPrincipalBeforeExec();
+            ownerDolaBeforeExec = c.ownerDolaBeforeExec();
+            minterRecoveredRecorded = c.minterRecoveredRecorded();
+            minterRecovered = c.minterRecovered();
+        }
     }
 
     /// Story 087: the per-pool aggregate with the self-exit list withheld, to prove the subtraction is load-bearing.
     function aggregateIgnoringSelfExits(address t) external view {
         _requirePoolAggregateNetOfSelfExits(
-            t, _strategyFor(t), _decode(_fetchLogsView(STABLE_STAKER_V1, MIGRATED_OUT_TOPIC)), new CutoverEvent[](0)
+            t, _decode(_fetchLogsView(STABLE_STAKER_V1, MIGRATED_OUT_TOPIC)), new CutoverEvent[](0)
         );
     }
 
@@ -119,6 +154,7 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
         _phase1_pauseV1();
         _phase2_antimatter();
         _phase3_stakerV2();
+        _phase3b_sdolaStrategy();
         _phase4_pools();
         _phase5_mintRights();
         vm.stopPrank();
@@ -141,12 +177,12 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
 
     function initiate(address t) external {
         vm.startPrank(OWNER);
-        _initiatePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _strategyFor(t));
+        _initiatePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _sourceStrategyFor(t));
         vm.stopPrank();
     }
 
     function planMigratable(address t) external view returns (address[] memory) {
-        return _planPool(ICutoverStaker(STABLE_STAKER_V1), t, _strategyFor(t)).migratable;
+        return _planPool(ICutoverStaker(STABLE_STAKER_V1), t, _destinationStrategyFor(t)).migratable;
     }
 
     /// On-chain effect of a broadcast `migrate` whose user list was computed in forge's local pass.
@@ -157,26 +193,30 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
 
     function migrateNoAssert(address t) external {
         vm.startPrank(OWNER);
-        _migratePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _strategyFor(t), MIGRATE_CHUNK, _stragglerCap(t));
+        _migratePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _destinationStrategyFor(t), MIGRATE_CHUNK, _stragglerCap(t));
         vm.stopPrank();
     }
 
     /// The resume-leg / verifier post-condition shape: live re-plan (empty migratable).
     function assertLivePlan(address t) external view {
-        address ys = _strategyFor(t);
-        PoolPlan memory plan = _planPool(ICutoverStaker(STABLE_STAKER_V1), t, ys);
+        address src = _sourceStrategyFor(t);
+        address dst = _destinationStrategyFor(t);
+        PoolPlan memory plan = _planPool(ICutoverStaker(STABLE_STAKER_V1), t, dst);
         _assertPoolPostMigration(
-            ICutoverStaker(STABLE_STAKER_V1), ICutoverStaker(address(v2)), t, ys, plan, _maxLossBps(ys), WEI_SLACK
+            ICutoverStaker(STABLE_STAKER_V1), ICutoverStaker(address(v2)), t, src, dst, plan, _maxLossBps(src), _maxLossBps(dst), WEI_SLACK
         );
     }
 
     function phase6(address t) external {
         vm.startPrank(OWNER);
-        address ys = _strategyFor(t);
+        address src = _sourceStrategyFor(t);
+        address dst = _destinationStrategyFor(t);
         ICutoverStaker v1 = ICutoverStaker(STABLE_STAKER_V1);
-        _initiatePool(ICutoverMigrator(address(migrator)), v1, t, ys);
-        PoolPlan memory plan = _migratePool(ICutoverMigrator(address(migrator)), v1, t, ys, MIGRATE_CHUNK, _stragglerCap(t));
-        _assertPoolPostMigration(v1, ICutoverStaker(address(v2)), t, ys, plan, _maxLossBps(ys), WEI_SLACK);
+        _initiatePool(ICutoverMigrator(address(migrator)), v1, t, src);
+        PoolPlan memory plan = _migratePool(ICutoverMigrator(address(migrator)), v1, t, dst, MIGRATE_CHUNK, _stragglerCap(t));
+        _assertPoolPostMigration(
+            v1, ICutoverStaker(address(v2)), t, src, dst, plan, _maxLossBps(src), _maxLossBps(dst), WEI_SLACK
+        );
         vm.stopPrank();
     }
 
@@ -187,8 +227,10 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
         vm.stopPrank();
     }
 
-    function phase7And8() external {
+    /// Story 092: Phase 6b (minter move / SYA / source retirement) runs between Phase 6 and Phase 7.
+    function phase6bTo8() external {
         vm.startPrank(OWNER);
+        _phase6b_minterSyaRetireSource();
         _phase7_finalize();
         vm.stopPrank();
         _phase8_wiringAssertions();
@@ -276,11 +318,20 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     /// @dev The inherited cutover mutators must never be reached from the verifier.
     function test_verifierNeverCallsInheritedMutators() public view {
         string memory src = vm.readFile(VERIFIER_SRC);
-        string[12] memory banned = [
+        string[21] memory banned = [
+            "_phase6b_minterSyaRetireSource",
+            "_minterRecordConfigAndDisable",
+            "_minterExecuteWithdrawal",
+            "_minterReseedSdola",
+            "_minterRegisterSdola",
+            "_syaRepointDola",
+            "_retireSourceDola",
             "_phase1_pauseV1",
             "_retireV1",
             "_phase2_antimatter",
             "_phase3_stakerV2",
+            "_phase3b_sdolaStrategy",
+            "_requireNoUnrecordedSdolaStrategy",
             "_phase4_pools",
             "_setupPool",
             "_phase5_mintRights",
@@ -320,6 +371,21 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             "the shared reader reads the PREVIEW_MODE env"
         );
         assertTrue(_contains(src, "eth_getLogs"), "per-user re-check from logs");
+        // Story 091: source/destination split and the sDOLA destination asserts.
+        assertFalse(_contains(src, "_strategyFor("), "no ambiguous strategy call site");
+        assertTrue(_contains(src, "_verifyPhase3b_sdolaStrategy();"), "Phase 3b verified");
+        assertTrue(_contains(src, "_doneSdolaStrategyIdentity()"), "sDOLA strategy owner/underlying/vault");
+        assertTrue(_contains(src, "_doneSdolaStrategyPauseWired()"), "sDOLA strategy pauser + registration");
+        assertTrue(_contains(src, "_doneSdolaStrategyWithdrawer()"), "sDOLA strategy SYA withdrawer");
+        assertTrue(_contains(src, "_perUserLossBpsFor(t)"), "per-user / aggregate use the combined bound");
+        // Story 092: minter collateral / SYA / retired source verified from chain with the shared predicates.
+        assertTrue(_contains(src, "_verifyPhase6b_minterMove();"), "Phase 6b verified");
+        assertTrue(_contains(src, "_doneMinterWithdrawalExecuted()"), "minter withdrawal executed");
+        assertTrue(_contains(src, "_doneMinterReseeded()"), "minter re-seed within bound of R");
+        assertTrue(_contains(src, "_doneMinterRepointed()"), "minter registration + rate/decimals/cap/enabled");
+        assertTrue(_contains(src, "_doneSyaListRepointed()"), "SYA list");
+        assertTrue(_contains(src, "_doneSourceWithdrawerRevoked()"), "source withdrawer revoked");
+        assertTrue(_contains(src, "_doneSourceDolaRetired()"), "source retired");
     }
 
     /// @dev The broadcast chain must verify on chain BEFORE the preview smoke test.
@@ -342,6 +408,32 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     //  Fork scenarios
     // =====================================================================
 
+    address constant YS_DOLA_SRC = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2;
+    address constant DOLA_TOKEN = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
+    address constant STABLE_MINTER = 0x94855ACA13952D81507C92D3CdBb2e25D3bbE60C;
+
+    /// @dev Story 092: the cutover needs the minter's DOLA totalWithdrawal initiated (story 090's script) and inside its
+    ///      execution window. Time is moved by ageing `initiatedAt` 6h + 60s in storage, not by `vm.warp`: an hours-long
+    ///      warp leaves Tokemak's Chainlink feeds (frozen at the fork block) stale and the execute's autoDOLA redeem
+    ///      reverts `InvalidDataReturned()`. The strategy only compares `block.timestamp` with `initiatedAt`.
+    function _initiateAndAgeMinterWithdrawal() internal {
+        new InitiateDolaStrategyWithdrawalHarness().run();
+        (uint256 at,,) = IWithdrawalStatesLike(YS_DOLA_SRC).withdrawalStates(DOLA_TOKEN, STABLE_MINTER);
+        vm.record();
+        IWithdrawalStatesLike(YS_DOLA_SRC).withdrawalStates(DOLA_TOKEN, STABLE_MINTER);
+        (bytes32[] memory reads,) = vm.accesses(YS_DOLA_SRC);
+        uint256 target = block.timestamp - 6 hours - 60;
+        bool done;
+        for (uint256 i = 0; i < reads.length && !done; i++) {
+            if (uint256(vm.load(YS_DOLA_SRC, reads[i])) != at) continue;
+            vm.store(YS_DOLA_SRC, reads[i], bytes32(target));
+            (uint256 now_,,) = IWithdrawalStatesLike(YS_DOLA_SRC).withdrawalStates(DOLA_TOKEN, STABLE_MINTER);
+            if (now_ == target) done = true;
+            else vm.store(YS_DOLA_SRC, reads[i], bytes32(at));
+        }
+        require(done, "test setup: initiatedAt slot not found");
+    }
+
     function _forkAndCutover() internal returns (bool) {
         string memory rpc = vm.envOr("RPC_MAINNET", string(""));
         if (bytes(rpc).length == 0) {
@@ -349,6 +441,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             return false;
         }
         vm.createSelectFork(rpc, FORK_BLOCK);
+        _initiateAndAgeMinterWithdrawal();
         cut = new PreviewCutover();
         OWNER = cut.OWNER();
         V1 = cut.STABLE_STAKER_V1();
@@ -367,6 +460,8 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             cut.phusdMaskAtPhase0(),
             cut.phusdMintVersionAtPhase0()
         );
+        vf.injectSdola(address(cut.sdolaStrategy()));
+        vf.injectMinterMoveFrom(cut);
         _feed(logs, bytes32(0), address(0));
         return true;
     }
@@ -440,6 +535,39 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         _runExpectingRevertContaining("verify: Phase1: V1 setPauser(OWNER) not on chain");
     }
 
+    /// Story 092: minter DOLA cap drifted from the pre-repoint value on chain -> verifier reverts at Phase 6b.
+    function test_fork_092_minterCapDrift_verifierReverts() public {
+        if (!_forkAndCutover()) return;
+        (,,,, uint256 cap,,) = PhusdStableMinter(STABLE_MINTER).stablecoinConfigs(DOLA_TOKEN);
+        vm.prank(OWNER);
+        PhusdStableMinter(STABLE_MINTER).setMaxMintPerDay(DOLA_TOKEN, cap + 1);
+        _runExpectingRevertContaining("verify: Phase6b: minter registerStablecoin(DOLA, sDOLA strategy)");
+    }
+
+    /// Story 092: the autoDOLA source unpaused again on chain -> verifier reverts at Phase 6b.
+    function test_fork_092_sourceUnpaused_verifierReverts() public {
+        if (!_forkAndCutover()) return;
+        vm.prank(OWNER);
+        IPausableLike(YS_DOLA_SRC).unpause();
+        _runExpectingRevertContaining("verify: Phase6b: autoDOLA strategy setPauser(OWNER) + Pauser.unregister + pause not on chain");
+    }
+
+    /// Story 092: the autoDOLA source back in SYA's list -> verifier reverts at Phase 6b.
+    function test_fork_092_syaStillListsSource_verifierReverts() public {
+        if (!_forkAndCutover()) return;
+        address sya = cut.STABLE_YIELD_ACCUMULATOR(); // resolved BEFORE the prank, which the next external call consumes
+        vm.prank(OWNER);
+        ISyaAddLike(sya).addYieldStrategy(YS_DOLA_SRC, DOLA_TOKEN);
+        _runExpectingRevertContaining("verify: Phase6b: SYA addYieldStrategy(sDOLA strategy) / removeYieldStrategy(autoDOLA strategy) not on chain");
+    }
+
+    /// Story 092: a progress file without `minterMove` -> the verifier refuses rather than guessing the previous config.
+    function test_fork_092_missingMinterMoveRecords_verifierReverts() public {
+        if (!_forkAndCutover()) return;
+        vf.withholdMinterMove();
+        _runExpectingRevertContaining("verify: Phase6b: minterMove records");
+    }
+
     /// RACE: a V1 staker left unmigrated on chain -> verifier reverts naming the user, the amount and the
     ///       remediation. Planted by reviving an EMPTY V1 pool (finalizeAndReset), staking, and re-initiating,
     ///       which leaves exactly the on-chain shape of a stake that raced the Phase-1 pause.
@@ -486,6 +614,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             return;
         }
         vm.createSelectFork(rpc, FORK_BLOCK);
+        _initiateAndAgeMinterWithdrawal();
         cut = new PreviewCutover();
         OWNER = cut.OWNER();
         V1 = cut.STABLE_STAKER_V1();
@@ -516,6 +645,8 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             cut.phusdMaskAtPhase0(),
             cut.phusdMintVersionAtPhase0()
         );
+        vf.injectSdola(address(cut.sdolaStrategy()));
+        vf.injectMinterMoveFrom(cut);
         _feed(logs, user, token);
         _runExpectingRevertContaining(
             string.concat("verify: per-user: V2 DepositedFor for user ", vm.toString(address(uint160(uint256(user)))))
@@ -545,7 +676,9 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     address constant DOLA = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant USDE = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
-    address constant YS_DOLA = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2;
+    /// @dev Story 091: the DOLA SOURCE strategy (autoDOLA, V1's exit side). The F-01 haircut below cuts V1's exit, so it
+    ///      stays on the source; V2's DOLA destination is the fork-local sDOLA strategy (`ph.sdolaStrategy()`).
+    address constant YS_DOLA_SOURCE = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2;
     string constant BOUND_REVERT = "cutover-post: V1 exit realization below loss bound";
 
     CutoverPhasesHarness ph;
@@ -557,6 +690,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             return false;
         }
         vm.createSelectFork(rpc, FORK_BLOCK);
+        _initiateAndAgeMinterWithdrawal();
         ph = new CutoverPhasesHarness();
         OWNER = ph.OWNER();
         V1 = ph.STABLE_STAKER_V1();
@@ -598,6 +732,8 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         v.inject(
             address(ph.antimatter()), address(ph.v2()), address(ph.migrator()), ph.phusdMaskAtPhase0(), ph.phusdMintVersionAtPhase0()
         );
+        v.injectSdola(address(ph.sdolaStrategy()));
+        v.injectMinterMoveFrom(ph);
         address v2 = address(ph.v2());
         for (uint256 i = 0; i < logs.length; i++) {
             Vm.Log memory l = logs[i];
@@ -615,7 +751,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         ph.assertLivePlan(DOLA); // resume-leg / verifier post-condition shape on the self-exit state
         ph.phase6(USDC);
         ph.phase6(USDE);
-        ph.phase7And8();
+        ph.phase6bTo8();
         logs = vm.getRecordedLogs();
         assertEq(ICutoverStaker(V1).stakerCount(DOLA), 0, "every DOLA V1 staker exited (migrated or self-exited)");
     }
@@ -663,7 +799,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         ph.resetTokens();
         ph.throughPhase5(); // resume leg: Phases 0-5 all skip on chain state
         ph.phase6All(); // DOLA: initiate skipped, empty re-plan, post-conditions on the self-exit state
-        ph.phase7And8();
+        ph.phase6bTo8();
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         assertEq(ICutoverStaker(V1).poolState(USDC), 1, "USDC migrated on resume");
@@ -695,7 +831,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         }
         ph.rawMigrate(USDE, planned); // every user already exited: batchMigrate skips them all
         ph.assertLivePlan(USDE);
-        ph.phase7And8();
+        ph.phase6bTo8();
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(ICutoverStaker(address(ph.v2())).stakerCount(USDE), 0, "setup: nobody migrated into V2 USDe");
 
@@ -720,31 +856,32 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         _runExpectingRevertContaining("verify: per-user: no MigratedOut/DepositedFor pair found for");
     }
 
-    /// (iv) F-01 falsification kept: the DOLA strategy left 5 bps short (V1 exit realizes R ~= P * (1 - 5 bps)),
+    /// (iv) F-01 falsification kept: the DOLA strategy left 10 bps short (V1 exit realizes R ~= P * (1 - 10 bps)),
     /// asserted in the resume-leg / verifier shape (empty plan), still fails closed on the realization bound;
-    /// 1 bps (within the 2 bps ERC4626 bound) and a clean exit pass.
+    /// 1 bps and 3 bps (within the 5 bps ERC4626 bound, story 088) and a clean exit pass.
     function _haircutDolaThenMigrate(uint256 haircutBps) internal {
         ph.throughPhase5();
         ph.phase6Setup();
         if (haircutBps > 0) {
-            address vault = ICutoverStrategy(YS_DOLA).vault();
-            uint256 shares = IERC20(vault).balanceOf(YS_DOLA);
+            address vault = ICutoverStrategy(YS_DOLA_SOURCE).vault();
+            uint256 shares = IERC20(vault).balanceOf(YS_DOLA_SOURCE);
             (,,, uint256 staked) = ICutoverStaker(V1).poolInfo(DOLA);
             uint256 need = IConvertToSharesLike(vault).convertToShares(staked);
             uint256 keep = need * (10_000 - haircutBps) / 10_000;
             require(shares > keep, "test setup: strategy holds fewer shares than the haircut target");
-            vm.prank(YS_DOLA);
+            vm.prank(YS_DOLA_SOURCE);
             IERC20(vault).transfer(makeAddr("haircut-sink"), shares - keep);
         }
         ph.initiate(DOLA);
         ph.migrateNoAssert(DOLA);
     }
 
-    function test_fork_F01_haircut5bps_resumeShapeFailsClosed() public {
+    function test_fork_F01_haircut10bps_resumeShapeFailsClosed() public {
         if (!_forkPhases()) return;
-        _haircutDolaThenMigrate(5);
+        assertEq(ph.ERC4626_MAX_LOSS_BPS(), 5, "setup: the live ERC4626 bound is 5 bps (story 088)");
+        _haircutDolaThenMigrate(10);
         (uint256 R, uint256 P) = ICutoverStaker(V1).migrationInfo(DOLA);
-        assertLt(R * 10_000, P * 9_998, "setup: exit realized beyond the 2 bps bound");
+        assertLt(R * 10_000, P * 9_995, "setup: exit realized beyond the 5 bps bound");
         vm.expectRevert(bytes(BOUND_REVERT));
         ph.assertLivePlan(DOLA);
     }
@@ -752,6 +889,15 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     function test_fork_F01_haircut1bps_withinBoundPasses() public {
         if (!_forkPhases()) return;
         _haircutDolaThenMigrate(1);
+        ph.assertLivePlan(DOLA);
+    }
+
+    /// Story 088: a haircut just under the new bound passes, proving 5 bps (not 2) is the live bound.
+    function test_fork_F01_haircut3bps_withinBoundPasses() public {
+        if (!_forkPhases()) return;
+        _haircutDolaThenMigrate(3);
+        (uint256 R, uint256 P) = ICutoverStaker(V1).migrationInfo(DOLA);
+        assertLt(R * 10_000, P * 9_998, "setup: exit realized beyond the OLD 2 bps bound");
         ph.assertLivePlan(DOLA);
     }
 
@@ -793,4 +939,12 @@ interface IERC20MetadataLike {
 
 interface IConvertToSharesLike {
     function convertToShares(uint256 assets) external view returns (uint256);
+}
+
+interface IWithdrawalStatesLike {
+    function withdrawalStates(address token, address client) external view returns (uint256, uint8, uint256);
+}
+
+interface ISyaAddLike {
+    function addYieldStrategy(address strategy, address token) external;
 }

@@ -60,7 +60,16 @@ export const mainnetAddresses: ContractAddresses = {
   // ResumeStableStakerMigration run, all receipts 0x1). DOLA/USDC are plain
   // ERC4626YieldStrategy; USDe is ERC4626MarketYieldStrategy @ 30 bps (sUSDe cooldown
   // blocks plain redeem). Old strategies (0xE7aE…, 0x8b4A…, 0xFc62…) drained + retired.
+  // Story 089 — PENDING CHANGE IN MEANING. Locally (DeployMocks) `YieldStrategyDola` is now the
+  // sDOLA strategy that SURVIVES the StableStaker V2 cutover, and `YieldStrategyDolaLegacy` is the
+  // autoDOLA strategy V1 sits on. On mainnet this key deliberately STILL points at the live
+  // autoDOLA strategy 0x1760... until story 092's cutover broadcast, whose patch script overwrites
+  // it with the new sDOLA strategy and moves 0x1760... into `YieldStrategyDolaLegacy`. Changing it
+  // before that broadcast would hand mainnet consumers a strategy nothing is wired to yet.
   YieldStrategyDola: "0x1760E05356Ec1FBBA159C730781dCfB9920524e2",
+  // Story 089: zero placeholder keeping the key-set equal to ContractAddresses; story 092's patch
+  // fills it with 0x1760E05356Ec1FBBA159C730781dCfB9920524e2 at the cutover.
+  YieldStrategyDolaLegacy: "0x0000000000000000000000000000000000000000",
   YieldStrategyUSDe: "0xaC2e5936Eca286eC364d4D5Bcca33145fBe57f95",
   YieldStrategyUSDC: "0xaFDf8DeA96a0F37Aae4869f813901bf73a3eAB83",
   // USDe<->sUSDe CurveAMMAdapter (Router NG, via crvUSD) backing YieldStrategyUSDe.
@@ -72,6 +81,9 @@ export const mainnetAddresses: ContractAddresses = {
   USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   Dola: "0x865377367054516e17014CcdED1e7d814EDC9ce4",
   AutoDOLA: "0x79eB84B5E30Ef2481c8f00fD0Aa7aAd6Ac0AA54d",
+  // Inverse sDOLA (ERC4626 over DOLA). Real external address, safe to set now: asset() ==
+  // 0x865377367054516e17014CcdED1e7d814EDC9ce4 (DOLA) verified on mainnet in story 089.
+  SDOLA: "0xb45ad160634c528Cc3D2926d9807104FA3157305",
   AutoUSDC: "0xa7569A44f348d3D70d8ad5889e50F78E33d80D35",
 
   // External tokens

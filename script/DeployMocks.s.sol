@@ -10,6 +10,7 @@ import "../src/mocks/MockUSDe.sol";
 import "../src/mocks/MockSUSDe.sol";
 import "../src/mocks/MockDola.sol";
 import "../src/mocks/MockAutoDOLA.sol";
+import "../src/mocks/MockSDOLA.sol"; // story 089: destination DOLA vault (sDOLA stand-in)
 import "../src/mocks/MockSUSDS.sol";
 import "../src/mocks/MockEYE.sol";
 import "../src/mocks/MockSCX.sol";
@@ -217,7 +218,13 @@ contract DeployMocks is Script {
     MockDola public dola;
     MockAutoDOLA public mockAutoDola;
     MockAutoDOLA public mockAutoUSDC; // Reusing MockAutoDOLA pattern for USDC
-    ERC4626YieldStrategy public yieldStrategyDola;
+    // Story 089: the autoDOLA -> sDOLA split. Key semantics (decided at planning):
+    //   `YieldStrategyDolaLegacy` = the autoDOLA strategy V1 sits on (mainnet 0x1760... once 092 patches it)
+    //   `YieldStrategyDola`       = the sDOLA strategy, the one that SURVIVES the cutover (V2, minter, SYA)
+    //   `SDOLA`                   = the external sDOLA vault (tracked as MockSDOLA; extractor strips `Mock`)
+    MockSDOLA public mockSDola;
+    ERC4626YieldStrategy public yieldStrategyDolaLegacy; // over MockAutoDOLA
+    ERC4626YieldStrategy public yieldStrategyDola; // over MockSDOLA
     ERC4626YieldStrategy public yieldStrategyUSDC;
     // USDe uses the AMM-market strategy (not the plain 1:1 ERC4626YieldStrategy) to mirror
     // mainnet, where sUSDe is reached via a Curve AMM that imposes slippage on every leg.
@@ -516,15 +523,34 @@ contract DeployMocks is Script {
         _trackDeployment("MockAutoDOLA", address(mockAutoDola), gasBefore - gasleft());
         console.log("MockAutoDOLA deployed at:", address(mockAutoDola));
 
-        // Deploy ERC4626YieldStrategy wrapping the DOLA vault
+        // Deploy ERC4626YieldStrategy wrapping the autoDOLA vault. Story 089: this is the LEGACY
+        // strategy (V1's, and the minter's until the Phase 9.7 repoint), tracked as
+        // `YieldStrategyDolaLegacy`.
         gasBefore = gasleft();
-        yieldStrategyDola = new ERC4626YieldStrategy(
+        yieldStrategyDolaLegacy = new ERC4626YieldStrategy(
             deployer, // owner
             address(dola), // underlyingToken (DOLA)
             address(mockAutoDola) // erc4626Vault
         );
+        _trackDeployment("YieldStrategyDolaLegacy", address(yieldStrategyDolaLegacy), gasBefore - gasleft());
+        console.log("YieldStrategyDolaLegacy (ERC4626YieldStrategy over MockAutoDOLA) deployed at:", address(yieldStrategyDolaLegacy));
+
+        // Story 089: the DESTINATION DOLA vault + strategy. Mainnet target is Inverse's sDOLA
+        // 0xb45ad160634c528Cc3D2926d9807104FA3157305 (asset() == DOLA verified on mainnet). V2's DOLA
+        // pool starts on this strategy (Phase 6.5a); the minter and SYA move onto it in Phase 9.7.
+        gasBefore = gasleft();
+        mockSDola = new MockSDOLA(address(dola));
+        _trackDeployment("MockSDOLA", address(mockSDola), gasBefore - gasleft());
+        console.log("MockSDOLA deployed at:", address(mockSDola));
+
+        gasBefore = gasleft();
+        yieldStrategyDola = new ERC4626YieldStrategy(
+            deployer, // owner
+            address(dola), // underlyingToken (DOLA)
+            address(mockSDola) // erc4626Vault
+        );
         _trackDeployment("YieldStrategyDola", address(yieldStrategyDola), gasBefore - gasleft());
-        console.log("YieldStrategyDola (ERC4626YieldStrategy) deployed at:", address(yieldStrategyDola));
+        console.log("YieldStrategyDola (ERC4626YieldStrategy over MockSDOLA) deployed at:", address(yieldStrategyDola));
 
         // ====== PHASE 2.6: AutoUSDC ERC4626 Infrastructure for USDC YieldStrategy ======
         console.log("\n=== Phase 2.6: Deploying AutoUSDC ERC4626 Infrastructure ===");
@@ -1105,7 +1131,7 @@ contract DeployMocks is Script {
         // ERC4626MarketYieldStrategy) — upcast to the shared base so the loop's setClient /
         // setSetAsideBuffer calls (both defined on AYieldStrategy) apply uniformly.
         AYieldStrategy[3] memory ssStrats =
-            [AYieldStrategy(yieldStrategyDola), AYieldStrategy(yieldStrategyUSDC), AYieldStrategy(yieldStrategyUSDe)];
+            [AYieldStrategy(yieldStrategyDolaLegacy), AYieldStrategy(yieldStrategyUSDC), AYieldStrategy(yieldStrategyUSDe)];
         for (uint256 i = 0; i < 3; i++) {
             stableStaker.addToken(ssTokens[i]);
             ssStrats[i].setClient(address(stableStaker), true); // client added ON the yield strategy
@@ -1140,7 +1166,9 @@ contract DeployMocks is Script {
         console.log("\n=== Phase 5: YieldStrategy Configuration ===");
 
         // Authorize minter as client on all yield strategies
-        yieldStrategyDola.setClient(address(minter), true);
+        // Story 089: the minter starts on the LEGACY (autoDOLA) strategy, as on mainnet today. It is
+        // authorized on the sDOLA strategy only in Phase 9.7, right before its first deposit there.
+        yieldStrategyDolaLegacy.setClient(address(minter), true);
         yieldStrategyUSDC.setClient(address(minter), true);
         console.log("Authorized minter as yield strategy client (all strategies)");
 
@@ -1157,7 +1185,7 @@ contract DeployMocks is Script {
         // pair of calls the USDe pool's whole reward path is dead on arrival and the assertion in
         // Phase 6.5 fails closed. DOLA and USDC were already registered below for the phUSD mint
         // path; USDe never was because nothing before StableStakerV2 needed it.
-        minter.approveYS(address(dola), address(yieldStrategyDola));
+        minter.approveYS(address(dola), address(yieldStrategyDolaLegacy));
         minter.approveYS(address(rewardToken), address(yieldStrategyUSDC)); // USDC
         minter.approveYS(address(usde), address(yieldStrategyUSDe));
         console.log("Approved yield strategies for their tokens (DOLA, USDC, USDe)");
@@ -1165,7 +1193,7 @@ contract DeployMocks is Script {
         // Register DOLA as stablecoin (18 decimals)
         minter.registerStablecoin(
             address(dola), // stablecoin
-            address(yieldStrategyDola), // yieldStrategy
+            address(yieldStrategyDolaLegacy), // yieldStrategy (story 089: repointed to sDOLA in Phase 9.7)
             1e18, // exchangeRate (1:1)
             18 // decimals
         );
@@ -1232,9 +1260,10 @@ contract DeployMocks is Script {
         stableYieldAccumulator.setTokenConfig(address(dola), 18, 1e18);
         console.log("Configured DOLA token config (18 decimals, 1:1 rate)");
 
-        // Add YieldStrategyDola to the yield strategy registry
-        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyDola), address(dola));
-        console.log("Added YieldStrategyDola to yield strategy registry");
+        // Add the LEGACY DOLA strategy to the registry (pre-cutover mainnet shape). Story 089:
+        // Phase 9.7 swaps it for the sDOLA strategy.
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyDolaLegacy), address(dola));
+        console.log("Added YieldStrategyDolaLegacy to yield strategy registry");
 
         // Add YieldStrategyUSDC to the yield strategy registry
         stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDC), address(rewardToken));
@@ -1250,8 +1279,8 @@ contract DeployMocks is Script {
 
         // CRITICAL: Authorize StableYieldAccumulator as withdrawer on all yield strategies
         // This allows StableYieldAccumulator to withdraw yield from the strategies
-        yieldStrategyDola.setWithdrawer(address(stableYieldAccumulator), true);
-        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyDola");
+        yieldStrategyDolaLegacy.setWithdrawer(address(stableYieldAccumulator), true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyDolaLegacy");
 
         yieldStrategyUSDC.setWithdrawer(address(stableYieldAccumulator), true);
         console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDC");
@@ -1351,8 +1380,8 @@ contract DeployMocks is Script {
         nftMinterV2.setAuthorizedBurner(address(stableYieldAccumulator), true);
         console.log("NFTMinterV2.setAuthorizedBurner(StableYieldAccumulator, true)");
 
-        // ====== PHASE 9: Seed YieldStrategyDola with PhUSD Minting ======
-        console.log("\n=== Phase 9: Seed YieldStrategyDola with PhUSD Minting ===");
+        // ====== PHASE 9: Seed YieldStrategyDolaLegacy with PhUSD Minting ======
+        console.log("\n=== Phase 9: Seed YieldStrategyDolaLegacy with PhUSD Minting ===");
 
         uint256 dolaAmount = 5000 * 10 ** 18; // 5000 DOLA
 
@@ -1362,10 +1391,10 @@ contract DeployMocks is Script {
         console.log("Approved minter to spend 5000 DOLA");
 
         // Mint PhUSD by depositing DOLA through the minter
-        // This will: 1) Transfer DOLA to minter, 2) Deposit DOLA into YieldStrategyDola, 3) Mint PhUSD to deployer
+        // This will: 1) Transfer DOLA to minter, 2) Deposit DOLA into YieldStrategyDolaLegacy, 3) Mint PhUSD to deployer
         minter.mint(address(dola), dolaAmount);
         console.log("Minted PhUSD with 5000 DOLA");
-        console.log("  - DOLA deposited to YieldStrategyDola");
+        console.log("  - DOLA deposited to YieldStrategyDolaLegacy");
         console.log("  - PhUSD minted to deployer:", deployer);
 
         // ====== PHASE 9.5: Add DOLA Yield to MockAutoDOLA Vault ======
@@ -1382,7 +1411,10 @@ contract DeployMocks is Script {
         console.log("Minted 1000 DOLA directly to MockAutoDOLA vault as yield");
         console.log("  - totalAssets increased without minting new shares");
         console.log("  - Share price now > 1, creating claimable yield");
-        console.log("  - YieldStrategyDola can claim this yield via ERC4626YieldStrategy");
+        console.log("  - YieldStrategyDolaLegacy holds this yield via ERC4626YieldStrategy");
+
+        // ====== PHASE 9.7: DOLA minter + SYA repoint onto the sDOLA strategy (story 089) ======
+        _repointDolaMinterAndSya(deployer);
 
         // ====== PHASE 9.55: Seed YieldStrategyUSDC with PhUSD Minting ======
         console.log("\n=== Phase 9.55: Seed YieldStrategyUSDC with PhUSD Minting ===");
@@ -1486,7 +1518,9 @@ contract DeployMocks is Script {
         _markConfigured("MockFlax", 0);
         _markConfigured("MockWBTC", 0);
         _markConfigured("MockAutoDOLA", 0);
+        _markConfigured("MockSDOLA", 0);
         _markConfigured("MockAutoUSDC", 0);
+        _markConfigured("YieldStrategyDolaLegacy", 0);
         _markConfigured("YieldStrategyDola", 0);
         _markConfigured("YieldStrategyUSDC", 0);
         _markConfigured("YieldStrategyUSDe", 0);
@@ -1563,14 +1597,14 @@ contract DeployMocks is Script {
         console.log("");
         console.log("Architecture Summary:");
         console.log("  - DOLA -> YieldStrategyDola (ERC4626YieldStrategy) -> PhusdStableMinter");
-        console.log("    \\-> ERC4626YieldStrategy wraps MockAutoDOLA (ERC4626 vault)");
+        console.log("    \\-> ERC4626YieldStrategy wraps MockSDOLA (ERC4626 vault); legacy wraps MockAutoDOLA");
         console.log("  - USDC -> YieldStrategyUSDC (ERC4626YieldStrategy) -> PhusdStableMinter");
         console.log("    \\-> ERC4626YieldStrategy wraps MockAutoUSDC (ERC4626 vault)");
         console.log("");
         console.log("StableYieldAccumulator Configuration:");
         console.log("  - Reward token: USDC (MockRewardToken)");
         console.log("  - Discount rate: 20% (2000 basis points)");
-        console.log("  - Yield strategies registered: YieldStrategyDola, YieldStrategyUSDC");
+        console.log("  - Yield strategies registered: YieldStrategyDola (sDOLA; legacy removed in Phase 9.7), YieldStrategyUSDC");
         console.log("  - Phlimbo set as reward recipient");
         console.log("  - Minter set for yield queries");
         console.log("  - Authorized as withdrawer on all yield strategies");
@@ -1599,14 +1633,14 @@ contract DeployMocks is Script {
         console.log("  - Burn 1000 EYE to trigger global pause");
         console.log("");
         console.log("Initial Seeding:");
-        console.log("  - 5000 DOLA deposited to YieldStrategyDola via minter.mint()");
+        console.log("  - 5000 DOLA deposited to YieldStrategyDolaLegacy via minter.mint()");
         console.log("  - Deployer received 5000 PhUSD");
-        console.log("  - YieldStrategyDola now has positive balance");
+        console.log("  - Phase 9.7 moved the minter's DOLA principal into YieldStrategyDola (sDOLA)");
         console.log("");
         console.log("DOLA Yield Seeding:");
-        console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault");
-        console.log("  - This increases share value for YieldStrategyDola");
-        console.log("  - ERC4626YieldStrategy can claim this yield via StableYieldAccumulator");
+        console.log("  - 1000 DOLA deposited directly to MockAutoDOLA vault (legacy seed, story 089 keeps it)");
+        console.log("  - 1000 DOLA deposited directly to MockSDOLA vault (Phase 9.7)");
+        console.log("  - YieldStrategyDola's surplus is claimable via StableYieldAccumulator");
         console.log("");
         console.log("USDC Seeding:");
         console.log("  - 5000 USDC deposited to YieldStrategyUSDC via minter.mint()");
@@ -1959,7 +1993,7 @@ contract DeployMocks is Script {
 
         address[3] memory ssTokens = [address(dola), address(rewardToken), address(usde)];
         AYieldStrategy[3] memory ssStrats =
-            [AYieldStrategy(yieldStrategyDola), AYieldStrategy(yieldStrategyUSDC), AYieldStrategy(yieldStrategyUSDe)];
+            [AYieldStrategy(yieldStrategyDolaLegacy), AYieldStrategy(yieldStrategyUSDC), AYieldStrategy(yieldStrategyUSDe)];
         // Per-user stake in each pool's OWN decimals: DOLA and USDe are 18-decimal, USDC is 6.
         uint256[3] memory ssStakeUnits = [uint256(100e18), uint256(100e6), uint256(100e18)];
 
@@ -2078,9 +2112,11 @@ contract DeployMocks is Script {
 
         uint256 maxLossBps = marketStrategy ? 100 : 0;
         uint256 v2Sum;
+        uint256 preSum;
         for (uint256 i = 0; i < SS_CUTOVER_ACTORS; i++) {
             address actor = _ssCutoverActor(token, i);
             uint256 pre = _ssPreCutoverPrincipal[token][actor];
+            preSum += pre;
             (uint256 post,) = stableStakerV2.userInfo(token, actor);
             require(pre > 0, "story-080: no recorded V1 principal for a seeded actor");
             require(post > 0, "story-080: a seeded staker was not credited on V2");
@@ -2096,6 +2132,136 @@ contract DeployMocks is Script {
             _ssTotalStaked(stableStakerV2, token) == v2Sum,
             "story-080: V2 pool total does not equal the sum of the migrated positions"
         );
+
+        // Story 089: DOLA is the one pool whose source and destination strategies DIFFER (V1 on the
+        // autoDOLA legacy strategy, V2 on the sDOLA strategy). Prove the split actually happened:
+        // the source leg is empty for V1 and never saw V2, and the destination leg holds V2's DOLA
+        // principal within the same bound the per-user check above applies (2 wei per actor).
+        if (token == address(dola)) {
+            require(
+                yieldStrategyDolaLegacy.principalOf(token, address(stableStaker)) == 0,
+                "story-089: V1 still holds principal on the legacy (autoDOLA) strategy"
+            );
+            require(
+                yieldStrategyDolaLegacy.principalOf(token, address(stableStakerV2)) == 0,
+                "story-089: V2 DOLA principal landed on the legacy (autoDOLA) strategy"
+            );
+            uint256 destPrincipal = yieldStrategyDola.principalOf(token, address(stableStakerV2));
+            require(destPrincipal > 0, "story-089: V2 DOLA principal is not on the sDOLA strategy");
+            require(destPrincipal <= preSum, "story-089: sDOLA strategy credited V2 more than V1 held");
+            require(
+                preSum - destPrincipal <= (preSum * maxLossBps) / 10_000 + 2 * SS_CUTOVER_ACTORS,
+                "story-089: sDOLA destination leg lost more principal than the strategy can explain"
+            );
+        }
+    }
+
+    /// @dev Story 089 — Phase 9.7. Brings the local chain to the POST-cutover mainnet shape for DOLA:
+    ///      the minter's DOLA collateral and registration, and SYA's DOLA strategy, all move from the
+    ///      legacy autoDOLA strategy to the sDOLA strategy V2 already sits on.
+    ///
+    ///      Deliberate simplification: mainnet (story 092) moves the minter's principal with the
+    ///      delayed two-phase `totalWithdrawal` (6h wait / 72h window). That dance is NOT simulated
+    ///      here — 092's fork tests prove it. The local stand-in is the undelayed owner path
+    ///      `withdrawAsOwner(minter, deployer, principal)`, followed by the same re-seed 092 uses
+    ///      (`noMintDeposit`), so the end state matches without warping a broadcast script.
+    ///
+    ///      Runs after Phase 9 / 9.5 so the legacy strategy has genuinely carried the minter's
+    ///      collateral (and its yield seed) before it is retired, mirroring pre-cutover mainnet.
+    ///      No strategy is registered with the Pauser in this script, so there is no Pauser step to
+    ///      mirror for the sDOLA strategy.
+    function _repointDolaMinterAndSya(address deployer) internal {
+        console.log("\n=== Phase 9.7: DOLA minter + SYA repoint onto the sDOLA strategy (story 089) ===");
+
+        // ---- 1. Read the current registration BEFORE touching it: `registerStablecoin` resets
+        //         maxMintPerDay to 0 (uncapped) and clears the mint window. ----
+        (address oldYS, uint256 exchangeRate, uint8 decimals_,, uint256 prevMaxMintPerDay,,) =
+            minter.stablecoinConfigs(address(dola));
+        require(oldYS == address(yieldStrategyDolaLegacy), "story-089: minter DOLA is not on the legacy strategy");
+
+        // ---- 2. Move the minter's collateral off the legacy strategy (undelayed local stand-in). ----
+        uint256 principal = yieldStrategyDolaLegacy.principalOf(address(dola), address(minter));
+        require(principal > 0, "story-089: minter holds no DOLA principal on the legacy strategy to move");
+        uint256 balBefore = dola.balanceOf(deployer);
+        yieldStrategyDolaLegacy.withdrawAsOwner(address(minter), deployer, principal);
+        uint256 recovered = dola.balanceOf(deployer) - balBefore;
+        require(
+            yieldStrategyDolaLegacy.principalOf(address(dola), address(minter)) == 0,
+            "story-089: minter principal not cleared from the legacy strategy"
+        );
+        // 1:1 ERC4626YieldStrategy: principal is preserved up to ERC4626 share rounding (2-wei floor,
+        // the same absolute floor the cutover assertions use).
+        require(recovered <= principal && principal - recovered <= 2, "story-089: minter collateral lost value in transit");
+        console.log("  minter DOLA principal withdrawn from legacy strategy (principal / recovered):", principal, recovered);
+
+        // ---- 3. Repoint the registration. setClient BEFORE any minter deposit on the new strategy. ----
+        yieldStrategyDola.setClient(address(minter), true);
+        minter.registerStablecoin(address(dola), address(yieldStrategyDola), exchangeRate, decimals_);
+        minter.setMaxMintPerDay(address(dola), prevMaxMintPerDay);
+        minter.approveYS(address(dola), address(yieldStrategyDola));
+        console.log("  minter DOLA re-registered on YieldStrategyDola (maxMintPerDay restored):", prevMaxMintPerDay);
+
+        // ---- 4. Re-seed the recovered collateral for the minter (same call 092 uses). ----
+        dola.approve(address(minter), recovered);
+        minter.noMintDeposit(address(yieldStrategyDola), address(dola), recovered);
+        console.log("  minter DOLA collateral re-seeded into YieldStrategyDola:", recovered);
+
+        // ---- 5. SYA: add the survivor, remove the legacy strategy, swap the withdrawer flags. ----
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyDola), address(dola));
+        stableYieldAccumulator.removeYieldStrategy(address(yieldStrategyDolaLegacy));
+        yieldStrategyDola.setWithdrawer(address(stableYieldAccumulator), true);
+        yieldStrategyDolaLegacy.setWithdrawer(address(stableYieldAccumulator), false);
+        console.log("  SYA: YieldStrategyDola added, YieldStrategyDolaLegacy removed, withdrawer flags swapped");
+
+        // ---- 6. Yield seed on the destination vault, mirroring Phase 9.5's 1000 DOLA on MockAutoDOLA,
+        //         so SYA.claim still has DOLA surplus to sell on the local chain after the repoint.
+        //         The legacy seed stays where Phase 9.5 put it. ----
+        mockSDola.addYield(1000 * 10 ** 18); // 1000 DOLA, same magnitude as Phase 9.5
+        console.log("  1000 DOLA yield added to MockSDOLA");
+
+        _assertDolaRepoint(prevMaxMintPerDay, exchangeRate, decimals_, recovered);
+    }
+
+    /// @dev Story 089 — post-conditions for Phase 9.7 (the rehearsal's post-cutover DOLA end state).
+    function _assertDolaRepoint(uint256 prevMaxMintPerDay, uint256 exchangeRate, uint8 decimals_, uint256 recovered)
+        internal
+        view
+    {
+        (address ys, uint256 rate, uint8 dec, bool enabled, uint256 maxMintPerDay,,) =
+            minter.stablecoinConfigs(address(dola));
+        require(ys == address(yieldStrategyDola), "story-089: minter DOLA registration is not the sDOLA strategy");
+        require(rate == exchangeRate && dec == decimals_, "story-089: minter DOLA rate/decimals changed on repoint");
+        require(enabled, "story-089: minter DOLA left disabled after repoint");
+        require(maxMintPerDay == prevMaxMintPerDay, "story-089: maxMintPerDay not restored after registerStablecoin");
+        require(
+            yieldStrategyDola.principalOf(address(dola), address(minter)) == recovered,
+            "story-089: minter principal on the sDOLA strategy does not equal the recovered collateral"
+        );
+        require(
+            yieldStrategyDola.principalOf(address(dola), address(stableStakerV2)) > 0,
+            "story-089: V2 DOLA principal is not on the sDOLA strategy"
+        );
+        require(
+            yieldStrategyDolaLegacy.principalOf(address(dola), address(stableStaker)) == 0,
+            "story-089: V1 still holds principal on the legacy strategy"
+        );
+        require(
+            stableYieldAccumulator.isRegisteredStrategy(address(yieldStrategyDola)),
+            "story-089: SYA does not list the sDOLA strategy"
+        );
+        require(
+            !stableYieldAccumulator.isRegisteredStrategy(address(yieldStrategyDolaLegacy)),
+            "story-089: SYA still lists the legacy strategy"
+        );
+        require(
+            yieldStrategyDola.authorizedWithdrawers(address(stableYieldAccumulator)),
+            "story-089: SYA is not a withdrawer on the sDOLA strategy"
+        );
+        require(
+            !yieldStrategyDolaLegacy.authorizedWithdrawers(address(stableYieldAccumulator)),
+            "story-089: SYA is still a withdrawer on the legacy strategy"
+        );
+        console.log("  Phase 9.7 end state asserted: minter + SYA + V2 on sDOLA, V1 legacy principal 0");
     }
 
     /// @dev A deterministic, pool-specific mock staker. Distinct per (token, index), so the three
