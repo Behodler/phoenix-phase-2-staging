@@ -720,9 +720,9 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         _runExpectingRevertContaining("verify: per-user: no MigratedOut/DepositedFor pair found for");
     }
 
-    /// (iv) F-01 falsification kept: the DOLA strategy left 5 bps short (V1 exit realizes R ~= P * (1 - 5 bps)),
+    /// (iv) F-01 falsification kept: the DOLA strategy left 10 bps short (V1 exit realizes R ~= P * (1 - 10 bps)),
     /// asserted in the resume-leg / verifier shape (empty plan), still fails closed on the realization bound;
-    /// 1 bps (within the 2 bps ERC4626 bound) and a clean exit pass.
+    /// 1 bps and 3 bps (within the 5 bps ERC4626 bound, story 088) and a clean exit pass.
     function _haircutDolaThenMigrate(uint256 haircutBps) internal {
         ph.throughPhase5();
         ph.phase6Setup();
@@ -740,11 +740,12 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         ph.migrateNoAssert(DOLA);
     }
 
-    function test_fork_F01_haircut5bps_resumeShapeFailsClosed() public {
+    function test_fork_F01_haircut10bps_resumeShapeFailsClosed() public {
         if (!_forkPhases()) return;
-        _haircutDolaThenMigrate(5);
+        assertEq(ph.ERC4626_MAX_LOSS_BPS(), 5, "setup: the live ERC4626 bound is 5 bps (story 088)");
+        _haircutDolaThenMigrate(10);
         (uint256 R, uint256 P) = ICutoverStaker(V1).migrationInfo(DOLA);
-        assertLt(R * 10_000, P * 9_998, "setup: exit realized beyond the 2 bps bound");
+        assertLt(R * 10_000, P * 9_995, "setup: exit realized beyond the 5 bps bound");
         vm.expectRevert(bytes(BOUND_REVERT));
         ph.assertLivePlan(DOLA);
     }
@@ -752,6 +753,15 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     function test_fork_F01_haircut1bps_withinBoundPasses() public {
         if (!_forkPhases()) return;
         _haircutDolaThenMigrate(1);
+        ph.assertLivePlan(DOLA);
+    }
+
+    /// Story 088: a haircut just under the new bound passes, proving 5 bps (not 2) is the live bound.
+    function test_fork_F01_haircut3bps_withinBoundPasses() public {
+        if (!_forkPhases()) return;
+        _haircutDolaThenMigrate(3);
+        (uint256 R, uint256 P) = ICutoverStaker(V1).migrationInfo(DOLA);
+        assertLt(R * 10_000, P * 9_998, "setup: exit realized beyond the OLD 2 bps bound");
         ph.assertLivePlan(DOLA);
     }
 

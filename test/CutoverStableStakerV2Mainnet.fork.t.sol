@@ -507,6 +507,90 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
     }
 
     // =====================================================================
+    //  Story 088: Phase 7 one-tx COVERAGE gaps (unpaused, pauser == Pauser, unregistered) and their remedy
+    // =====================================================================
+
+    /// Halt after step 2 (V2 unpaused, not yet registered): the global pause SUCCEEDS but MISSES V2, while every
+    /// strategy V2 routes through is paused (why nothing is exposed). OWNER's direct pause() reverts onlyPauser;
+    /// setPauser(OWNER) then pause() works. A resume afterwards re-runs Phase 7 and UNPAUSES V2 (resume hazard).
+    function test_fork_phase7Gap_V2_afterUnpause_globalPauseMissesV2_remedyWorks() public {
+        if (!_fork()) return;
+        _toPhase6();
+        h.harnessPhase7Preamble();
+        _phase7PauserSteps(2, false);
+        address v2 = address(h.v2());
+        assertEq(IPausableLike(v2).pauser(), PAUSER, "setup: V2 pauser is already the Pauser");
+        assertFalse(IPauserRegistry(PAUSER).isRegistered(v2), "setup: V2 not registered");
+
+        uint256 snap = vm.snapshotState();
+        (bool ok,) = _eyeFundedPause();
+        assertTrue(ok, "global pause does not revert at the gap");
+        assertFalse(IPausableLike(v2).paused(), "GAP: global pause leaves V2 unpaused");
+        assertTrue(IPausableLike(h.YS_DOLA()).paused(), "strategy DOLA paused by the global pause");
+        assertTrue(IPausableLike(h.YS_USDC()).paused(), "strategy USDC paused by the global pause");
+        assertTrue(IPausableLike(h.YS_USDE()).paused(), "strategy USDE paused by the global pause");
+        vm.revertToState(snap);
+
+        vm.prank(OWNER);
+        vm.expectRevert(bytes("StableStaker: only pauser"));
+        IPausableLike(v2).pause();
+
+        snap = vm.snapshotState();
+        vm.prank(OWNER);
+        IPauserRegistry(PAUSER).register(v2);
+        (ok,) = _eyeFundedPause();
+        assertTrue(ok, "alternative remedy: register then global pause");
+        assertTrue(IPausableLike(v2).paused(), "alternative remedy pauses V2");
+        vm.revertToState(snap);
+
+        vm.startPrank(OWNER);
+        IPausableLike(v2).setPauser(OWNER);
+        IPausableLike(v2).pause();
+        vm.stopPrank();
+        assertTrue(IPausableLike(v2).paused(), "remedy: V2 paused");
+
+        // Resume hazard: the finalized marker is cleared, so the real Phase 7 re-runs and unpauses V2.
+        h.harnessPhase7AsOwner();
+        assertFalse(IPausableLike(v2).paused(), "HAZARD: a resume after the remedy unpauses V2");
+    }
+
+    /// Halt after step 4 (Antimatter pauser == Pauser, not yet registered): same gap and same remedy.
+    function test_fork_phase7Gap_Antimatter_afterSetPauser_globalPauseMissesIt_remedyWorks() public {
+        if (!_fork()) return;
+        _toPhase6();
+        h.harnessPhase7Preamble();
+        _phase7PauserSteps(4, false);
+        address am = address(h.antimatter());
+        assertEq(IPausableLike(am).pauser(), PAUSER, "setup: Antimatter pauser is already the Pauser");
+        assertFalse(IPauserRegistry(PAUSER).isRegistered(am), "setup: Antimatter not registered");
+
+        uint256 snap = vm.snapshotState();
+        (bool ok,) = _eyeFundedPause();
+        assertTrue(ok, "global pause does not revert at the gap");
+        assertFalse(IPausableLike(am).paused(), "GAP: global pause leaves Antimatter unpaused");
+        assertTrue(IPausableLike(address(h.v2())).paused(), "registered V2 is paused by the global pause");
+        vm.revertToState(snap);
+
+        vm.prank(OWNER);
+        vm.expectRevert(bytes4(keccak256("OnlyPauser()")));
+        IPausableLike(am).pause();
+
+        snap = vm.snapshotState();
+        vm.prank(OWNER);
+        IPauserRegistry(PAUSER).register(am);
+        (ok,) = _eyeFundedPause();
+        assertTrue(ok, "alternative remedy: register then global pause");
+        assertTrue(IPausableLike(am).paused(), "alternative remedy pauses Antimatter");
+        vm.revertToState(snap);
+
+        vm.startPrank(OWNER);
+        IPausableLike(am).setPauser(OWNER);
+        IPausableLike(am).pause();
+        vm.stopPrank();
+        assertTrue(IPausableLike(am).paused(), "remedy: Antimatter paused");
+    }
+
+    // =====================================================================
     //  Story 087 (audit-33 L-07): OWNER ETH preflight
     // =====================================================================
 

@@ -438,7 +438,7 @@ abstract contract StableStakerCutoverCore {
     ///         R > P (a strategy exit that realized a gain) is capped at par, exactly as V1 caps the credit.
     ///         ONE `weiSlack` for the pool, not one per user: the exit is a single strategy withdraw of `P`, whose
     ///         vault share rounding can realize a few wei under par even with no economic loss (unit-tested at a
-    ///         high share price). On mainnet 1000 wei is below 1e-9 of a 2 bps allowance on any live pool.
+    ///         high share price). On mainnet 1000 wei is below 1e-9 of a 5 bps allowance on any live pool.
     ///         Multiplication, not division: no rounding in either direction.
     function _exitRealizationWithinBound(
         uint256 realized,
@@ -464,7 +464,7 @@ abstract contract StableStakerCutoverCore {
     ///         Organic stakes: V2 is paused until Phase 7; checks here that read V2 totals are equalities over
     ///         V2's own staker set, which organic stakes keep true.
     /// @param plan The plan `_migratePool` executed in THIS leg (per-user checks cover its users).
-    /// @param maxLossBps Principal loss allowed in bps, per user and on the exit leg (`_maxLossBps`: 2 for the
+    /// @param maxLossBps Principal loss allowed in bps, per user and on the exit leg (`_maxLossBps`: 5 for the
     ///        ERC4626 autopools, 2 * slippageToleranceBps + 1 for the market strategy).
     /// @param weiSlack Absolute rounding slack, in token wei: per user in the per-user bound, and once for the pool's
     ///        single V1 exit in the realization bound.

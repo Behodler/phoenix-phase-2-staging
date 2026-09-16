@@ -33,10 +33,15 @@ import {
  *   1  Retire V1 for the window (story 084, audit L-04): setPauser(OWNER) -> Pauser.unregister(V1) ->
  *      pause(), each step state-gated. V1 is UNREGISTERED BEFORE it is paused so the permissionless
  *      global `Pauser.pause()` (which loops every registrant with no try/catch) is not bricked by V1.
- *      BREAKER LIVENESS (stories 084 + 087, audit L-04 / audit-33 L-05): the global breaker is live after
- *      EVERY transaction of the session EXCEPT ONE forced window - the single tx between
+ *      BREAKER LIVENESS (stories 084 + 087 + 088, audit L-04 / audit-33 L-05): `Pauser.pause()` never REVERTS
+ *      after any transaction of the session EXCEPT ONE forced window - the single tx between
  *      `V1.setPauser(OWNER)` and `Pauser.unregister(V1)` (unregister requires V1.pauser() != Pauser, and a
- *      registered V1 whose pauser is OWNER reverts `only pauser`). The rule on both sides: never leave a
+ *      registered V1 whose pauser is OWNER reverts `only pauser`). A live breaker only pauses REGISTRANTS,
+ *      though, and Phase 7 has two further one-tx COVERAGE gaps where a contract is unpaused, its pauser is
+ *      already the Pauser, and it is not yet registered, so a global pause succeeds but MISSES it (story 088):
+ *      V2 between its unpause and Pauser.register(V2), and Antimatter between its setPauser(Pauser) and
+ *      Pauser.register(Antimatter). See HALTED RUNS below for why nothing is exposed and the remedy.
+ *      The rule on both sides: never leave a
  *      registrant paused or un-pausable by the Pauser - unregister BEFORE pause (Phase 1), unpause BEFORE
  *      register (Phase 7). `test/CutoverStableStakerV2Mainnet.fork.t.sol` probes this per transaction.
  *      PREVIEW additionally proves the breaker with a simulated EYE-funded `Pauser.pause()` inside a
@@ -55,7 +60,9 @@ import {
  *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 retirement BACKSTOP (the
  *      same state-gated triple Phase 1 ran; normally every step skips - story 083/084), then (story 087,
  *      audit-33 L-05) V2 setPauser(Pauser) -> V2 unpause -> Pauser.register(V2) -> Antimatter
- *      setPauser(Pauser) -> Pauser.register(Antimatter). V2 is never registered while paused.
+ *      setPauser(Pauser) -> Pauser.register(Antimatter). V2 is never registered while paused. Consequence
+ *      (story 088): after the V2 unpause and after the Antimatter setPauser, that contract is briefly
+ *      unpaused, Pauser-owned and unregistered - a global pause misses it for one tx (HALTED RUNS).
  *   8  Wiring assertions (both modes), incl. a static sweep: every Pauser registrant unpaused with
  *      pauser == Pauser (story 084, audit L-03).
  *   -  PREVIEW_MODE only: smoke tests (Antimatter mint-revocation proof, V2 stake/withdraw on every
@@ -91,8 +98,26 @@ import {
  *   between Phase 1's `V1.setPauser(OWNER)` and `Pauser.unregister(V1)` (or a V1 paused manually while still
  *   registered). Do not walk away from such a halt: resume it (Phase 1 converges from any partial state), or
  *   at minimum have OWNER call `Pauser.unregister(V1)`. A preview on such a state reports
- *   `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`. Every Phase 7 halt point keeps the breaker live, because V2 is
- *   unpaused before it is registered (audit-33 L-05); a resume from any of them converges.
+ *   `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`. Every Phase 7 halt point keeps `Pauser.pause()` from reverting, because
+ *   V2 is unpaused before it is registered (audit-33 L-05), and a resume from any of them converges.
+ *
+ *   PHASE 7 COVERAGE GAPS (story 088). Two Phase 7 halt points leave ONE contract outside the global pause:
+ *     (a) V2, halted after its unpause and before Pauser.register(V2): V2 is unpaused, pauser == Pauser,
+ *         unregistered. `Pauser.pause()` loops registrants only, so it succeeds and leaves V2 unpaused.
+ *     (b) Antimatter, halted after its setPauser(Pauser) and before Pauser.register(Antimatter): same shape.
+ *   Why (a) exposes nothing: all three strategies (YS_DOLA, YS_USDC, YS_USDE) are registered with the Pauser
+ *   with pauser == Pauser (Phase 0 asserts it), and every V2 user action reverts under a strategy pause -
+ *   stake -> strategy.deposit and withdraw / autoAnnihilate / emergencyWithdraw -> strategy.withdraw are
+ *   whenNotPaused (the underwater relinquishPrincipal edge needs idle V2 balance, ~0 after migration); claim
+ *   also needs claimEnabled (false); userMigrate needs a Migrating V2 pool (all Active). For (b) Antimatter's
+ *   pause gates only annihilate.
+ *   REMEDY at either gap (OWNER): calling pause() on the contract directly REVERTS - it is onlyPauser
+ *   ("StableStaker: only pauser") and the pauser is already the Pauser. Instead run setPauser(OWNER) then
+ *   pause() on that contract (setPauser is onlyOwner). Alternative: OWNER calls Pauser.register(<contract>)
+ *   (valid, the pauser is already the Pauser) and then triggers the global pause (burns EYE).
+ *   RESUME HAZARD after the setPauser(OWNER) remedy on V2: the finalized marker (`_doneCutoverFinalized`,
+ *   V2 pauser == Pauser) is cleared, so a resume re-runs Phase 7 from the pauser hand-back and UNPAUSES V2.
+ *   Do not resume until the incident is cleared; then a resume converges.
  */
 contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverCore {
     // =====================================================================
@@ -144,14 +169,17 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     ///      than 2 wei per user and tripped the Phase 6 post-migration assert. 1000 wei is at most $0.001
     ///      per user even on a 6-decimal token (USDC), so the looser bound is economically negligible.
     uint256 public constant WEI_SLACK = 1000;
-    /// @dev Per-user loss bound on the 1:1 ERC4626 strategies. The story planned 0 bps, but the live
-    ///      autoDOLA autopool is NOT loss-free on either leg: the planning preview (block ~25975061)
-    ///      measured, per leg, autoDOLA: exit R/P = 1 - 1.70e-6, re-deposit x * (1 - 1.73e-6)
-    ///      (~0.034 bps round trip); autoUSDC: exit R/P = 1 - 4.32e-5, re-deposit ~ 1 - 4.3e-5
-    ///      (~0.86 bps round trip). 2 bps is ~2.3x the worst observation: loose enough not to trip on
-    ///      the autopools' own valuation spread, tight enough that a real vault loss still stops the
-    ///      run. Recorded in story 082's Autonomous Decisions.
-    uint256 public constant ERC4626_MAX_LOSS_BPS = 2;
+    /// @dev Per-user loss bound on the 1:1 ERC4626 strategies (autoDOLA, autoUSDC). The story planned 0 bps,
+    ///      but the live autopools are NOT loss-free on either leg. Story 082's planning preview (block
+    ///      ~25975061) measured autoDOLA ~0.034 bps and autoUSDC ~0.86 bps per round trip, and set 2 bps.
+    ///      Story 087's live preview (block 25985945) then measured the autoDOLA EXIT leg alone at ~1.035 bps,
+    ///      and the full per-user round trip failed the Phase 6 check at 2 bps: the autopools' valuation spread
+    ///      moves day to day. Story 088 (human request) raises it to 5 bps: ~4.8x the worst single-leg
+    ///      observation and ~5.8x the autoUSDC round trip, so the spread does not trip the run, while a real
+    ///      vault loss (a haircut beyond 5 bps + WEI_SLACK) still stops it. Script-only: never passed to a
+    ///      constructor or setter, nothing on chain stores it; the market strategy bound (`_maxLossBps`) is
+    ///      unaffected.
+    uint256 public constant ERC4626_MAX_LOSS_BPS = 5;
 
     string constant PROGRESS_FILE = "server/deployments/progress.stable-staker-v2-cutover.1.json";
     uint256 constant CHAIN_ID = 1;
@@ -376,6 +404,10 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             address ys = _strategyFor(t); // reverts on a token with no known strategy
             require(_owner(ys) == OWNER, "Phase0: strategy owner != OWNER");
             require(!IPausableLike(ys).paused(), "Phase0: strategy paused - its withdraw/deposit are whenNotPaused");
+            // Story 088: the Phase 7 V2 coverage gap (V2 unpaused, unregistered for one tx) exposes nothing ONLY
+            // because a global pause stops every strategy V2 routes through. Assert that, read-only.
+            require(IPauserRegistry(PAUSER).isRegistered(ys), "Phase0: strategy not registered with the global Pauser");
+            require(IPausableLike(ys).pauser() == PAUSER, "Phase0: strategy pauser != Pauser");
 
             (uint256 perSecond,,, uint256 staked) = v1.poolInfo(t);
             uint8 state = v1.poolState(t);
@@ -733,7 +765,11 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         // The pauser hand-back stays FIRST: it is the finalized marker (`_doneCutoverFinalized`), so a resume
         // that halted after it skips Phase 3's re-pause and converges here. Unpausing before the hand-back
         // would leave "unpaused, pauser OWNER" and a resume would re-pause V2 in Phase 3. `unpause` is
-        // owner-or-pauser, so it works after the hand-back. Every tx in this block keeps the breaker live.
+        // owner-or-pauser, so it works after the hand-back. No tx in this block makes Pauser.pause() revert, but
+        // two halts leave one contract OUTSIDE it for one tx (story 088): V2 after its unpause and before its
+        // registration, Antimatter after its pauser hand-back and before its registration - unpaused, pauser
+        // already the Pauser, unregistered. Remedy there is OWNER setPauser(OWNER) then pause() on that contract
+        // (a direct pause() reverts onlyPauser); do not resume until cleared. See HALTED RUNS in the header.
         if (v2.pauser() != PAUSER) v2.setPauser(PAUSER);
         // Unpause BEFORE registering: a paused registrant makes Pauser.pause() revert EnforcedPause (audit-33 L-05).
         if (!_doneV2Unpaused()) v2.unpause();
