@@ -14,11 +14,13 @@ import {CrossVersionMigrator} from "stable-staker/CrossVersionMigrator.sol";
 import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
 import {IAntimatter} from "stable-staker/interfaces/IAntimatter.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
+import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import {
     StableStakerCutoverCore,
     ICutoverStaker,
     ICutoverMigrator,
-    ICutoverStrategy
+    ICutoverStrategy,
+    ICutoverVault
 } from "./helpers/StableStakerCutoverCore.sol";
 
 /**
@@ -51,13 +53,20 @@ import {
  *   2  Deploy Antimatter (name "Antimatter", symbol "AM" - hard-coded in its constructor), owner
  *      OWNER; setPhUSD then setPhUSDMinter; read back.
  *   3  Deploy StableStakerV2(antimatter, OWNER); setPauser(OWNER) + pause() BEFORE any addToken.
- *   4  Per V1 token: addToken, strategy.setClient(V2), idle-balance guard, setYieldStrategy,
- *      setSetAsideBuffer(V2, <V1's>), antimatterPerDay(C * 21 / 10), autoAnnihilateAvailable.
+ *   3b (story 091) Deploy the sDOLA DESTINATION strategy: preflight sDOLA asset() == DOLA and maxDeposit >= V1's
+ *      DOLA principal; `new ERC4626YieldStrategy(OWNER, DOLA, SDOLA)` (address persisted in the progress file,
+ *      recovered on resume, fail closed on an unidentified on-chain candidate); setPauser(Pauser) ->
+ *      Pauser.register (registered while UNPAUSED, before any V2 deposit) -> setWithdrawer(SYA). Minter
+ *      client wiring is NOT here (story 092).
+ *   4  Per V1 token, on the DESTINATION strategy: addToken, strategy.setClient(V2), idle-balance guard,
+ *      setYieldStrategy, setSetAsideBuffer(V2, <V1's pct on the SOURCE>), antimatterPerDay(C * 21 / 10),
+ *      autoAnnihilateAvailable.
  *   5  Mint rights: Antimatter.setApprovedMinter(V2), phUSD.setMinter(V2), phUSD.setMinter(Antimatter)
  *      (see the Phase 5 NatSpec for why the third grant exists), two-sided minter delta.
- *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus, initiate, plan
- *      (dust predicate), batch-migrate non-dust, allow-list stragglers under a cap, post-conditions.
- *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 retirement BACKSTOP (the
+ *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus + initiate on the SOURCE,
+ *      plan (dust predicate) + batch-migrate into the DESTINATION, allow-list stragglers under a cap,
+ *      post-conditions (exit bound on the source, per-user bound source + destination).
+ *   7  Finalize: repoint set-aside buffer recipient on the DESTINATION, revoke V1 phUSD mint, V1 retirement BACKSTOP (the
  *      same state-gated triple Phase 1 ran; normally every step skips - story 083/084), then (story 087,
  *      audit-33 L-05) V2 setPauser(Pauser) -> V2 unpause -> Pauser.register(V2) -> Antimatter
  *      setPauser(Pauser) -> Pauser.register(Antimatter). V2 is never registered while paused. Consequence
@@ -101,12 +110,25 @@ import {
  *   `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`. Every Phase 7 halt point keeps `Pauser.pause()` from reverting, because
  *   V2 is unpaused before it is registered (audit-33 L-05), and a resume from any of them converges.
  *
+ *   PHASE 3b HALT POINTS (story 091, 088's pattern). Nothing in Phase 3b makes `Pauser.pause()` revert: the new
+ *   strategy is never paused and is registered only once its pauser is the Pauser. Halts:
+ *     (a) after the CREATE, before setPauser(Pauser): the strategy's pauser is address(0), it is unregistered, and it
+ *         has NO client and NO principal (V2 is paused and not wired to it until Phase 4). A global pause misses it,
+ *         which exposes nothing - there is nothing to deposit or withdraw. Resume recovers it from the progress file.
+ *     (b) after setPauser(Pauser), before Pauser.register: the one-tx COVERAGE gap shape (unpaused, pauser ==
+ *         Pauser, unregistered), again with no client and no principal - nothing is exposed. REMEDY if needed:
+ *         OWNER Pauser.register(<strategy>) (valid, its pauser is already the Pauser), or simply resume.
+ *     (c) after register, before setWithdrawer(SYA): fully under the breaker; SYA cannot yet skim it (no yield yet).
+ *   V2 never deposits into an unregistered strategy: Phase 4 requires the destination registered before
+ *   `setYieldStrategy`, and Phase 6 is the first deposit.
+ *
  *   PHASE 7 COVERAGE GAPS (story 088). Two Phase 7 halt points leave ONE contract outside the global pause:
  *     (a) V2, halted after its unpause and before Pauser.register(V2): V2 is unpaused, pauser == Pauser,
  *         unregistered. `Pauser.pause()` loops registrants only, so it succeeds and leaves V2 unpaused.
  *     (b) Antimatter, halted after its setPauser(Pauser) and before Pauser.register(Antimatter): same shape.
- *   Why (a) exposes nothing: all three strategies (YS_DOLA, YS_USDC, YS_USDE) are registered with the Pauser
- *   with pauser == Pauser (Phase 0 asserts it), and every V2 user action reverts under a strategy pause -
+ *   Why (a) exposes nothing: every strategy V2 routes through - the sDOLA destination (Phase 3b registers it and
+ *   Phase 4 re-asserts it) plus YS_USDC and YS_USDE (Phase 0 asserts them) - is registered with the Pauser with
+ *   pauser == Pauser, and every V2 user action reverts under a strategy pause -
  *   stake -> strategy.deposit and withdraw / autoAnnihilate / emergencyWithdraw -> strategy.withdraw are
  *   whenNotPaused (the underwater relinquishPrincipal edge needs idle V2 balance, ~0 after migration); claim
  *   also needs claimEnabled (false); userMigrate needs a Migrating V2 pool (all Active). For (b) Antimatter's
@@ -135,12 +157,17 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address public constant USDE = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
 
-    /// @dev The strategy map is HARD-CODED rather than read off V1 because `initiateMigration` clears
-    ///      `V1.yieldStrategy(token)`; a resume leg past initiation could otherwise not recover it.
-    ///      Phase 0 asserts each entry against V1 (while Active) and V2 (once wired).
+    /// @dev The SOURCE strategy map (`_sourceStrategyFor`, V1's exit side) is HARD-CODED rather than read off V1
+    ///      because `initiateMigration` clears `V1.yieldStrategy(token)`; a resume leg past initiation could
+    ///      otherwise not recover it. Phase 0 asserts each entry against V1 (while Active). The DESTINATION map
+    ///      (`_destinationStrategyFor`, V2's side) is the same for USDC / USDe; DOLA goes to the sDOLA strategy
+    ///      Phase 3b deploys (story 091), which cannot be a constant.
     address public constant YS_DOLA = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2; // ERC4626YieldStrategy (autoDOLA)
     address public constant YS_USDC = 0xaFDf8DeA96a0F37Aae4869f813901bf73a3eAB83; // ERC4626YieldStrategy (autoUSDC)
     address public constant YS_USDE = 0xaC2e5936Eca286eC364d4D5Bcca33145fBe57f95; // ERC4626MarketYieldStrategy (sUSDe, 30 bps)
+    /// @dev Story 091: Inverse Finance sDOLA (ERC4626 over DOLA), the vault of V2's DOLA destination strategy.
+    ///      Read on-chain 2026-09-16: asset() == DOLA, maxDeposit == type(uint256).max. Phase 3b re-asserts both.
+    address public constant SDOLA = 0xb45ad160634c528Cc3D2926d9807104FA3157305;
 
     // ---- phUSD minter candidate set (story 076 two-sided delta). APPEND-ONLY: bit i == index i. ----
     address public constant PHLIMBO_V3 = 0x8D3A8E3ba43DEb8C7e2110DF437a92243523b6ca;
@@ -193,6 +220,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     Antimatter public antimatter;
     StableStakerV2 public v2;
     CrossVersionMigrator public migrator;
+    /// @dev Story 091: V2's DOLA destination, `ERC4626YieldStrategy(OWNER, DOLA, SDOLA)`, deployed in Phase 3b and
+    ///      persisted in the progress file as `contracts.ERC4626YieldStrategySDOLA`.
+    ERC4626YieldStrategy public sdolaStrategy;
     address[] public tokens;
 
     bool public phusdBaselineRecorded;
@@ -254,6 +284,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         _previewBreakerStage("after-phase2");
         _phase3_stakerV2();
         _previewBreakerStage("after-phase3");
+        _phase3b_sdolaStrategy();
+        _previewBreakerStage("after-phase3b");
         _phase4_pools();
         _previewBreakerStage("after-phase4");
         _phase5_mintRights();
@@ -402,7 +434,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         for (uint256 i = 0; i < live.length; i++) {
             address t = live[i];
             tokens.push(t);
-            address ys = _strategyFor(t); // reverts on a token with no known strategy
+            address ys = _sourceStrategyFor(t); // V1's exit side; reverts on a token with no known strategy
             require(_owner(ys) == OWNER, "Phase0: strategy owner != OWNER");
             require(!IPausableLike(ys).paused(), "Phase0: strategy paused - its withdraw/deposit are whenNotPaused");
             // Story 088: the Phase 7 V2 coverage gap (V2 unpaused, unregistered for one tx) exposes nothing ONLY
@@ -567,6 +599,88 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     }
 
     // =====================================================================
+    //  PHASE 3b - sDOLA destination strategy (story 091)
+    // =====================================================================
+
+    /// @dev Deploys and wires V2's DOLA destination BEFORE Phase 4 wires V2 to it. Every step is `if (!done) do();`
+    ///      with a done-predicate read from chain (`_doneSdolaStrategy*`), shared with the verifier. HALT POINTS: see
+    ///      PHASE 3b HALT POINTS in the header - none makes `Pauser.pause()` revert and none exposes principal (the
+    ///      strategy has no client until Phase 4). Minter client wiring is story 092's.
+    function _phase3b_sdolaStrategy() internal {
+        console.log("\n=== Phase 3b: sDOLA destination strategy (story 091) ===");
+        require(_contains(tokens, DOLA), "Phase3b: V1 stakes no DOLA - the sDOLA destination has no pool (STOP AND REPORT)");
+        require(IERC4626AssetLike(SDOLA).asset() == DOLA, "Phase3b: sDOLA asset() != DOLA - refusing to deploy over the wrong vault");
+
+        if (address(sdolaStrategy) == address(0)) {
+            _requireNoUnrecordedSdolaStrategy();
+            sdolaStrategy = new ERC4626YieldStrategy(OWNER, DOLA, SDOLA);
+            console.log("  ERC4626YieldStrategy(OWNER, DOLA, sDOLA) deployed at:", address(sdolaStrategy));
+            _writeProgress("in_progress");
+        } else {
+            console.log("  sDOLA strategy loaded from progress file:", address(sdolaStrategy));
+        }
+        require(_doneSdolaStrategyIdentity(), "Phase3b: sDOLA strategy owner / underlyingToken / vault != OWNER / DOLA / sDOLA");
+
+        // Capacity preflight against V1's whole DOLA principal (the larger of V1's book and the source strategy's).
+        uint256 v1Dola = _v1DolaPrincipal();
+        uint256 cap = ICutoverVault(SDOLA).maxDeposit(address(sdolaStrategy));
+        console.log("  sDOLA maxDeposit(strategy) / V1 DOLA principal:", cap, v1Dola);
+        require(cap >= v1Dola, "Phase3b: sDOLA maxDeposit below V1's DOLA principal - STOP AND REPORT");
+
+        // Pauser BEFORE any V2 deposit, and never register a paused contract (story 087 rule).
+        if (sdolaStrategy.pauser() != PAUSER) sdolaStrategy.setPauser(PAUSER);
+        if (!IPauserRegistry(PAUSER).isRegistered(address(sdolaStrategy))) {
+            require(!sdolaStrategy.paused(), "Phase3b: sDOLA strategy is paused - refusing to register a paused contract");
+            IPauserRegistry(PAUSER).register(address(sdolaStrategy));
+        }
+        require(_doneSdolaStrategyPauseWired(), "Phase3b: sDOLA strategy pauser / Pauser registration did not land");
+
+        if (!_doneSdolaStrategyWithdrawer()) sdolaStrategy.setWithdrawer(STABLE_YIELD_ACCUMULATOR, true);
+        require(_doneSdolaStrategyWithdrawer(), "Phase3b: StableYieldAccumulator is not a withdrawer on the sDOLA strategy");
+        console.log("  sDOLA strategy: pauser Pauser, registered, SYA withdrawer (minter client is story 092)");
+    }
+
+    /// @dev FAIL CLOSED before a CREATE (story 091). The progress file names no sDOLA strategy, so a deployment is
+    ///      about to happen. Refuse if the chain already shows one the file does not name: V2 already routing DOLA
+    ///      to a strategy, or a Pauser registrant that IS an `ERC4626YieldStrategy(OWNER, DOLA, sDOLA)`. Deploying a
+    ///      second one would split the pool. A CREATE that landed but was never registered cannot be seen here; the
+    ///      progress file records every CREATE in forge's local pass before sending, so that shape only arises from
+    ///      a hand-trimmed file - trim to run-latest.json receipts, which include the CREATE.
+    function _requireNoUnrecordedSdolaStrategy() internal view {
+        if (address(v2) != address(0) && address(v2).code.length > 0 && _contains(v2.getStakedTokens(), DOLA)) {
+            require(
+                address(v2.yieldStrategy(DOLA)) == address(0),
+                "Phase3b: V2 already routes DOLA to a strategy the progress file does not name - STOP (add contracts.ERC4626YieldStrategySDOLA to the progress file; never deploy a second one)"
+            );
+        }
+        address[] memory registrants = IPauserRegistry(PAUSER).getPausableContracts();
+        for (uint256 i = 0; i < registrants.length; i++) {
+            require(
+                !_isSdolaStrategyShape(registrants[i]),
+                string.concat(
+                    "Phase3b: Pauser registrant ", vm.toString(registrants[i]),
+                    " is an ERC4626YieldStrategy(OWNER, DOLA, sDOLA) the progress file does not name - STOP (record it; never deploy a second one)"
+                )
+            );
+        }
+    }
+
+    function _isSdolaStrategyShape(address c) internal view returns (bool) {
+        (bool okV, bytes memory v) = c.staticcall(abi.encodeWithSignature("vault()"));
+        if (!okV || v.length < 32 || abi.decode(v, (address)) != SDOLA) return false;
+        (bool okU, bytes memory u) = c.staticcall(abi.encodeWithSignature("underlyingToken()"));
+        if (!okU || u.length < 32 || abi.decode(u, (address)) != DOLA) return false;
+        (bool okO, bytes memory o) = c.staticcall(abi.encodeWithSignature("owner()"));
+        return okO && o.length >= 32 && abi.decode(o, (address)) == OWNER;
+    }
+
+    function _v1DolaPrincipal() internal view returns (uint256) {
+        (,,, uint256 staked) = ICutoverStaker(STABLE_STAKER_V1).poolInfo(DOLA);
+        uint256 booked = ICutoverStrategy(YS_DOLA).principalOf(DOLA, STABLE_STAKER_V1);
+        return booked > staked ? booked : staked;
+    }
+
+    // =====================================================================
     //  PHASE 4 - per-token pool setup, copied from V1's LIVE config
     // =====================================================================
 
@@ -578,7 +692,12 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     }
 
     function _setupPool(address t) internal {
-        address ys = _strategyFor(t);
+        address ys = _destinationStrategyFor(t); // V2's side (story 091: DOLA -> sDOLA strategy)
+        // Story 091: V2 must never deposit into a strategy outside the global breaker.
+        require(
+            IPauserRegistry(PAUSER).isRegistered(ys) && IPausableLike(ys).pauser() == PAUSER,
+            "Phase4: destination strategy not registered with the Pauser - refusing to wire V2 to it"
+        );
         console.log("  -- pool", t, IERC20Metadata(t).symbol());
 
         if (!_donePoolTokenAdded(t)) {
@@ -698,20 +817,23 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         ICutoverStaker v1 = ICutoverStaker(STABLE_STAKER_V1);
         for (uint256 i = 0; i < tokens.length; i++) {
             address t = tokens[i];
-            address ys = _strategyFor(t);
+            address src = _sourceStrategyFor(t); // V1 exits here
+            address dst = _destinationStrategyFor(t); // V2 deposits here
             console.log("  -- migrating pool", t, IERC20Metadata(t).symbol());
 
-            _initiatePool(ICutoverMigrator(address(migrator)), v1, t, ys);
+            _initiatePool(ICutoverMigrator(address(migrator)), v1, t, src);
 
-            PoolPlan memory preview = _planPool(v1, t, ys);
+            PoolPlan memory preview = _planPool(v1, t, dst);
             if (preview.migratable.length > 0) {
                 // Pending phUSD is minted inside batchMigrate; a revoked V1 would brick every exit.
                 require(_canMintPhUSD(STABLE_STAKER_V1), "Phase6: V1 phUSD mint revoked while stakers remain to migrate");
             }
             PoolPlan memory plan =
-                _migratePool(ICutoverMigrator(address(migrator)), v1, t, ys, MIGRATE_CHUNK, _stragglerCap(t));
+                _migratePool(ICutoverMigrator(address(migrator)), v1, t, dst, MIGRATE_CHUNK, _stragglerCap(t));
 
-            _assertPoolPostMigration(v1, ICutoverStaker(address(v2)), t, ys, plan, _maxLossBps(ys), WEI_SLACK);
+            _assertPoolPostMigration(
+                v1, ICutoverStaker(address(v2)), t, src, dst, plan, _maxLossBps(src), _maxLossBps(dst), WEI_SLACK
+            );
         }
     }
 
@@ -725,7 +847,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
         for (uint256 i = 0; i < tokens.length; i++) {
             address t = tokens[i];
-            address ys = _strategyFor(t);
+            address ys = _destinationStrategyFor(t); // V2's side: plan + buffer recipient
             require(_doneV1PoolMigrating(t), "Phase7: a V1 pool is not Migrating");
             PoolPlan memory rest = _planPool(v1, t, ys);
             require(rest.migratable.length == 0, "Phase7: migratable V1 stakers remain - refusing to finalize");
@@ -733,6 +855,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             // The recipient is GLOBAL per strategy. Repointed AFTER migration: skimSurplus is the only
             // reader, the migration never skims, and V1 is drained. A pre-story-047 strategy (the live
             // USDe one) has no recipient and pays each client its own buffer, so V2 already receives it.
+            // Story 091: repointed on the DESTINATION only. The DOLA source (autoDOLA strategy) keeps recipient V1:
+            // it is being drained, and story 092 retires it.
             if (!_doneBufferRecipientV2(ys)) {
                 IYieldStrategy(ys).setSetAsideBufferRecipient(address(v2));
                 require(_doneBufferRecipientV2(ys), "Phase7: setAsideBufferRecipient not repointed to V2");
@@ -817,7 +941,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(v2Tokens.length == tokens.length, "Phase8: V2 token set size != V1 token set size");
         for (uint256 i = 0; i < tokens.length; i++) {
             address t = tokens[i];
-            address ys = _strategyFor(t);
+            address ys = _destinationStrategyFor(t);
+            address src = _sourceStrategyFor(t);
             require(_contains(v2Tokens, t), "Phase8: V2 token set != V1 token set");
             require(address(v2.yieldStrategy(t)) == ys, "Phase8: V2 strategy");
             require(IClientGetter(ys).authorizedClients(address(v2)), "Phase8: V2 not a strategy client");
@@ -833,12 +958,18 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             require(v2.autoAnnihilateAvailable(t), "Phase8: autoAnnihilate unavailable");
             require(v1.poolState(t) == POOL_MIGRATING, "Phase8: V1 pool not Migrating");
             require(
-                ICutoverStrategy(ys).principalOf(t, STABLE_STAKER_V1) == 0, "Phase8: V1 still books strategy principal"
+                ICutoverStrategy(src).principalOf(t, STABLE_STAKER_V1) == 0, "Phase8: V1 still books source strategy principal"
             );
+            require(IPauserRegistry(PAUSER).isRegistered(ys), "Phase8: V2's destination strategy not registered with Pauser");
             (,,, uint256 v1Staked) = v1.poolInfo(t);
             require(v1Staked < _stragglerCap(t), "Phase8: V1 totalStaked is not sub-cap straggler dust");
             console.log("  pool OK (token / V2 stakers / V1 stragglers):", t, v2.stakerCount(t), v1.stakerCount(t));
         }
+
+        require(_doneSdolaStrategyIdentity(), "Phase8: sDOLA strategy owner / underlyingToken / vault");
+        require(_doneSdolaStrategyPauseWired(), "Phase8: sDOLA strategy pauser / Pauser registration");
+        require(_doneSdolaStrategyWithdrawer(), "Phase8: StableYieldAccumulator not a withdrawer on the sDOLA strategy");
+        require(address(v2.yieldStrategy(DOLA)) == address(sdolaStrategy), "Phase8: V2 DOLA strategy != sDOLA strategy");
 
         require(v2.pauser() == PAUSER, "Phase8: V2 pauser");
         require(antimatter.pauser() == PAUSER, "Phase8: Antimatter pauser");
@@ -1159,21 +1290,36 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             && v2.owner() == OWNER;
     }
 
+    // ---- Phase 3b: sDOLA destination strategy (story 091) ----
+    function _doneSdolaStrategyIdentity() internal view returns (bool) {
+        return address(sdolaStrategy).code.length > 0 && sdolaStrategy.owner() == OWNER
+            && address(sdolaStrategy.underlyingToken()) == DOLA && address(sdolaStrategy.vault()) == SDOLA;
+    }
+
+    function _doneSdolaStrategyPauseWired() internal view returns (bool) {
+        return address(sdolaStrategy).code.length > 0 && sdolaStrategy.pauser() == PAUSER
+            && IPauserRegistry(PAUSER).isRegistered(address(sdolaStrategy));
+    }
+
+    function _doneSdolaStrategyWithdrawer() internal view returns (bool) {
+        return address(sdolaStrategy).code.length > 0 && sdolaStrategy.authorizedWithdrawers(STABLE_YIELD_ACCUMULATOR);
+    }
+
     // ---- Phase 4: per-token pool setup ----
     function _donePoolTokenAdded(address t) internal view returns (bool) {
         return _contains(v2.getStakedTokens(), t);
     }
 
     function _donePoolClientSet(address t) internal view returns (bool) {
-        return IClientGetter(_strategyFor(t)).authorizedClients(address(v2));
+        return IClientGetter(_destinationStrategyFor(t)).authorizedClients(address(v2));
     }
 
     function _donePoolStrategySet(address t) internal view returns (bool) {
-        return address(v2.yieldStrategy(t)) == _strategyFor(t);
+        return address(v2.yieldStrategy(t)) == _destinationStrategyFor(t);
     }
 
     function _donePoolBufferCopied(address t) internal view returns (bool) {
-        return ICutoverBuffer(_strategyFor(t)).setAsideBufferSize(address(v2)) == v1BufferPct[t];
+        return ICutoverBuffer(_destinationStrategyFor(t)).setAsideBufferSize(address(v2)) == v1BufferPct[t];
     }
 
     /// @dev Requires `cPerDay[t]` hydrated by Phase 0.
@@ -1241,16 +1387,43 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     //  Helpers
     // =====================================================================
 
-    function _strategyFor(address t) internal pure returns (address) {
+    /// @dev Story 091: V1's EXIT side - the strategy V1 staked through. Hard-coded (see the constants' NatSpec).
+    ///      Use for: Phase 0 V1 checks + V1 buffer pct, `_initiatePool` (relinquish, maxRedeem), the exit-realization
+    ///      bound, and `principalOf(token, V1) == 0`.
+    function _sourceStrategyFor(address t) internal pure returns (address) {
         if (t == DOLA) return YS_DOLA;
         if (t == USDC) return YS_USDC;
         if (t == USDE) return YS_USDE;
         revert("V1 stakes a token with no known strategy - STOP AND REPORT (update the strategy map deliberately)");
     }
 
-    /// @dev Loss bound, bps part (Phase 6 adds the absolute WEI_SLACK = 1000 wei on top, story 083). Used per user
-    ///      (pre -> credited) AND, since story 087, for the pool's exit-realization bound (pre -> credit, on V1's
-    ///      immutable R / P), which is a sub-leg of the per-user total and so is bounded by the same allowance.
+    /// @dev Story 091: V2's DEPOSIT side. USDC / USDe: the same strategy as the source. DOLA: the sDOLA strategy
+    ///      Phase 3b deploys, recovered from the progress file on resume; reverts while it is unknown so no V2 step
+    ///      can silently fall back to the autoDOLA strategy.
+    ///      Use for: Phase 4 wiring, `_planPool` / `_depositWouldFail` / maxDeposit, Phase 7 buffer recipient, Phase 8.
+    function _destinationStrategyFor(address t) internal view returns (address) {
+        if (t == DOLA) {
+            require(
+                address(sdolaStrategy) != address(0),
+                "DOLA destination (sDOLA strategy) unknown - Phase 3b has not deployed it and the progress file does not name it"
+            );
+            return address(sdolaStrategy);
+        }
+        return _sourceStrategyFor(t);
+    }
+
+    /// @dev Story 091: per-user pre -> credited loss bound for `t` (source + destination bps, once when equal).
+    ///      The verifier's per-user re-check and per-pool aggregate use the same rule.
+    function _perUserLossBpsFor(address t) internal view returns (uint256) {
+        address src = _sourceStrategyFor(t);
+        address dst = _destinationStrategyFor(t);
+        return _perUserLossBps(src, dst, _maxLossBps(src), _maxLossBps(dst));
+    }
+
+    /// @dev Loss bound of ONE strategy, bps part (Phase 6 adds the absolute WEI_SLACK = 1000 wei on top, story 083).
+    ///      Story 091: the pool's exit-realization bound (pre -> credit, on V1's immutable R / P) uses the SOURCE
+    ///      strategy's bound; the per-user bound (pre -> credited) is `_perUserLossBpsFor` - source + destination when
+    ///      they differ (DOLA: autoDOLA exit + sDOLA entry = 10), this bound once when they are the same strategy.
     ///      ERC4626 strategies: ERC4626_MAX_LOSS_BPS (WEI_SLACK is a separate wei term, not added here). The market strategy
     ///      haircuts TWICE: the V1 exit sells shares with minOut = ideal * (1 - bps) and the V2 re-deposit
     ///      books credited = credit * (1 - bps). Worst case 1 - (1 - bps)^2 < 2 * bps; +1 bps slack.
@@ -1311,6 +1484,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         antimatter = Antimatter(_loadAddress(json, "Antimatter"));
         v2 = StableStakerV2(_loadAddress(json, "StableStakerV2"));
         migrator = CrossVersionMigrator(_loadAddress(json, "CrossVersionMigrator"));
+        sdolaStrategy = ERC4626YieldStrategy(_loadAddress(json, "ERC4626YieldStrategySDOLA"));
         if (vm.keyExistsJson(json, ".baselines.cutoverStartBlock")) {
             cutoverStartBlock = vm.parseUint(vm.parseJsonString(json, ".baselines.cutoverStartBlock"));
         }
@@ -1341,6 +1515,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         c = _serializeEntry("Antimatter", address(antimatter));
         c = _serializeEntry("StableStakerV2", address(v2));
         c = _serializeEntry("CrossVersionMigrator", address(migrator));
+        c = _serializeEntry("ERC4626YieldStrategySDOLA", address(sdolaStrategy));
 
         // Story 086: write-once lower bound for the verifier's per-user event scan.
         if (cutoverStartBlock == 0) cutoverStartBlock = block.number;
@@ -1379,6 +1554,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         console.log("Antimatter:           ", address(antimatter));
         console.log("StableStakerV2:       ", address(v2));
         console.log("CrossVersionMigrator: ", address(migrator), "(transient, no address-book key)");
+        console.log("sDOLA strategy:       ", address(sdolaStrategy), "(V2 DOLA destination; address book is story 092)");
         string memory mode = isPreview ? string("PREVIEW") : string("BROADCAST");
         console.log("Mode:                 ", mode);
     }
@@ -1419,6 +1595,10 @@ interface ICutoverBuffer {
 
 interface IClientGetter {
     function authorizedClients(address client) external view returns (bool);
+}
+
+interface IERC4626AssetLike {
+    function asset() external view returns (address);
 }
 
 interface IPhUSDOwner {

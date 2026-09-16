@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StableStakerV2} from "stable-staker/StableStakerV2.sol";
 import {IAntimatter} from "stable-staker/interfaces/IAntimatter.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
+import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import {
     CutoverStableStakerV2Mainnet,
     IPausableLike,
@@ -49,6 +50,35 @@ contract CutoverStableStakerV2MainnetHarness is CutoverStableStakerV2Mainnet {
         vm.stopPrank();
     }
 
+    function harnessPhase3bAsOwner() external {
+        vm.startPrank(OWNER);
+        _phase3b_sdolaStrategy();
+        vm.stopPrank();
+    }
+
+    /// Phase 3b's CREATE only, byte-for-byte (so the test can step the pauser/register txs one at a time).
+    function harnessDeploySdolaStrategyOnly() external {
+        vm.prank(OWNER);
+        sdolaStrategy = new ERC4626YieldStrategy(OWNER, DOLA, SDOLA);
+    }
+
+    /// Story 091: simulate a resume whose progress file does not name the sDOLA strategy.
+    function harnessForgetSdolaStrategy() external {
+        sdolaStrategy = ERC4626YieldStrategy(address(0));
+    }
+
+    function harnessDestinationStrategyFor(address t) external view returns (address) {
+        return _destinationStrategyFor(t);
+    }
+
+    function harnessSourceStrategyFor(address t) external pure returns (address) {
+        return _sourceStrategyFor(t);
+    }
+
+    function harnessPerUserLossBpsFor(address t) external view returns (uint256) {
+        return _perUserLossBpsFor(t);
+    }
+
     function harnessPhase4AsOwner() external {
         vm.startPrank(OWNER);
         _phase4_pools();
@@ -87,7 +117,7 @@ contract CutoverStableStakerV2MainnetHarness is CutoverStableStakerV2Mainnet {
     function harnessPhase7Preamble() external {
         vm.startPrank(OWNER);
         for (uint256 i = 0; i < tokens.length; i++) {
-            address ys = _strategyFor(tokens[i]);
+            address ys = _destinationStrategyFor(tokens[i]);
             if (!_doneBufferRecipientV2(ys)) IYieldStrategy(ys).setSetAsideBufferRecipient(address(v2));
         }
         if (!_v1MintRevoked()) IPhUSDOwner(PHUSD).setMinter(STABLE_STAKER_V1, false);
@@ -256,21 +286,38 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertFalse(IPauserRegistry(PAUSER).isRegistered(V1), "V1 must end unregistered");
         assertTrue(IPausableLike(V1).paused(), "V1 must end paused");
         // Phase 0 is the tolerated BROKEN_BY_V1 case (not recorded); every strict stage must pass.
-        assertEq(h.globalPauseStageCount(), 8, "strict stages after-phase1 .. after-phase8");
-        for (uint256 i = 0; i < 8; i++) {
-            assertEq(h.globalPauseStagesPassed(i), string.concat("after-phase", vm.toString(i + 1)));
+        string[9] memory expected = _strictStages();
+        assertEq(h.globalPauseStageCount(), 9, "strict stages after-phase1 .. after-phase8 incl. after-phase3b");
+        for (uint256 i = 0; i < 9; i++) {
+            assertEq(h.globalPauseStagesPassed(i), expected[i]);
         }
     }
 
     /// Full preview run() passes with the GLOBAL_PAUSE simulation succeeding at phase0 and after EVERY phase 1..8
     /// (story 087 class check: story 084 sampled only phase0 / after-phase1 / after-phase8).
+    /// Strict stages in run() order. Story 091 adds after-phase3b (the sDOLA strategy registration).
+    function _strictStages() internal pure returns (string[9] memory) {
+        return [
+            "after-phase1",
+            "after-phase2",
+            "after-phase3",
+            "after-phase3b",
+            "after-phase4",
+            "after-phase5",
+            "after-phase6",
+            "after-phase7",
+            "after-phase8"
+        ];
+    }
+
     function test_fork_fullPreview_globalPauseAfterEveryPhase() public {
         if (!_fork()) return;
         h.run();
-        assertEq(h.globalPauseStageCount(), 9, "phase0 + after-phase1 .. after-phase8");
+        string[9] memory expected = _strictStages();
+        assertEq(h.globalPauseStageCount(), 10, "phase0 + after-phase1 .. after-phase8 incl. after-phase3b");
         assertEq(h.globalPauseStagesPassed(0), "phase0");
-        for (uint256 i = 1; i <= 8; i++) {
-            assertEq(h.globalPauseStagesPassed(i), string.concat("after-phase", vm.toString(i)));
+        for (uint256 i = 0; i < 9; i++) {
+            assertEq(h.globalPauseStagesPassed(i + 1), expected[i]);
         }
         assertFalse(IPauserRegistry(PAUSER).isRegistered(V1), "V1 unregistered");
         assertTrue(IPauserRegistry(PAUSER).isRegistered(address(h.v2())), "V2 registered");
@@ -345,6 +392,7 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         h.harnessPhase1AsOwner();
         h.harnessPhase2AsOwner();
         h.harnessPhase3AsOwner();
+        h.harnessPhase3bAsOwner();
         h.harnessPhase4AsOwner();
         h.harnessPhase5AsOwner();
         h.harnessPhase6AsOwner();
@@ -447,6 +495,20 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertTrue(_breakerLive("P3-after-V2.pause()"), "P3 pause");
         h.harnessPhase3AsOwner(); // real Phase 3: pause step skips, identity read-backs pass
 
+        // ---- Phase 3b (story 091): the sDOLA strategy is never paused, and registered only once its pauser is the Pauser ----
+        h.harnessDeploySdolaStrategyOnly();
+        address sys = address(h.sdolaStrategy());
+        assertTrue(_breakerLive("P3b-after-sDOLA-strategy-deploy"), "P3b deploy");
+        vm.prank(OWNER);
+        IPausableLike(sys).setPauser(PAUSER);
+        assertTrue(_breakerLive("P3b-after-sDOLA-strategy.setPauser(Pauser)"), "P3b setPauser");
+        assertFalse(IPausableLike(sys).paused(), "sDOLA strategy is UNPAUSED when it is registered");
+        vm.prank(OWNER);
+        IPauserRegistry(PAUSER).register(sys);
+        assertTrue(_breakerLive("P3b-after-register(sDOLA strategy)"), "P3b register");
+        h.harnessPhase3bAsOwner(); // real Phase 3b: CREATE skipped (address held), pauser/register skip, withdrawer lands
+        assertTrue(_breakerLive("after-phase3b"), "phase 3b");
+
         h.harnessPhase4AsOwner();
         assertTrue(_breakerLive("after-phase4"), "phase 4");
         h.harnessPhase5AsOwner();
@@ -526,7 +588,8 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         (bool ok,) = _eyeFundedPause();
         assertTrue(ok, "global pause does not revert at the gap");
         assertFalse(IPausableLike(v2).paused(), "GAP: global pause leaves V2 unpaused");
-        assertTrue(IPausableLike(h.YS_DOLA()).paused(), "strategy DOLA paused by the global pause");
+        assertTrue(IPausableLike(address(h.sdolaStrategy())).paused(), "V2's DOLA strategy (sDOLA, story 091) paused by the global pause");
+        assertTrue(IPausableLike(h.YS_DOLA()).paused(), "source strategy DOLA paused by the global pause");
         assertTrue(IPausableLike(h.YS_USDC()).paused(), "strategy USDC paused by the global pause");
         assertTrue(IPausableLike(h.YS_USDE()).paused(), "strategy USDE paused by the global pause");
         vm.revertToState(snap);
@@ -588,6 +651,134 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         IPausableLike(am).pause();
         vm.stopPrank();
         assertTrue(IPausableLike(am).paused(), "remedy: Antimatter paused");
+    }
+
+    // =====================================================================
+    //  Story 091: sDOLA destination strategy + source/destination split
+    // =====================================================================
+
+    address constant DOLA_T = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
+    address constant YS_DOLA_SOURCE = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2;
+
+    /// Full preview end state: V2's DOLA principal sits in the NEW sDOLA strategy, V1 books nothing on 0x1760, the
+    /// sDOLA strategy is Pauser-registered with SYA as withdrawer, the other pools keep source == destination, and
+    /// the preview smoke tests (stake/withdraw every pool, autoAnnihilate(DOLA)) passed inside run().
+    function test_fork_fullPreview_v2DolaLandsInSdolaStrategy() public {
+        if (!_fork()) return;
+        (,,, uint256 v1DolaBefore) = ICutoverStakerLike(V1).poolInfo(DOLA_T);
+        assertGt(v1DolaBefore, 0, "setup: V1 holds DOLA at the fork block");
+        h.run();
+
+        ERC4626YieldStrategy sys = h.sdolaStrategy();
+        address v2 = address(h.v2());
+        assertTrue(address(sys) != address(0) && address(sys) != YS_DOLA_SOURCE, "a NEW DOLA strategy was deployed");
+        assertEq(address(sys.vault()), h.SDOLA(), "vault is sDOLA");
+        assertEq(address(sys.underlyingToken()), DOLA_T, "underlying DOLA");
+        assertEq(sys.owner(), OWNER, "owner OWNER");
+        assertEq(sys.pauser(), PAUSER, "pauser Pauser");
+        assertTrue(IPauserRegistry(PAUSER).isRegistered(address(sys)), "sDOLA strategy registered with the Pauser");
+        assertTrue(sys.authorizedWithdrawers(h.STABLE_YIELD_ACCUMULATOR()), "SYA withdrawer");
+        assertTrue(sys.authorizedClients(v2), "V2 client");
+        assertEq(sys.setAsideBufferSize(v2), IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferSize(V1), "V1's buffer pct copied");
+        assertEq(sys.setAsideBufferRecipient(), v2, "destination recipient V2");
+        assertEq(IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferRecipient(), V1, "source recipient left as V1 (story 092 retires it)");
+        assertFalse(sys.authorizedClients(h.PHUSD_STABLE_MINTER()), "minter client wiring is story 092, not 091");
+
+        assertEq(address(StableStakerV2(v2).yieldStrategy(DOLA_T)), address(sys), "V2 DOLA -> sDOLA strategy");
+        (,,, uint256 v2DolaStaked) = StableStakerV2(v2).poolInfo(DOLA_T);
+        assertGt(v2DolaStaked, 0, "V2 DOLA pool populated");
+        assertGe(sys.principalOf(DOLA_T, v2), v2DolaStaked, "V2's DOLA principal is booked in the sDOLA strategy");
+        assertEq(IStrategyBufferLike(YS_DOLA_SOURCE).principalOf(DOLA_T, V1), 0, "V1 principal on 0x1760 == 0");
+        assertEq(IStrategyBufferLike(YS_DOLA_SOURCE).principalOf(DOLA_T, v2), 0, "V2 never touched the source strategy");
+
+        assertEq(h.harnessSourceStrategyFor(h.USDC()), h.harnessDestinationStrategyFor(h.USDC()), "USDC same both sides");
+        assertEq(h.harnessSourceStrategyFor(h.USDE()), h.harnessDestinationStrategyFor(h.USDE()), "USDe same both sides");
+        assertEq(h.harnessPerUserLossBpsFor(DOLA_T), 10, "DOLA per-user bound: autoDOLA 5 + sDOLA 5");
+        assertEq(h.harnessPerUserLossBpsFor(h.USDC()), 5, "USDC per-user bound counted once");
+        assertEq(h.harnessPerUserLossBpsFor(h.USDE()), 61, "USDe per-user bound counted once (2*30+1)");
+    }
+
+    /// Before Phase 3b (and with no progress entry) the DOLA destination is unknown and every V2-side read reverts.
+    function test_fork_destinationUnknown_revertsLoudly() public {
+        if (!_fork()) return;
+        vm.expectRevert(
+            bytes("DOLA destination (sDOLA strategy) unknown - Phase 3b has not deployed it and the progress file does not name it")
+        );
+        h.harnessDestinationStrategyFor(DOLA_T);
+        assertEq(h.harnessDestinationStrategyFor(h.USDC()), h.YS_USDC(), "USDC destination needs no deployment");
+    }
+
+    /// Resume with a progress file that lost the sDOLA strategy while it is REGISTERED with the Pauser: Phase 3b
+    /// refuses to deploy a second one.
+    function test_fork_phase3b_unrecordedRegisteredStrategy_failsClosed() public {
+        if (!_fork()) return;
+        h.harnessPhase0(true);
+        h.harnessPhase1AsOwner();
+        h.harnessPhase2AsOwner();
+        h.harnessPhase3AsOwner();
+        h.harnessPhase3bAsOwner();
+        address first = address(h.sdolaStrategy());
+        h.harnessForgetSdolaStrategy();
+        vm.expectRevert(
+            bytes(
+                string.concat(
+                    "Phase3b: Pauser registrant ", vm.toString(first),
+                    " is an ERC4626YieldStrategy(OWNER, DOLA, sDOLA) the progress file does not name - STOP (record it; never deploy a second one)"
+                )
+            )
+        );
+        h.harnessPhase3bAsOwner();
+    }
+
+    /// Resume with a progress file that lost the sDOLA strategy after V2 was wired to it: fails closed on V2 state.
+    function test_fork_phase3b_unrecordedV2Wiring_failsClosed() public {
+        if (!_fork()) return;
+        h.harnessPhase0(true);
+        h.harnessPhase1AsOwner();
+        h.harnessPhase2AsOwner();
+        h.harnessPhase3AsOwner();
+        h.harnessPhase3bAsOwner();
+        h.harnessPhase4AsOwner();
+        address first = address(h.sdolaStrategy());
+        vm.startPrank(OWNER); // hide it from the registrant scan: only V2 state names it
+        IPausableLike(first).setPauser(OWNER);
+        IPauserRegistry(PAUSER).unregister(first);
+        vm.stopPrank();
+        h.harnessForgetSdolaStrategy();
+        vm.expectRevert(
+            bytes(
+                "Phase3b: V2 already routes DOLA to a strategy the progress file does not name - STOP (add contracts.ERC4626YieldStrategySDOLA to the progress file; never deploy a second one)"
+            )
+        );
+        h.harnessPhase3bAsOwner();
+    }
+
+    /// A resume that re-enters Phase 3b with the address held (as loaded from the progress file) deploys nothing.
+    function test_fork_phase3b_resumeIsIdempotent() public {
+        if (!_fork()) return;
+        h.harnessPhase0(true);
+        h.harnessPhase1AsOwner();
+        h.harnessPhase2AsOwner();
+        h.harnessPhase3AsOwner();
+        h.harnessPhase3bAsOwner();
+        address first = address(h.sdolaStrategy());
+        uint256 registrants = IPauserRegistry(PAUSER).getPausableContracts().length;
+        h.harnessPhase3bAsOwner();
+        assertEq(address(h.sdolaStrategy()), first, "same strategy");
+        assertEq(IPauserRegistry(PAUSER).getPausableContracts().length, registrants, "no second registration");
+    }
+
+    /// Source guard: `_strategyFor` is gone from every cutover source, so no call site is ambiguous.
+    function test_strategyMapSplit_noAmbiguousCallSite() public view {
+        string[3] memory files = [SCRIPT_SRC, "script/VerifyStableStakerV2Cutover.s.sol", "script/helpers/StableStakerCutoverCore.sol"];
+        for (uint256 i = 0; i < files.length; i++) {
+            assertEq(_count(vm.readFile(files[i]), "_strategyFor("), 0, string.concat("_strategyFor still used in ", files[i]));
+        }
+        string memory src = vm.readFile(SCRIPT_SRC);
+        uint256 p3b = _indexOf(src, "_phase3b_sdolaStrategy();", _indexOf(src, "function run()", 0));
+        uint256 p4 = _indexOf(src, "_phase4_pools();", _indexOf(src, "function run()", 0));
+        uint256 p3 = _indexOf(src, "_phase3_stakerV2();", _indexOf(src, "function run()", 0));
+        assertTrue(p3 < p3b && p3b < p4, "Phase 3b runs after Phase 3 and before Phase 4");
     }
 
     // =====================================================================
@@ -735,7 +926,8 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertEq(_count(src, "v2.pause();"), 1, "P3 pause");
         assertEq(_count(src, "v2.setPauser(PAUSER);"), 1, "P7 setPauser");
         assertEq(_count(src, "v2.unpause();"), 1, "P7 unpause");
-        assertEq(_count(src, "IPauserRegistry(PAUSER).register("), 2, "P7 register x2");
+        assertEq(_count(src, "IPauserRegistry(PAUSER).register("), 3, "P3b register sDOLA strategy + P7 register x2");
+        assertEq(_count(src, "sdolaStrategy.setPauser(PAUSER);"), 1, "P3b sDOLA strategy setPauser");
         assertEq(_count(src, "antimatter.setPauser(PAUSER);"), 1, "P7 Antimatter setPauser");
     }
 
@@ -768,4 +960,14 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         );
         assertEq(_count(pkg, "--with-gas-price 0.3gwei"), 0, "no literal gas price left beside the env var");
     }
+}
+
+interface ICutoverStakerLike {
+    function poolInfo(address token) external view returns (uint256, uint256, uint256, uint256);
+}
+
+interface IStrategyBufferLike {
+    function setAsideBufferSize(address client) external view returns (uint256);
+    function setAsideBufferRecipient() external view returns (address);
+    function principalOf(address token, address account) external view returns (uint256);
 }

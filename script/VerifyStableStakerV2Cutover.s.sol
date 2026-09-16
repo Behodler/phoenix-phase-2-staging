@@ -59,6 +59,12 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *              under-count an exit into a false alarm. Only this verifier has the logs; the broadcast script
  *              cannot see a self-exit from state and relies on (1) plus its in-leg per-user bound.
  *
+ *         SOURCE / DESTINATION (story 091). V1 exited through the hard-coded SOURCE strategies; V2 deposits into
+ *         the DESTINATION strategies, which differ only for DOLA (the sDOLA strategy recovered from the progress file
+ *         key `contracts.ERC4626YieldStrategySDOLA`, exactly as the cutover recovers it). The exit-realization bound
+ *         uses the source bound; the per-user re-check and the per-pool aggregate use the per-user bound (source +
+ *         destination bps, counted once when they are the same strategy), the same rule as the cutover's in-leg check.
+ *
  *         RUN IT IMMEDIATELY AFTER THE BROADCAST. The per-pool aggregate and the `V2 userInfo >= credited`
  *         check read live V2 balances; once migrated users start withdrawing from V2 they can legitimately
  *         fall below what the cutover credited. The `:broadcast` npm key chains this verifier straight after
@@ -103,6 +109,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         _verifyPhase1_v1Retired();
         _verifyPhase2_antimatter();
         _verifyPhase3_stakerV2();
+        _verifyPhase3b_sdolaStrategy();
 
         require(
             phusdBaselineRecorded,
@@ -126,6 +133,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         console.log("Antimatter:           ", address(antimatter));
         console.log("StableStakerV2:       ", address(v2));
         console.log("CrossVersionMigrator: ", address(migrator));
+        console.log("sDOLA strategy:       ", address(sdolaStrategy));
         console.log("Per-user credits re-checked:", verifiedUserCount);
     }
 
@@ -179,6 +187,27 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         console.log("  StableStakerV2:", address(v2));
     }
 
+    /// @dev Story 091: the sDOLA destination strategy. Address from the progress file only (code required by the
+    ///      loader); every property from chain. V2 client + V2 buffer are Phase 4's `_donePoolClientSet` /
+    ///      `_donePoolBufferCopied`, which read the destination.
+    function _verifyPhase3b_sdolaStrategy() internal view {
+        console.log("\n=== verify Phase 3b: sDOLA destination strategy ===");
+        require(
+            address(sdolaStrategy) != address(0),
+            "verify: Phase3b: sDOLA strategy deployment not on chain (no contracts.ERC4626YieldStrategySDOLA address in the progress file)"
+        );
+        require(
+            _doneSdolaStrategyIdentity(),
+            "verify: Phase3b: sDOLA strategy owner/underlyingToken/vault != OWNER/DOLA/sDOLA on chain"
+        );
+        require(
+            _doneSdolaStrategyPauseWired(),
+            "verify: Phase3b: sDOLA strategy setPauser(Pauser) + Pauser.register not on chain"
+        );
+        require(_doneSdolaStrategyWithdrawer(), "verify: Phase3b: sDOLA strategy setWithdrawer(SYA) not on chain");
+        console.log("  sDOLA strategy:", address(sdolaStrategy));
+    }
+
     // =====================================================================
     //  Phase 4-5
     // =====================================================================
@@ -227,14 +256,15 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         ICutoverStaker v1 = ICutoverStaker(STABLE_STAKER_V1);
         for (uint256 i = 0; i < tokens.length; i++) {
             address t = tokens[i];
-            address ys = _strategyFor(t);
+            address src = _sourceStrategyFor(t);
+            address dst = _destinationStrategyFor(t);
             string memory sym = IERC20Metadata(t).symbol();
             require(
                 _doneV1PoolMigrating(t), string.concat("verify: Phase6: V1 initiateMigration(", sym, ") not on chain")
             );
 
             // Live re-plan. After a clean cutover `migratable` is empty and only sub-cap stragglers remain.
-            PoolPlan memory plan = _planPool(v1, t, ys);
+            PoolPlan memory plan = _planPool(v1, t, dst);
             _requireNoUnmigratedStaker(t, sym, plan);
             require(
                 plan.stragglerAmountTotal < _stragglerCap(t),
@@ -248,7 +278,9 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             // stakerCount / totalStaked must equal the stragglers, V2 books == sum of its stakers, the lockstep, and
             // story 087's exit-realization bound on V1's immutable R / P (self-exit-proof, audit-33 L-06). The
             // self-exit-aware aggregate on V2's booked total needs logs and runs in `_verifyPerUserCredits`.
-            _assertPoolPostMigration(v1, ICutoverStaker(address(v2)), t, ys, plan, _maxLossBps(ys), WEI_SLACK);
+            _assertPoolPostMigration(
+                v1, ICutoverStaker(address(v2)), t, src, dst, plan, _maxLossBps(src), _maxLossBps(dst), WEI_SLACK
+            );
             console.log("  pool migrated (token / V1 stragglers):", t, plan.stragglers.length);
         }
     }
@@ -277,7 +309,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     function _verifyPhase7_finalize() internal view {
         console.log("\n=== verify Phase 7: finalize ===");
         for (uint256 i = 0; i < tokens.length; i++) {
-            address ys = _strategyFor(tokens[i]);
+            address ys = _destinationStrategyFor(tokens[i]);
             require(
                 _doneBufferRecipientV2(ys),
                 string.concat("verify: Phase7: setSetAsideBufferRecipient(V2) not on chain for strategy ", vm.toString(ys))
@@ -334,8 +366,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         ICutoverStaker v1 = ICutoverStaker(STABLE_STAKER_V1);
         for (uint256 i = 0; i < tokens.length; i++) {
             address t = tokens[i];
-            address ys = _strategyFor(t);
-            uint256 matched = _checkPoolCredits(t, ys, outs, selfExits, deposits);
+            uint256 matched = _checkPoolCredits(t, outs, selfExits, deposits);
 
             // Vacuity guard: a pool that owed principal to V2 must show at least one migrated credit, so an empty
             // log fetch (wrong start block, a silently truncating RPC) cannot pass. Story 087 sibling sweep: keyed
@@ -361,18 +392,17 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             verifiedUserCount += matched;
             console.log("  per-user credits OK (token / users):", t, matched);
 
-            _requirePoolAggregateNetOfSelfExits(t, ys, outs, selfExits);
+            _requirePoolAggregateNetOfSelfExits(t, outs, selfExits);
         }
     }
 
     function _checkPoolCredits(
         address t,
-        address ys,
         CutoverEvent[] memory outs,
         CutoverEvent[] memory selfExits,
         CutoverEvent[] memory deposits
     ) internal view returns (uint256 matched) {
-        uint256 bps = _maxLossBps(ys);
+        uint256 bps = _perUserLossBpsFor(t); // story 091: source + destination, once when equal
         for (uint256 j = 0; j < outs.length; j++) {
             CutoverEvent memory o = outs[j];
             if (o.token != t || o.amount == 0) continue;
@@ -411,7 +441,6 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     ///      (zero-credit users included), one `WEI_SLACK` each.
     function _requirePoolAggregateNetOfSelfExits(
         address t,
-        address ys,
         CutoverEvent[] memory outs,
         CutoverEvent[] memory selfExits
     ) internal view {
@@ -427,7 +456,7 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             if (outs[j].token == t && !_hasEvent(selfExits, t, outs[j].user)) nMigrated++;
         }
         uint256 due = P > v1Staked + selfExited ? P - v1Staked - selfExited : 0;
-        uint256 floor = due * (CUTOVER_MAX_BPS - _maxLossBps(ys)) / CUTOVER_MAX_BPS;
+        uint256 floor = due * (CUTOVER_MAX_BPS - _perUserLossBpsFor(t)) / CUTOVER_MAX_BPS; // story 091: same rule as per user
         uint256 slack = nMigrated * WEI_SLACK;
         floor = floor > slack ? floor - slack : 0;
         console.log("  aggregate net of self-exits (token / floor / V2 totalStaked):", t, floor, v2Staked);

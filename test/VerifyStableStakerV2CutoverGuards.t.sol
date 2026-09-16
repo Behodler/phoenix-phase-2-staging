@@ -15,6 +15,7 @@ import {
 import {VerifyStableStakerV2Cutover} from "../script/VerifyStableStakerV2Cutover.s.sol";
 import {ICutoverStaker, ICutoverStrategy, ICutoverMigrator} from "../script/helpers/StableStakerCutoverCore.sol";
 import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
+import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 
 interface IV1Admin {
     function finalizeAndReset(address token) external;
@@ -44,8 +45,14 @@ contract VerifyStableStakerV2CutoverHarness is VerifyStableStakerV2Cutover {
     address internal injAntimatter;
     address internal injV2;
     address internal injMigrator;
+    address internal injSdola;
     uint256 internal injMask;
     uint256 internal injVersion;
+
+    /// Story 091: the fork-local sDOLA destination strategy, recovered like the progress-file address.
+    function injectSdola(address sd) external {
+        injSdola = sd;
+    }
 
     function inject(address a, address s, address m, uint256 mask, uint256 version) external {
         injAntimatter = a;
@@ -63,6 +70,7 @@ contract VerifyStableStakerV2CutoverHarness is VerifyStableStakerV2Cutover {
         antimatter = Antimatter(injAntimatter);
         v2 = StableStakerV2(injV2);
         migrator = CrossVersionMigrator(injMigrator);
+        sdolaStrategy = ERC4626YieldStrategy(injSdola);
         phusdMaskAtPhase0 = injMask;
         phusdMintVersionAtPhase0 = injVersion;
         phusdBaselineRecorded = true;
@@ -72,7 +80,7 @@ contract VerifyStableStakerV2CutoverHarness is VerifyStableStakerV2Cutover {
     /// Story 087: the per-pool aggregate with the self-exit list withheld, to prove the subtraction is load-bearing.
     function aggregateIgnoringSelfExits(address t) external view {
         _requirePoolAggregateNetOfSelfExits(
-            t, _strategyFor(t), _decode(_fetchLogsView(STABLE_STAKER_V1, MIGRATED_OUT_TOPIC)), new CutoverEvent[](0)
+            t, _decode(_fetchLogsView(STABLE_STAKER_V1, MIGRATED_OUT_TOPIC)), new CutoverEvent[](0)
         );
     }
 
@@ -119,6 +127,7 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
         _phase1_pauseV1();
         _phase2_antimatter();
         _phase3_stakerV2();
+        _phase3b_sdolaStrategy();
         _phase4_pools();
         _phase5_mintRights();
         vm.stopPrank();
@@ -141,12 +150,12 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
 
     function initiate(address t) external {
         vm.startPrank(OWNER);
-        _initiatePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _strategyFor(t));
+        _initiatePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _sourceStrategyFor(t));
         vm.stopPrank();
     }
 
     function planMigratable(address t) external view returns (address[] memory) {
-        return _planPool(ICutoverStaker(STABLE_STAKER_V1), t, _strategyFor(t)).migratable;
+        return _planPool(ICutoverStaker(STABLE_STAKER_V1), t, _destinationStrategyFor(t)).migratable;
     }
 
     /// On-chain effect of a broadcast `migrate` whose user list was computed in forge's local pass.
@@ -157,26 +166,30 @@ contract CutoverPhasesHarness is CutoverStableStakerV2Mainnet {
 
     function migrateNoAssert(address t) external {
         vm.startPrank(OWNER);
-        _migratePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _strategyFor(t), MIGRATE_CHUNK, _stragglerCap(t));
+        _migratePool(ICutoverMigrator(address(migrator)), ICutoverStaker(STABLE_STAKER_V1), t, _destinationStrategyFor(t), MIGRATE_CHUNK, _stragglerCap(t));
         vm.stopPrank();
     }
 
     /// The resume-leg / verifier post-condition shape: live re-plan (empty migratable).
     function assertLivePlan(address t) external view {
-        address ys = _strategyFor(t);
-        PoolPlan memory plan = _planPool(ICutoverStaker(STABLE_STAKER_V1), t, ys);
+        address src = _sourceStrategyFor(t);
+        address dst = _destinationStrategyFor(t);
+        PoolPlan memory plan = _planPool(ICutoverStaker(STABLE_STAKER_V1), t, dst);
         _assertPoolPostMigration(
-            ICutoverStaker(STABLE_STAKER_V1), ICutoverStaker(address(v2)), t, ys, plan, _maxLossBps(ys), WEI_SLACK
+            ICutoverStaker(STABLE_STAKER_V1), ICutoverStaker(address(v2)), t, src, dst, plan, _maxLossBps(src), _maxLossBps(dst), WEI_SLACK
         );
     }
 
     function phase6(address t) external {
         vm.startPrank(OWNER);
-        address ys = _strategyFor(t);
+        address src = _sourceStrategyFor(t);
+        address dst = _destinationStrategyFor(t);
         ICutoverStaker v1 = ICutoverStaker(STABLE_STAKER_V1);
-        _initiatePool(ICutoverMigrator(address(migrator)), v1, t, ys);
-        PoolPlan memory plan = _migratePool(ICutoverMigrator(address(migrator)), v1, t, ys, MIGRATE_CHUNK, _stragglerCap(t));
-        _assertPoolPostMigration(v1, ICutoverStaker(address(v2)), t, ys, plan, _maxLossBps(ys), WEI_SLACK);
+        _initiatePool(ICutoverMigrator(address(migrator)), v1, t, src);
+        PoolPlan memory plan = _migratePool(ICutoverMigrator(address(migrator)), v1, t, dst, MIGRATE_CHUNK, _stragglerCap(t));
+        _assertPoolPostMigration(
+            v1, ICutoverStaker(address(v2)), t, src, dst, plan, _maxLossBps(src), _maxLossBps(dst), WEI_SLACK
+        );
         vm.stopPrank();
     }
 
@@ -276,11 +289,13 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     /// @dev The inherited cutover mutators must never be reached from the verifier.
     function test_verifierNeverCallsInheritedMutators() public view {
         string memory src = vm.readFile(VERIFIER_SRC);
-        string[12] memory banned = [
+        string[14] memory banned = [
             "_phase1_pauseV1",
             "_retireV1",
             "_phase2_antimatter",
             "_phase3_stakerV2",
+            "_phase3b_sdolaStrategy",
+            "_requireNoUnrecordedSdolaStrategy",
             "_phase4_pools",
             "_setupPool",
             "_phase5_mintRights",
@@ -320,6 +335,13 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             "the shared reader reads the PREVIEW_MODE env"
         );
         assertTrue(_contains(src, "eth_getLogs"), "per-user re-check from logs");
+        // Story 091: source/destination split and the sDOLA destination asserts.
+        assertFalse(_contains(src, "_strategyFor("), "no ambiguous strategy call site");
+        assertTrue(_contains(src, "_verifyPhase3b_sdolaStrategy();"), "Phase 3b verified");
+        assertTrue(_contains(src, "_doneSdolaStrategyIdentity()"), "sDOLA strategy owner/underlying/vault");
+        assertTrue(_contains(src, "_doneSdolaStrategyPauseWired()"), "sDOLA strategy pauser + registration");
+        assertTrue(_contains(src, "_doneSdolaStrategyWithdrawer()"), "sDOLA strategy SYA withdrawer");
+        assertTrue(_contains(src, "_perUserLossBpsFor(t)"), "per-user / aggregate use the combined bound");
     }
 
     /// @dev The broadcast chain must verify on chain BEFORE the preview smoke test.
@@ -367,6 +389,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             cut.phusdMaskAtPhase0(),
             cut.phusdMintVersionAtPhase0()
         );
+        vf.injectSdola(address(cut.sdolaStrategy()));
         _feed(logs, bytes32(0), address(0));
         return true;
     }
@@ -516,6 +539,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             cut.phusdMaskAtPhase0(),
             cut.phusdMintVersionAtPhase0()
         );
+        vf.injectSdola(address(cut.sdolaStrategy()));
         _feed(logs, user, token);
         _runExpectingRevertContaining(
             string.concat("verify: per-user: V2 DepositedFor for user ", vm.toString(address(uint160(uint256(user)))))
@@ -545,7 +569,9 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     address constant DOLA = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant USDE = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
-    address constant YS_DOLA = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2;
+    /// @dev Story 091: the DOLA SOURCE strategy (autoDOLA, V1's exit side). The F-01 haircut below cuts V1's exit, so it
+    ///      stays on the source; V2's DOLA destination is the fork-local sDOLA strategy (`ph.sdolaStrategy()`).
+    address constant YS_DOLA_SOURCE = 0x1760E05356Ec1FBBA159C730781dCfB9920524e2;
     string constant BOUND_REVERT = "cutover-post: V1 exit realization below loss bound";
 
     CutoverPhasesHarness ph;
@@ -598,6 +624,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         v.inject(
             address(ph.antimatter()), address(ph.v2()), address(ph.migrator()), ph.phusdMaskAtPhase0(), ph.phusdMintVersionAtPhase0()
         );
+        v.injectSdola(address(ph.sdolaStrategy()));
         address v2 = address(ph.v2());
         for (uint256 i = 0; i < logs.length; i++) {
             Vm.Log memory l = logs[i];
@@ -727,13 +754,13 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         ph.throughPhase5();
         ph.phase6Setup();
         if (haircutBps > 0) {
-            address vault = ICutoverStrategy(YS_DOLA).vault();
-            uint256 shares = IERC20(vault).balanceOf(YS_DOLA);
+            address vault = ICutoverStrategy(YS_DOLA_SOURCE).vault();
+            uint256 shares = IERC20(vault).balanceOf(YS_DOLA_SOURCE);
             (,,, uint256 staked) = ICutoverStaker(V1).poolInfo(DOLA);
             uint256 need = IConvertToSharesLike(vault).convertToShares(staked);
             uint256 keep = need * (10_000 - haircutBps) / 10_000;
             require(shares > keep, "test setup: strategy holds fewer shares than the haircut target");
-            vm.prank(YS_DOLA);
+            vm.prank(YS_DOLA_SOURCE);
             IERC20(vault).transfer(makeAddr("haircut-sink"), shares - keep);
         }
         ph.initiate(DOLA);

@@ -95,7 +95,15 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
 
     function doAssert(PoolPlan memory plan, uint256 maxLossBps, uint256 weiSlack) external view {
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), plan, maxLossBps, weiSlack
+            ICutoverStaker(address(v1)),
+            ICutoverStaker(address(v2)),
+            address(dola),
+            address(ys),
+            address(ys),
+            plan,
+            maxLossBps,
+            maxLossBps,
+            weiSlack
         );
     }
 
@@ -128,7 +136,7 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
 
         // Loss: exit + re-deposit at price 10 rounds by < 10 wei per leg.
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), plan, 0, 20
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), address(ys), plan, 0, 0, 20
         );
         (uint256 v2Dust,) = v2.userInfo(address(dola), dust);
         assertEq(v2Dust, 0, "straggler has no V2 position");
@@ -153,7 +161,7 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
 
         // 1e18 loss on 2000e18 = 5 bps socialised by min(R,P)/P.
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), plan, 6, 2
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), address(ys), plan, 6, 6, 2
         );
     }
 
@@ -202,7 +210,56 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         assertEq(again.migratable.length, 0, "nothing left to migrate on a resume leg");
         assertEq(again.stragglers.length, 1, "straggler still allow-listed on a resume leg");
         _assertPoolPostMigration(
-            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), again, 0, 20
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2)), address(dola), address(ys), address(ys), again, 0, 0, 20
+        );
+    }
+
+    // ------------------------------------------------------------------ story 091: source != destination
+
+    /// The per-user bound: source + destination when the strategies differ, the bound ONCE when they are the same.
+    function test_perUserLossBps_sourcePlusDestination_onceWhenEqual() public view {
+        assertEq(_perUserLossBps(address(ys), address(ys), 5, 5), 5, "same strategy: counted once");
+        assertEq(_perUserLossBps(address(ys), address(0xBEEF), 5, 5), 10, "different strategies: 5 + 5");
+        assertEq(_perUserLossBps(address(ys), address(0xBEEF), 61, 5), 66, "legs add");
+    }
+
+    /// V1 exits through the SOURCE strategy and V2 re-deposits into a DIFFERENT destination strategy over another
+    /// vault (the DOLA autoDOLA -> sDOLA shape): the plan and migration use the destination, the post-condition uses
+    /// the source for V1's booked principal and the exit bound, and the destination for the lockstep.
+    function test_sourceDestinationSplit_v2LandsInDestination() public {
+        MockERC4626Vault vault2 = new MockERC4626Vault("sDOLA", "sDOLA", address(dola));
+        ERC4626YieldStrategy dst = new ERC4626YieldStrategy(address(this), address(dola), address(vault2));
+        StableStakerV2 v2b = new StableStakerV2(IAntimatter(address(new Antimatter(address(this)))), address(this));
+        CrossVersionMigrator migB = new CrossVersionMigrator(
+            IStableStakerMigratable(address(v1)), IStableStakerMigratable(address(v2b)), address(this)
+        );
+        v2b.addToken(address(dola));
+        dst.setClient(address(v2b), true);
+        v2b.setYieldStrategy(address(dola), IYieldStrategy(address(dst)));
+        v1.setMigrator(address(migB));
+        v2b.setMigrator(address(migB));
+
+        _initiatePool(ICutoverMigrator(address(migB)), ICutoverStaker(address(v1)), address(dola), address(ys));
+        PoolPlan memory plan = _migratePool(
+            ICutoverMigrator(address(migB)), ICutoverStaker(address(v1)), address(dola), address(dst), 25, CAP
+        );
+        assertEq(plan.migratable.length, 2, "both stakers migrated");
+        _assertPoolPostMigration(
+            ICutoverStaker(address(v1)), ICutoverStaker(address(v2b)), address(dola), address(ys), address(dst), plan, 5, 5, 1_000
+        );
+        assertEq(ys.principalOf(address(dola), address(v1)), 0, "V1 books nothing on the source");
+        assertEq(ys.principalOf(address(dola), address(v2b)), 0, "V2 never touched the source");
+        assertEq(dst.principalOf(address(dola), address(v2b)), 2 * BIG, "V2 principal booked on the destination");
+        assertGt(vault2.balanceOf(address(dst)), 0, "destination holds the new vault's shares");
+
+        // Passing the SAME strategy for both sides must fail: V2 books nothing on the source (lockstep).
+        vm.expectRevert(bytes("cutover-post: strategy principal for V2 below V2 booked totalStaked (lockstep)"));
+        this.doAssertSplit(plan, address(ys), address(ys), address(v2b));
+    }
+
+    function doAssertSplit(PoolPlan memory plan, address src, address dst, address v2x) external view {
+        _assertPoolPostMigration(
+            ICutoverStaker(address(v1)), ICutoverStaker(v2x), address(dola), src, dst, plan, 5, 5, 1_000
         );
     }
 
