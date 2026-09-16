@@ -71,7 +71,9 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *         the sDOLA strategy with the previous exchangeRate / decimals / maxMintPerDay / enabled, the minter is its client
  *         with principal within the destination bound of R, SYA lists the sDOLA strategy and not the autoDOLA one, SYA
  *         is a withdrawer on the sDOLA strategy only, and the autoDOLA strategy has no clients, no V1 / minter principal,
- *         pauser OWNER, is unregistered from the Pauser and paused.
+ *         pauser OWNER, is unregistered from the Pauser and paused. Story 094 (audit-35 L-09): OWNER's DOLA must equal
+ *         its persisted pre-execution balance, and the minter's sDOLA principal is bounded against the MINED R read from
+ *         the execute's DOLA `Transfer(autoDOLA strategy -> OWNER)` log, never against the recorded (possibly local-pass) R.
  *
  *         RUN IT IMMEDIATELY AFTER THE BROADCAST. The per-pool aggregate and the `V2 userInfo >= credited`
  *         check read live V2 balances; once migrated users start withdrawing from V2 they can legitimately
@@ -87,6 +89,9 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     bytes32 internal constant MIGRATED_OUT_TOPIC = keccak256("MigratedOut(address,address,uint256,uint256)");
     bytes32 internal constant USER_MIGRATED_TOPIC = keccak256("UserMigrated(address,address,uint256)");
     bytes32 internal constant DEPOSITED_FOR_TOPIC = keccak256("DepositedFor(address,address,uint256)");
+    /// @dev Story 094: ERC20 Transfer. `WithdrawalExecuted` emits the principal snapshot P, not the DOLA received, so the
+    ///      MINED R is only visible as the DOLA `Transfer(autoDOLA strategy -> OWNER)` of the execute.
+    bytes32 internal constant ERC20_TRANSFER_TOPIC = keccak256("Transfer(address,address,uint256)");
 
     /// @dev A decoded `(token, user, amount)` event row. `token` and `user` are the two indexed topics.
     struct CutoverEvent {
@@ -103,6 +108,10 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     }
 
     uint256 public verifiedUserCount;
+    /// @dev Story 094: the mined R (sum of DOLA Transfer(autoDOLA strategy -> OWNER) since the cutover start block) and
+    ///      the number of such transfers.
+    uint256 public verifiedMinedRecovered;
+    uint256 public verifiedMinedTransfers;
 
     function run() external override {
         console.log("=================================================");
@@ -315,11 +324,11 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     //  Phase 6b - minter collateral, SYA, retired autoDOLA source (story 092)
     // =====================================================================
 
-    function _verifyPhase6b_minterMove() internal view {
+    function _verifyPhase6b_minterMove() internal {
         console.log("\n=== verify Phase 6b: minter DOLA collateral, SYA, retired autoDOLA strategy ===");
         require(
-            minterConfigRecorded && minterRecoveredRecorded,
-            "verify: Phase6b: minterMove records (pre-repoint minter config / recovered R) absent from the progress file - refusing to guess them"
+            minterConfigRecorded && minterRecoveredRecorded && minterExecRecorded,
+            "verify: Phase6b: minterMove records (pre-repoint minter config / execution record / recovered R) absent from the progress file - refusing to guess them"
         );
         require(
             _doneMinterWithdrawalExecuted(), "verify: Phase6b: autoDOLA totalWithdrawal(DOLA, minter) execution not on chain"
@@ -342,7 +351,55 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
         require(_doneSdolaStrategyWithdrawer(), "verify: Phase6b: SYA is not a withdrawer on the sDOLA strategy");
         require(_sourceDolaRetirementStarted(), "verify: Phase6b: autoDOLA strategy setClient(V1 / minter, false) not on chain");
         require(_doneSourceDolaRetired(), "verify: Phase6b: autoDOLA strategy setPauser(OWNER) + Pauser.unregister + pause not on chain");
+        _verifyPhase6b_minedRecovery();
         console.log("  minter DOLA -> sDOLA strategy (R / minter principal):", minterRecovered, sdolaStrategy.principalOf(DOLA, PHUSD_STABLE_MINTER));
+    }
+
+    /// @dev Story 094 (audit-35 L-09). The recorded `minterRecovered` can be a forge local-pass value, so it proves nothing
+    ///      about what mined. Two chain-side checks instead:
+    ///        1. OWNER RESIDUAL: OWNER's DOLA is exactly its persisted pre-execution balance - no collateral left on the EOA
+    ///           (the excess branch, mined R above the re-seeded amount).
+    ///        2. MINED-R BOUND: the minter's sDOLA principal is within the destination loss bound of the R the execute
+    ///           actually delivered, summed from DOLA `Transfer(autoDOLA strategy -> OWNER)` logs since the cutover start
+    ///           block. The lower side only: organic DOLA mints after the repoint only add principal.
+    function _verifyPhase6b_minedRecovery() internal {
+        require(
+            IERC20Metadata(DOLA).balanceOf(OWNER) == ownerDolaBeforeExec,
+            string.concat(
+                "verify: Phase6b: OWNER DOLA residual - OWNER holds ", vm.toString(IERC20Metadata(DOLA).balanceOf(OWNER)),
+                " DOLA, expected its pre-execution balance ", vm.toString(ownerDolaBeforeExec),
+                " (minter collateral left on the EOA, or OWNER's DOLA moved since)"
+            )
+        );
+        require(
+            cutoverStartBlock != 0 && cutoverStartBlock <= block.number,
+            "verify: Phase6b: no usable cutover start block for the mined-R Transfer scan"
+        );
+        bytes32[] memory topics = new bytes32[](3);
+        topics[0] = ERC20_TRANSFER_TOPIC;
+        topics[1] = bytes32(uint256(uint160(YS_DOLA)));
+        topics[2] = bytes32(uint256(uint160(OWNER)));
+        CutoverLog[] memory logs = _fetchTopicLogs(DOLA, topics);
+        uint256 minedR;
+        for (uint256 i = 0; i < logs.length; i++) {
+            require(logs[i].data.length >= 32, "verify: Phase6b: malformed DOLA Transfer log");
+            minedR += abi.decode(logs[i].data, (uint256));
+        }
+        require(
+            logs.length > 0 && minedR > 0,
+            "verify: Phase6b: no DOLA Transfer(autoDOLA strategy -> OWNER) since the cutover start block - the mined R is unknown"
+        );
+        uint256 principal = sdolaStrategy.principalOf(DOLA, PHUSD_STABLE_MINTER);
+        require(
+            principal + minedR * _maxLossBps(address(sdolaStrategy)) / CUTOVER_MAX_BPS + WEI_SLACK >= minedR,
+            string.concat(
+                "verify: Phase6b: minter principal on the sDOLA strategy below the bound of the MINED R (principal ",
+                vm.toString(principal), ", mined R ", vm.toString(minedR), ", recorded R ", vm.toString(minterRecovered), ")"
+            )
+        );
+        verifiedMinedRecovered = minedR;
+        verifiedMinedTransfers = logs.length;
+        console.log("  OWNER DOLA residual 0; mined R (Transfer logs) / transfers:", minedR, logs.length);
     }
 
     // =====================================================================
@@ -568,6 +625,12 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
     function _fetchLogs(address emitter, bytes32 topic0) internal virtual returns (CutoverLog[] memory out) {
         bytes32[] memory topics = new bytes32[](1);
         topics[0] = topic0;
+        return _fetchTopicLogs(emitter, topics);
+    }
+
+    /// @dev Story 094: the same chunked live fetch filtered on positional topics (topic0, topic1, ...), so a Transfer scan
+    ///      on a busy token asks the RPC only for the rows it needs. `virtual` for the same test seam as `_fetchLogs`.
+    function _fetchTopicLogs(address emitter, bytes32[] memory topics) internal virtual returns (CutoverLog[] memory out) {
         for (uint256 from = cutoverStartBlock; from <= block.number; from += LOG_CHUNK_BLOCKS) {
             uint256 to = from + LOG_CHUNK_BLOCKS - 1;
             if (to > block.number) to = block.number;

@@ -115,6 +115,37 @@ contract VerifyStableStakerV2CutoverHarness is VerifyStableStakerV2Cutover {
         return _fetchLogsView(emitter, topic0);
     }
 
+    /// Story 094: topic-filtered fetch (the mined-R DOLA Transfer), matched on every supplied topic.
+    function _fetchTopicLogs(address emitter, bytes32[] memory topics)
+        internal
+        view
+        override
+        returns (CutoverLog[] memory out)
+    {
+        uint256 n;
+        for (uint256 i = 0; i < rows.length; i++) {
+            if (_rowMatches(rows[i], emitter, topics)) n++;
+        }
+        out = new CutoverLog[](n);
+        uint256 k;
+        for (uint256 i = 0; i < rows.length; i++) {
+            if (!_rowMatches(rows[i], emitter, topics)) continue;
+            bytes32[] memory t = new bytes32[](3);
+            t[0] = rows[i].topic0;
+            t[1] = rows[i].topic1;
+            t[2] = rows[i].topic2;
+            out[k++] = CutoverLog({emitter: emitter, topics: t, data: rows[i].data});
+        }
+    }
+
+    function _rowMatches(Row storage r, address emitter, bytes32[] memory topics) internal view returns (bool) {
+        if (r.emitter != emitter) return false;
+        if (topics.length > 0 && r.topic0 != topics[0]) return false;
+        if (topics.length > 1 && r.topic1 != topics[1]) return false;
+        if (topics.length > 2 && r.topic2 != topics[2]) return false;
+        return true;
+    }
+
     function _fetchLogsView(address emitter, bytes32 topic0) internal view returns (CutoverLog[] memory out) {
         uint256 n;
         for (uint256 i = 0; i < rows.length; i++) {
@@ -278,6 +309,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     bytes32 constant MIGRATED_OUT = keccak256("MigratedOut(address,address,uint256,uint256)");
     bytes32 constant USER_MIGRATED = keccak256("UserMigrated(address,address,uint256)");
     bytes32 constant DEPOSITED_FOR = keccak256("DepositedFor(address,address,uint256)");
+    bytes32 constant ERC20_TRANSFER = keccak256("Transfer(address,address,uint256)");
 
     CutoverStableStakerV2Mainnet cut;
     VerifyStableStakerV2CutoverHarness vf;
@@ -386,6 +418,10 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         assertTrue(_contains(src, "_doneSyaListRepointed()"), "SYA list");
         assertTrue(_contains(src, "_doneSourceWithdrawerRevoked()"), "source withdrawer revoked");
         assertTrue(_contains(src, "_doneSourceDolaRetired()"), "source retired");
+        // Story 094 (audit-35 L-09): OWNER residual + the MINED R read from the execute's DOLA Transfer log.
+        assertTrue(_contains(src, "verify: Phase6b: OWNER DOLA residual"), "OWNER DOLA residual check");
+        assertTrue(_contains(src, "keccak256(\"Transfer(address,address,uint256)\")"), "DOLA Transfer topic");
+        assertTrue(_contains(src, "_fetchTopicLogs(DOLA, "), "mined R read from DOLA Transfer logs");
     }
 
     /// @dev The broadcast chain must verify on chain BEFORE the preview smoke test.
@@ -475,10 +511,21 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             if (l.topics.length < 3) continue;
             bool v1Evt = l.emitter == V1 && (l.topics[0] == MIGRATED_OUT || l.topics[0] == USER_MIGRATED);
             bool v2Evt = l.emitter == v2 && l.topics[0] == DEPOSITED_FOR;
-            if (!v1Evt && !v2Evt) continue;
+            bool minedR = _isMinedRecoveryTransfer(l);
+            if (!v1Evt && !v2Evt && !minedR) continue;
+            if (minedR && dropMinedTransfer) continue;
             if (v2Evt && l.topics[2] == dropUser && address(uint160(uint256(l.topics[1]))) == dropToken) continue;
             vf.addLog(l.emitter, l.topics[0], l.topics[1], l.topics[2], l.data);
         }
+    }
+
+    /// Story 094: set to feed the verifier a log set WITHOUT the execute's DOLA Transfer(autoDOLA strategy -> OWNER).
+    bool dropMinedTransfer;
+
+    /// Story 094: the minter execute's DOLA Transfer(autoDOLA strategy -> OWNER) - the mined R.
+    function _isMinedRecoveryTransfer(Vm.Log memory l) internal view returns (bool) {
+        return l.emitter == DOLA_TOKEN && l.topics.length == 3 && l.topics[0] == ERC20_TRANSFER
+            && l.topics[1] == bytes32(uint256(uint160(YS_DOLA_SRC))) && l.topics[2] == bytes32(uint256(uint160(OWNER)));
     }
 
     function _reason(bytes memory ret) internal pure returns (string memory) {
@@ -559,6 +606,44 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         vm.prank(OWNER);
         ISyaAddLike(sya).addYieldStrategy(YS_DOLA_SRC, DOLA_TOKEN);
         _runExpectingRevertContaining("verify: Phase6b: SYA addYieldStrategy(sDOLA strategy) / removeYieldStrategy(autoDOLA strategy) not on chain");
+    }
+
+    /// Story 094 (audit-35 L-09), passing case: the verifier reads the MINED R off the execute's DOLA Transfer and it
+    /// equals the R the cutover re-seeded.
+    function test_fork_094_minedRFromTransferLog_verifierPasses() public {
+        if (!_forkAndCutover()) return;
+        vf.run();
+        assertEq(vf.verifiedMinedRecovered(), cut.minterRecovered(), "mined R (DOLA Transfer log) == re-seeded R");
+        assertEq(vf.verifiedMinedTransfers(), 1, "exactly one execute transfer");
+    }
+
+    /// Story 094: DOLA left on OWNER above its pre-execution balance (the excess branch) -> verifier reverts.
+    function test_fork_094_ownerDolaResidual_verifierReverts() public {
+        if (!_forkAndCutover()) return;
+        deal(DOLA_TOKEN, OWNER, IERC20(DOLA_TOKEN).balanceOf(OWNER) + 1e15);
+        _runExpectingRevertContaining("verify: Phase6b: OWNER DOLA residual");
+    }
+
+    /// Story 094: the mined R exceeds what the minter holds on the sDOLA strategy (a second execute transfer in the
+    /// logs) although OWNER's residual is clean -> the mined-R bound reverts.
+    function test_fork_094_minedRAboveReseed_verifierReverts() public {
+        if (!_forkAndCutover()) return;
+        uint256 r = cut.minterRecovered();
+        vf.addLog(
+            DOLA_TOKEN,
+            ERC20_TRANSFER,
+            bytes32(uint256(uint160(YS_DOLA_SRC))),
+            bytes32(uint256(uint160(OWNER))),
+            abi.encode(r / 100)
+        );
+        _runExpectingRevertContaining("verify: Phase6b: minter principal on the sDOLA strategy below the bound of the MINED R");
+    }
+
+    /// Story 094: no execute DOLA Transfer in the fetched logs -> the verifier refuses (the mined R is unknown).
+    function test_fork_094_missingMinedTransferLog_verifierReverts() public {
+        dropMinedTransfer = true;
+        if (!_forkAndCutover()) return;
+        _runExpectingRevertContaining("verify: Phase6b: no DOLA Transfer(autoDOLA strategy -> OWNER)");
     }
 
     /// Story 092: a progress file without `minterMove` -> the verifier refuses rather than guessing the previous config.
@@ -740,7 +825,7 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
             if (l.topics.length < 3) continue;
             bool v1Evt = l.emitter == V1 && (l.topics[0] == MIGRATED_OUT || l.topics[0] == USER_MIGRATED);
             bool v2Evt = l.emitter == v2 && l.topics[0] == DEPOSITED_FOR;
-            if (!v1Evt && !v2Evt) continue;
+            if (!v1Evt && !v2Evt && !_isMinedRecoveryTransfer(l)) continue;
             v.addLog(l.emitter, l.topics[0], l.topics[1], l.topics[2], l.data);
         }
     }
@@ -851,8 +936,20 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
     /// The re-keyed vacuity guard still catches an empty log fetch (wrong start block / truncating RPC).
     function test_fork_emptyLogFetch_vacuityGuardStillFires() public {
         if (!_forkPhases()) return;
-        _cutoverWithOptionalSelfExit(false);
-        vf = _verifierFrom(new Vm.Log[](0));
+        (, Vm.Log[] memory logs) = _cutoverWithOptionalSelfExit(false);
+        // Story 094: Phase 6b now reads the mined R from the execute's DOLA Transfer before the per-user re-check, and an
+        // empty fetch fails closed there first. Keep ONLY that transfer so the per-user vacuity guard is still reached.
+        uint256 n;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (_isMinedRecoveryTransfer(logs[i])) n++;
+        }
+        Vm.Log[] memory minedOnly = new Vm.Log[](n);
+        uint256 k;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (_isMinedRecoveryTransfer(logs[i])) minedOnly[k++] = logs[i];
+        }
+        assertEq(n, 1, "setup: the execute's DOLA Transfer was recorded");
+        vf = _verifierFrom(minedOnly);
         _runExpectingRevertContaining("verify: per-user: no MigratedOut/DepositedFor pair found for");
     }
 

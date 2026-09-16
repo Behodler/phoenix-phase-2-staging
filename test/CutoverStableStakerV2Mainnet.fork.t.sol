@@ -153,6 +153,24 @@ contract CutoverStableStakerV2MainnetHarness is CutoverStableStakerV2Mainnet {
         minterRecovered = 0;
     }
 
+    // ---- story 094: the broadcast leg ends after the minter execute (audit-35 L-09) ----
+    /// Forces the BROADCAST leg-end rule while the harness stays in preview (OWNER prank, progress file never written).
+    bool public forceBroadcastLegEnd;
+
+    function harnessForceBroadcastLegEnd(bool on) external {
+        forceBroadcastLegEnd = on;
+    }
+
+    function _legEndsAfterExecute() internal view override returns (bool) {
+        return forceBroadcastLegEnd || super._legEndsAfterExecute();
+    }
+
+    /// The progress file of a real leg 1 carries the LOCAL-pass R, which can differ from the mined one.
+    function harnessSetRecordedRecovered(uint256 r) external {
+        minterRecovered = r;
+        minterRecoveredRecorded = true;
+    }
+
     function harnessPhase7AsOwner() external {
         vm.startPrank(OWNER);
         _phase7_finalize();
@@ -1188,6 +1206,148 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         _assertMinterMoved(pre, ownerDolaPre);
     }
 
+    // ---- Story 094 (audit-35 L-09): the first broadcast leg ends after the execute; the re-seed approves 1.5R ----
+
+    /// An UNINTERRUPTED run from Phase 0 stops right after the minter execute: no OWNER approve to the minter and no
+    /// noMintDeposit is recorded in that run, Phase 7 / 8 never run, and the progress status names the leg end.
+    function test_fork_094_uninterruptedRun_endsLegAfterExecute() public {
+        if (!_fork()) return;
+        MinterCfg memory pre = _minterCfg();
+        uint256 ownerDolaPre = IERC20(DOLA_T).balanceOf(OWNER);
+        uint256 allowancePre = IERC20(DOLA_T).allowance(OWNER, MINTER);
+        h.harnessForceBroadcastLegEnd(true);
+
+        vm.expectCall(DOLA_T, abi.encodeWithSelector(IERC20.approve.selector, MINTER), 0);
+        vm.expectCall(MINTER, abi.encodeWithSelector(PhusdStableMinter.noMintDeposit.selector), 0);
+        h.run();
+
+        assertTrue(h.minterLegEndedAfterExecute(), "leg ended after the execute");
+        assertEq(h.lastProgressStatus(), h.PROGRESS_STATUS_AWAITING_RESEED(), "progress status names the leg end");
+        assertEq(h.PROGRESS_STATUS_AWAITING_RESEED(), "awaiting_reseed");
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER), 0, "the execute ran in leg 1");
+        uint256 r = h.minterRecovered();
+        assertGt(r, 0, "R recorded");
+        assertEq(IERC20(DOLA_T).balanceOf(OWNER), ownerDolaPre + r, "leg-1 end: the collateral sits on OWNER");
+        assertEq(IERC20(DOLA_T).allowance(OWNER, MINTER), allowancePre, "no approve recorded in leg 1");
+        assertEq(h.sdolaStrategy().principalOf(DOLA_T, MINTER), 0, "no re-seed recorded in leg 1");
+        MinterCfg memory mid = _minterCfg();
+        assertEq(mid.ys, pre.ys, "registration not moved in leg 1");
+        assertFalse(mid.enabled, "DOLA minting stays disabled until leg 2");
+        assertTrue(h.v2().paused(), "Phase 7 did not run in leg 1");
+    }
+
+    /// Leg 2 re-seeds the MINED R. Reproduces the audit's injection: the leg-1 state is recorded, then SYA's
+    /// skimSurplus(DOLA, claimer) lands before the execute, so the mined R is BELOW the R an unskimmed local pass saw.
+    /// Leg 2 (carrying the local-pass R in its progress file) deposits the live delta, converges, and leaves OWNER's
+    /// DOLA exactly at its pre-execution level.
+    function test_fork_094_leg2_reseedsMinedR_afterSkimBeforeExecute() public {
+        if (!_fork()) return;
+        MinterCfg memory pre = _minterCfg();
+        uint256 ownerDolaPre = IERC20(DOLA_T).balanceOf(OWNER);
+
+        // Forge's local pass of an uninterrupted leg 1 (no skim): the R it would have signed.
+        uint256 snap = vm.snapshotState();
+        h.harnessForceBroadcastLegEnd(true);
+        h.run();
+        uint256 rLocal = h.minterRecovered();
+        vm.revertToState(snap);
+
+        // On chain: leg-1 state recorded, then the skim mines before the execute.
+        _throughPhase6();
+        h.harnessMinterRecordAndDisableAsOwner();
+        vm.prank(SYA);
+        uint256 skimmed = ISkimSurplusLike(YS_DOLA_SOURCE).skimSurplus(DOLA_T, makeAddr("story094-claimer"));
+        assertGt(skimmed, 0, "setup: surplus skimmed between the local pass and the execute");
+
+        h.harnessForceBroadcastLegEnd(true);
+        h.harnessResetTokens();
+        h.run(); // leg 1 continues to the execute, then ends
+        assertTrue(h.minterLegEndedAfterExecute(), "leg 1 ended after the execute");
+        uint256 rMined = IERC20(DOLA_T).balanceOf(OWNER) - ownerDolaPre;
+        assertLt(rMined, rLocal, "setup: mined R below the local-pass R (the old revert branch)");
+        assertEq(h.sdolaStrategy().principalOf(DOLA_T, MINTER), 0, "nothing re-seeded in leg 1");
+
+        // Leg 2: its progress file carries the local-pass R; the re-seed must use the mined one.
+        h.harnessSetRecordedRecovered(rLocal);
+        h.harnessResetTokens();
+        h.run();
+        assertFalse(h.minterLegEndedAfterExecute(), "leg 2 does not end early (no execute in this run)");
+        assertEq(h.minterRecovered(), rMined, "leg 2 re-seeded the mined R");
+        assertEq(IERC20(DOLA_T).balanceOf(OWNER), h.ownerDolaBeforeExec(), "OWNER DOLA == ownerDolaBeforeExec");
+        _assertMinterMoved(pre, ownerDolaPre);
+        assertFalse(h.v2().paused(), "leg 2 finalized the cutover");
+    }
+
+    /// @dev OWNER's DOLA allowance to the minter is live state (type(uint256).max at FORK_BLOCK), so each approve test sets
+    ///      the allowance it needs explicitly after the execute.
+    function _throughExecute() internal returns (uint256 r) {
+        _throughPhase6();
+        h.harnessMinterRecordAndDisableAsOwner();
+        h.harnessMinterExecuteAsOwner();
+        r = h.minterRecovered();
+        assertGt(r, 0, "setup: R recorded");
+    }
+
+    /// The re-seed approves ceil(1.5 * R) (human decision) and still deposits exactly R.
+    function test_fork_094_reseedApprovesOneAndAHalfR() public {
+        if (!_fork()) return;
+        uint256 r = _throughExecute();
+        uint256 headroom = (r * 3 + 1) / 2;
+        vm.prank(OWNER);
+        IERC20(DOLA_T).approve(MINTER, 0); // a fresh session: no allowance
+        vm.expectCall(DOLA_T, abi.encodeCall(IERC20.approve, (MINTER, headroom)), 1);
+        vm.expectCall(DOLA_T, abi.encodeCall(IERC20.approve, (MINTER, uint256(0))), 0);
+        vm.expectCall(MINTER, abi.encodeCall(PhusdStableMinter.noMintDeposit, (address(h.sdolaStrategy()), DOLA_T, r)), 1);
+        h.harnessMinterReseedAsOwner();
+        assertEq(IERC20(DOLA_T).allowance(OWNER, MINTER), headroom - r, "the unused 0.5R headroom stays as allowance");
+        assertEq(IERC20(DOLA_T).balanceOf(OWNER), h.ownerDolaBeforeExec(), "exactly R deposited");
+    }
+
+    /// Resume after a halt between the approve and noMintDeposit: an allowance that already covers R is NOT zeroed and
+    /// not re-approved.
+    function test_fork_094_resume_allowanceCoveringR_notZeroed() public {
+        if (!_fork()) return;
+        uint256 r = _throughExecute();
+        uint256 headroom = (r * 3 + 1) / 2;
+        vm.prank(OWNER);
+        IERC20(DOLA_T).approve(MINTER, headroom); // the halted leg's approve landed
+        vm.expectCall(DOLA_T, abi.encodeWithSelector(IERC20.approve.selector, MINTER), 0);
+        h.harnessMinterReseedAsOwner();
+        assertEq(IERC20(DOLA_T).allowance(OWNER, MINTER), headroom - r, "existing headroom kept, R pulled");
+        assertEq(IERC20(DOLA_T).balanceOf(OWNER), h.ownerDolaBeforeExec(), "exactly R deposited");
+    }
+
+    /// A non-zero allowance BELOW R is zeroed first, then re-approved to 1.5R.
+    function test_fork_094_resume_allowanceBelowR_zeroedThenOneAndAHalfR() public {
+        if (!_fork()) return;
+        uint256 r = _throughExecute();
+        uint256 headroom = (r * 3 + 1) / 2;
+        vm.prank(OWNER);
+        IERC20(DOLA_T).approve(MINTER, r / 2);
+        vm.expectCall(DOLA_T, abi.encodeCall(IERC20.approve, (MINTER, uint256(0))), 1);
+        vm.expectCall(DOLA_T, abi.encodeCall(IERC20.approve, (MINTER, headroom)), 1);
+        h.harnessMinterReseedAsOwner();
+        assertEq(IERC20(DOLA_T).allowance(OWNER, MINTER), headroom - r);
+    }
+
+    /// Source guard: run() returns between Phase 6b and Phase 7 when the leg ended, Phase 6b checks the flag between the
+    /// execute and the re-seed, and only a BROADCAST ends the leg (preview rehearses the whole session).
+    function test_094_legEnd_wiring() public view {
+        string memory src = vm.readFile(SCRIPT_SRC);
+        uint256 runAt = _indexOf(src, "function run()", 0);
+        uint256 p6b = _indexOf(src, "_phase6b_minterSyaRetireSource();", runAt);
+        uint256 legEnd = _indexOf(src, "if (minterLegEndedAfterExecute)", runAt);
+        uint256 p7 = _indexOf(src, "_phase7_finalize();", runAt);
+        assertTrue(p6b < legEnd && legEnd < p7, "run() ends the leg between Phase 6b and Phase 7");
+        uint256 body = _indexOf(src, "function _phase6b_minterSyaRetireSource()", 0);
+        uint256 exec = _indexOf(src, "_minterExecuteWithdrawal();", body);
+        uint256 flag = _indexOf(src, "if (minterLegEndedAfterExecute) return;", body);
+        uint256 reseed = _indexOf(src, "_minterReseedSdola();", body);
+        assertTrue(exec < flag && flag < reseed, "Phase 6b returns between the execute and the re-seed");
+        assertEq(_count(src, "return !isPreview;"), 1, "only a broadcast ends the leg");
+        assertEq(_count(src, "IERC20(DOLA).approve(PHUSD_STABLE_MINTER, (r * 3 + 1) / 2);"), 1, "1.5R approve");
+    }
+
     // ---- V1 exit vs pending minter withdrawal (human-requested proof), cases (a) - (c) ----
 
     /// Phases 0 (read checks only - Phase 0's window gate is untouched) .. 6 with the minter withdrawal pending, then
@@ -1456,4 +1616,8 @@ interface IStrategyBufferLike {
     function setAsideBufferSize(address client) external view returns (uint256);
     function setAsideBufferRecipient() external view returns (address);
     function principalOf(address token, address account) external view returns (uint256);
+}
+
+interface ISkimSurplusLike {
+    function skimSurplus(address token, address recipient) external returns (uint256);
 }

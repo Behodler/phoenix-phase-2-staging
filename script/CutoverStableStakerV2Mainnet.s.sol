@@ -74,8 +74,10 @@ import {
  *   6b (story 092) Minter collateral, SYA, retire the autoDOLA source - AFTER Phase 6 (V1 must be drained first:
  *      `_totalWithdraw` redeems pro-rata of ALL the strategy's shares). Record the minter's DOLA config (rate, decimals,
  *      enabled, maxMintPerDay) -> setStablecoinEnabled(DOLA, false) -> source.totalWithdrawal(DOLA, minter) EXECUTES
- *      (DOLA R lands on OWNER, bounded against the principal P) -> sDOLA strategy setClient(minter) -> minter.approveYS ->
- *      OWNER approve + minter.noMintDeposit(sDOLA strategy, DOLA, R) (OWNER back to its pre-execution DOLA) ->
+ *      (DOLA R lands on OWNER, bounded against the principal P) -> [BROADCAST LEG 1 ENDS HERE, story 094: progress status
+ *      `awaiting_reseed`; after the execute mines, run :preview + :broadcast again - leg 2 reads the MINED R] ->
+ *      sDOLA strategy setClient(minter) -> minter.approveYS -> OWNER approve ceil(1.5R) (only when the allowance is below R)
+ *      + minter.noMintDeposit(sDOLA strategy, DOLA, R) (OWNER back to its pre-execution DOLA) ->
  *      registerStablecoin(DOLA, sDOLA strategy, same rate, same decimals) -> setMaxMintPerDay(previous) -> restore
  *      enabled -> SYA addYieldStrategy(sDOLA strategy) / removeYieldStrategy(autoDOLA strategy) -> source
  *      setWithdrawer(SYA, false) -> source setClient(V1 / minter, false) -> source setPauser(OWNER) ->
@@ -94,6 +96,10 @@ import {
  * ================================ RUNNING IT ==============================================
  *   npm run stable-staker-v2-cutover:preview     (impersonates OWNER on live mainnet state)
  *   npm run stable-staker-v2-cutover:broadcast   (Ledger m/44'/60'/46'/0/0; chains :verify && :preview)
+ *
+ *   TWO BROADCAST LEGS (story 094, audit-35 L-09). The broadcast that executes the minter's DOLA totalWithdrawal ends
+ *   right after that execute (progress status `awaiting_reseed`); its patch tail stops loudly by design. Once the execute
+ *   has mined, run :preview then :broadcast again: leg 2's local pass reads the MINED R, re-seeds it and finishes.
  *
  *   OWNER ETH (story 087, audit-33 L-07): broadcast mode refuses to start unless OWNER's ON-CHAIN balance (read
  *   with `eth_getBalance`, never the in-EVM one - forge pre-funds the script sender) is at least
@@ -161,12 +167,18 @@ import {
  *   during it) leaves the step undone: wait for expiry, rerun `initiate-dola-ys-withdrawal:broadcast`, wait 6h, resume.
  *     (a) after setStablecoinEnabled(DOLA, false), before the execute: DOLA minting is off (V2's autoAnnihilate(DOLA)
  *         reverts - V2 is still paused, so nobody can call it). Nothing is exposed. Resume.
- *     (b) after the execute, before noMintDeposit: THE MINTER'S DOLA COLLATERAL SITS ON THE OWNER EOA. Resume promptly:
- *         R is re-derived ON CHAIN as OWNER's DOLA balance minus the persisted pre-execution balance
- *         (`minterMove.ownerDolaBeforeExec`), bounded against the persisted P, so a local-pass R that differs from the
- *         mined one cannot strand or over-deposit. Do not move OWNER's DOLA before resuming. The script FAILS CLOSED
- *         if the progress file lacks the execution record or OWNER holds less DOLA than before execution.
- *     (c) after setClient / approveYS, before noMintDeposit: same as (b); both calls are idempotent.
+ *     (b) after the execute, before noMintDeposit: THE MINTER'S DOLA COLLATERAL SITS ON THE OWNER EOA. Since story 094
+ *         (audit-35 L-09) this is the DELIBERATE end of every broadcast that executes: forge's local pass computes R
+ *         before the execute mines at the live autoDOLA price, so an amount signed in the same session could strand
+ *         dust on OWNER (mined R higher) or revert noMintDeposit (mined R lower). The leg writes progress status
+ *         `awaiting_reseed` and stops. After the execute has mined, run :preview then :broadcast (leg 2) promptly:
+ *         its local pass re-derives R ON CHAIN as OWNER's DOLA balance minus the persisted pre-execution balance
+ *         (`minterMove.ownerDolaBeforeExec`), bounded against the persisted P, and re-seeds exactly that. Do not move
+ *         OWNER's DOLA before leg 2. The script FAILS CLOSED if the progress file lacks the execution record or OWNER
+ *         holds less DOLA than before execution. :verify then requires OWNER's DOLA == ownerDolaBeforeExec and bounds
+ *         the minter's sDOLA principal against the DOLA Transfer the execute actually mined.
+ *     (c) after setClient / approveYS / the OWNER approve, before noMintDeposit: same as (b); every call is idempotent,
+ *         and an OWNER allowance that already covers R is kept (not zeroed or re-approved).
  *     (d) after noMintDeposit, before registerStablecoin: the collateral is in the sDOLA strategy booked to the minter,
  *         DOLA minting is still off. Nothing is exposed.
  *     (e) after registerStablecoin, before setMaxMintPerDay: ONE-TX GAP - registration re-enables DOLA minting with
@@ -305,6 +317,13 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     /// @dev R: the DOLA the execute delivered to OWNER and noMintDeposit re-seeds (OWNER's balance delta).
     bool public minterRecoveredRecorded;
     uint256 public minterRecovered;
+    /// @dev Story 094 (audit-35 L-09): set when THIS run executed the minter withdrawal in broadcast mode; run() then ends
+    ///      the leg before the re-seed. Reset at the start of every run(), never persisted.
+    bool public minterLegEndedAfterExecute;
+    /// @dev Story 094: progress status of a broadcast leg that ended deliberately after the minter execute.
+    string public constant PROGRESS_STATUS_AWAITING_RESEED = "awaiting_reseed";
+    /// @dev Story 094: the last status `_writeProgress` serialised (also in preview, where nothing is written).
+    string public lastProgressStatus;
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "Wrong chain id - expected Mainnet (1)");
@@ -328,6 +347,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(STRAGGLER_CAP_CENTS > 0 && STRAGGLER_CAP_CENTS <= 1, "straggler cap must be (0, 1 cent]");
 
         isPreview = _previewModeFromEnv();
+        minterLegEndedAfterExecute = false;
         _loadProgressFile();
 
         _phase0_preconditions();
@@ -367,6 +387,11 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         _phase6_migration();
         _previewBreakerStage("after-phase6");
         _phase6b_minterSyaRetireSource();
+        if (minterLegEndedAfterExecute) {
+            // Story 094 (audit-35 L-09): deliberate end of broadcast leg 1. Nothing after the execute is recorded.
+            _endLegAfterMinterExecute();
+            return;
+        }
         _previewBreakerStage("after-phase6b");
         _phase7_finalize();
         _previewBreakerStage("after-phase7");
@@ -405,6 +430,36 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         vm.stopPrank();
         _assertGlobalPauseWorks(stage, false);
         vm.startPrank(OWNER);
+    }
+
+    /// @dev Story 094 (audit-35 L-09). Leg 1 of a broadcast ends here, right after the minter execute was recorded in
+    ///      this run: the re-seed amount must be read from the MINED execute, which only the next leg's local pass sees.
+    ///      The progress file already says `PROGRESS_STATUS_AWAITING_RESEED` (written by `_minterExecuteWithdrawal`).
+    function _endLegAfterMinterExecute() internal {
+        if (isPreview) {
+            vm.stopPrank();
+        } else {
+            vm.stopBroadcast();
+        }
+        console.log("");
+        console.log("=================================================");
+        console.log("  LEG 1 ENDED DELIBERATELY AFTER THE MINTER EXECUTE (story 094)");
+        console.log("=================================================");
+        console.log("  Progress status:", PROGRESS_STATUS_AWAITING_RESEED);
+        console.log("  Local-pass R (NOT signed; leg 2 re-reads the mined R) / OWNER DOLA before execute:", minterRecovered, ownerDolaBeforeExec);
+        console.log("  THE MINTER'S DOLA COLLATERAL SITS ON OWNER UNTIL LEG 2. Do not move OWNER's DOLA.");
+        console.log("  NEXT: once the execute has MINED, run  npm run stable-staker-v2-cutover:preview");
+        console.log("        then  npm run stable-staker-v2-cutover:broadcast  (leg 2 re-seeds the mined R and finishes).");
+        console.log("  The :broadcast tail (address patch -> :verify -> :preview) is EXPECTED to stop now with");
+        console.log("  deploymentStatus awaiting_reseed - that is leg 1 ending, not a failure.");
+    }
+
+    /// @dev Story 094: only a BROADCAST ends its leg after the execute - forge's local pass cannot know the mined R, so
+    ///      nothing derived from it may be signed in the same session. PREVIEW rehearses the whole session (its local R is
+    ///      the only R it has) and logs where a broadcast will stop. `virtual` only so fork tests can force the broadcast
+    ///      rule while staying in preview.
+    function _legEndsAfterExecute() internal view virtual returns (bool) {
+        return !isPreview;
     }
 
     // =====================================================================
@@ -1014,6 +1069,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         );
         _minterRecordConfigAndDisable();
         _minterExecuteWithdrawal();
+        // Story 094 (audit-35 L-09): a broadcast that executed in THIS run stops here; the next leg re-seeds the mined R.
+        if (minterLegEndedAfterExecute) return;
         _minterReseedSdola();
         _minterRegisterSdola();
         _syaRepointDola();
@@ -1080,7 +1137,15 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         _requireRecoveryWithinBound(r);
         minterRecovered = r;
         minterRecoveredRecorded = true;
-        _writeProgress("in_progress");
+        // Story 094 (audit-35 L-09): in a broadcast this R is the LOCAL pass's, and the execute mines later at the live
+        // autoDOLA price. End the leg so no amount derived from it is signed; leg 2 re-derives R from the mined state.
+        if (_legEndsAfterExecute()) {
+            minterLegEndedAfterExecute = true;
+            _writeProgress(PROGRESS_STATUS_AWAITING_RESEED);
+        } else {
+            _writeProgress("in_progress");
+            console.log("  PREVIEW: a BROADCAST ends its leg here (story 094) - re-run :preview + :broadcast after the execute mines");
+        }
         console.log("  executed: R (DOLA delivered to OWNER) / P:", r, minterPrincipalBeforeExec);
     }
 
@@ -1133,9 +1198,17 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         minterRecoveredRecorded = true;
         _writeProgress("in_progress");
 
-        // forceApprove semantics by hand (OWNER is an EOA, SafeERC20 is a library for contracts): zero first if set.
-        if (IERC20(DOLA).allowance(OWNER, PHUSD_STABLE_MINTER) != 0) IERC20(DOLA).approve(PHUSD_STABLE_MINTER, 0);
-        IERC20(DOLA).approve(PHUSD_STABLE_MINTER, r);
+        // Story 094 (human decision): approve ceil(1.5 * R) as headroom; the deposit stays exactly R (noMintDeposit pulls
+        // the literal amount, so the headroom neither sweeps nor strands anything). Re-approve only when the allowance
+        // does not already cover R, so a resume after a landed approve keeps its headroom; a non-zero allowance below R is
+        // zeroed first (forceApprove semantics by hand: OWNER is an EOA, SafeERC20 is a library for contracts). The ~0.5R
+        // left as allowance is harmless - noMintDeposit is onlyOwner and pulls only from msg.sender - and is not zeroed,
+        // to save a transaction.
+        uint256 allowance = IERC20(DOLA).allowance(OWNER, PHUSD_STABLE_MINTER);
+        if (allowance < r) {
+            if (allowance != 0) IERC20(DOLA).approve(PHUSD_STABLE_MINTER, 0);
+            IERC20(DOLA).approve(PHUSD_STABLE_MINTER, (r * 3 + 1) / 2);
+        }
         PhusdStableMinter(PHUSD_STABLE_MINTER).noMintDeposit(address(sdolaStrategy), DOLA, r);
 
         require(_doneMinterReseeded(), "Phase6b: minter principal on the sDOLA strategy not within bound of R after noMintDeposit");
@@ -1982,6 +2055,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     }
 
     function _writeProgress(string memory status) internal {
+        lastProgressStatus = status;
         string memory c;
         c = _serializeEntry("Antimatter", address(antimatter));
         c = _serializeEntry("StableStakerV2", address(v2));

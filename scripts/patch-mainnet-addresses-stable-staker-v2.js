@@ -36,6 +36,7 @@
  *   0 - Success
  *   1 - mainnet-addresses.ts missing
  *   2 - progress file missing / unparseable / deploymentStatus != "completed"
+ *       (story 094: "awaiting_reseed" is broadcast LEG 1 ending after the minter execute - expected; run leg 2)
  *   3 - post-patch key-set no longer equals the ContractAddresses interface
  *   4 - a source address is missing/zero, a target field is absent, or a collision
  */
@@ -75,6 +76,11 @@ function loadProgress() {
         fail(2, `Progress unparseable: ${e.message}`);
     }
     if (p.chainId !== 1) fail(2, `Progress chainId is ${p.chainId}, expected 1 (mainnet)`);
+    if (p.deploymentStatus === 'awaiting_reseed') {
+        fail(2, 'LEG 1 ENDED AFTER THE MINTER EXECUTE (story 094) - deploymentStatus is "awaiting_reseed", nothing patched. '
+            + 'This stop is expected. Once the execute has mined, run npm run stable-staker-v2-cutover:preview and then '
+            + 'npm run stable-staker-v2-cutover:broadcast again: leg 2 re-seeds the mined R, finishes, and this tail patches, verifies and previews.');
+    }
     if (p.deploymentStatus !== 'completed') {
         fail(2, `deploymentStatus is "${p.deploymentStatus}", expected "completed" (broadcast not finished, or a resume leg is outstanding)`);
     }
