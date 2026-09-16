@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-// Generated interface from local.json on 2026-09-15T22:12:39.260Z
-=======
-// Generated interface from local.json on 2026-09-16T12:33:37.433Z
->>>>>>> sprint/stable-staker-v2
+// Generated interface from local.json on 2026-09-16T18:55:20.119Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 

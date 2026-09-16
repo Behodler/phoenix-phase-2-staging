@@ -31,6 +31,23 @@ jobs:
       - name: Run Forge fmt
         run: forge fmt --check
 
+      - name: Check for conflict markers and unparseable deployment JSON
+        run: |
+          if git grep -nE '^(<<<<<<<|=======|>>>>>>>)( |$)' -- ':!lib'; then
+            echo "::error::Unresolved merge-conflict markers found in tracked files (see above)"
+            exit 1
+          fi
+          node -e '
+            const fs = require("fs");
+            const dir = "server/deployments";
+            let failed = false;
+            for (const f of fs.readdirSync(dir).filter((n) => n.endsWith(".json"))) {
+              try { JSON.parse(fs.readFileSync(`${dir}/${f}`, "utf8")); }
+              catch (e) { console.error(`::error file=${dir}/${f}::${e.message}`); failed = true; }
+            }
+            if (failed) process.exit(1);
+          '
+
       - name: Run Forge build
         run: forge build --sizes
 

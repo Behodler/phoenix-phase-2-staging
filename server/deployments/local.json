@@ -2,11 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-<<<<<<< HEAD
-  "extractedAt": "2026-09-15T22:12:39.116Z",
-=======
-  "extractedAt": "2026-09-16T12:33:37.334Z",
->>>>>>> sprint/stable-staker-v2
+  "extractedAt": "2026-09-16T18:55:20.024Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -117,11 +113,7 @@
       "address": "0x3Aa5ebB10DC797CAC828524e59A333d0A371443c",
       "deployed": true,
       "configured": true,
-<<<<<<< HEAD
-      "deployGas": 1219749,
-=======
       "deployGas": 1142178,
->>>>>>> sprint/stable-staker-v2
       "configGas": 0
     },
     "YieldStrategyDola": {
@@ -135,7 +127,7 @@
       "address": "0x59b670e9fA9D0A427751Af201D676719a970857b",
       "deployed": true,
       "configured": true,
-      "deployGas": 1216552,
+      "deployGas": 1219752,
       "configGas": 0
     },
     "YieldStrategyUSDC": {
@@ -405,17 +397,10 @@
       "configGas": 0
     },
     "ViewRouter": {
-<<<<<<< HEAD
-      "address": "0xBbc18b580256A82dC0F9A86152b8B22E7C1C8005",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 516968,
-=======
       "address": "0xccA9728291bC98ff4F97EF57Be3466227b0eb06C",
       "deployed": true,
       "configured": true,
       "deployGas": 517016,
->>>>>>> sprint/stable-staker-v2
       "configGas": 0
     }
   }
