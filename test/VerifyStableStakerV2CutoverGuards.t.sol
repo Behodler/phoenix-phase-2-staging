@@ -646,6 +646,44 @@ contract VerifyStableStakerV2CutoverGuardsTest is Test {
         _runExpectingRevertContaining("verify: Phase6b: no DOLA Transfer(autoDOLA strategy -> OWNER)");
     }
 
+    /// Story 096 (audit-35 L-11): rewrite the minter's `initiatedAt` to `block.timestamp - secondsAgo` (same slot search as
+    ///      `_initiateAndAgeMinterWithdrawal`, which leaves it 6h + 60s ago).
+    function _ageMinterWithdrawalTo(uint256 secondsAgo) internal {
+        (uint256 at,,) = IWithdrawalStatesLike(YS_DOLA_SRC).withdrawalStates(DOLA_TOKEN, STABLE_MINTER);
+        vm.record();
+        IWithdrawalStatesLike(YS_DOLA_SRC).withdrawalStates(DOLA_TOKEN, STABLE_MINTER);
+        (bytes32[] memory reads,) = vm.accesses(YS_DOLA_SRC);
+        uint256 target = block.timestamp - secondsAgo;
+        bool done;
+        for (uint256 i = 0; i < reads.length && !done; i++) {
+            if (uint256(vm.load(YS_DOLA_SRC, reads[i])) != at) continue;
+            vm.store(YS_DOLA_SRC, reads[i], bytes32(target));
+            (uint256 now_,,) = IWithdrawalStatesLike(YS_DOLA_SRC).withdrawalStates(DOLA_TOKEN, STABLE_MINTER);
+            if (now_ == target) done = true;
+            else vm.store(YS_DOLA_SRC, reads[i], bytes32(at));
+        }
+        require(done, "test setup: initiatedAt slot not found");
+    }
+
+    /// Story 096 (audit-35 L-11): a resume past Phase 6 with a lapsed minter window finalizes V2 (Phase 7) and leaves 6b
+    /// pending. That state must NOT verify: the verifier names the pending 6b instead of reporting success.
+    function test_fork_096_minterMovePending_verifierReverts() public {
+        if (!_forkPhases()) return;
+        ph.throughPhase5();
+        ph.phase6All();
+        _ageMinterWithdrawalTo(78 hours + 1);
+        ph.resetTokens();
+        ph.run(); // the lapsed-window resume (preview-pinned)
+        assertTrue(ph.minterMovePending(), "setup: 6b pending");
+        assertFalse(ph.v2().paused(), "setup: V2 unpaused by the resume");
+
+        vf = new VerifyStableStakerV2CutoverHarness();
+        vf.inject(address(ph.antimatter()), address(ph.v2()), address(ph.migrator()), ph.phusdMaskAtPhase0(), ph.phusdMintVersionAtPhase0());
+        vf.injectSdola(address(ph.sdolaStrategy()));
+        vf.injectMinterMoveFrom(ph);
+        _runExpectingRevertContaining("verify: Phase6b: PENDING");
+    }
+
     /// Story 092: a progress file without `minterMove` -> the verifier refuses rather than guessing the previous config.
     function test_fork_092_missingMinterMoveRecords_verifierReverts() public {
         if (!_forkAndCutover()) return;

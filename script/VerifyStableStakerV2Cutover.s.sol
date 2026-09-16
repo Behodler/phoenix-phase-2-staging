@@ -75,6 +75,10 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *         its persisted pre-execution balance, and the minter's sDOLA principal is bounded against the MINED R read from
  *         the execute's DOLA `Transfer(autoDOLA strategy -> OWNER)` log, never against the recorded (possibly local-pass) R.
  *
+ *         PENDING 6b (story 096, audit-35 L-11). A resume past Phase 6 with a lapsed minter window finalizes V2 and leaves
+ *         Phase 6b pending (progress status `awaiting_minter_window`). The verifier REFUSES that state with
+ *         `verify: Phase6b: PENDING` - it never reports success until the minter withdrawal has executed and 6b is complete.
+ *
  *         RUN IT IMMEDIATELY AFTER THE BROADCAST. The per-pool aggregate and the `V2 userInfo >= credited`
  *         check read live V2 balances; once migrated users start withdrawing from V2 they can legitimately
  *         fall below what the cutover credited. The `:broadcast` npm key chains this verifier straight after
@@ -326,6 +330,12 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
 
     function _verifyPhase6b_minterMove() internal {
         console.log("\n=== verify Phase 6b: minter DOLA collateral, SYA, retired autoDOLA strategy ===");
+        // Story 096 (audit-35 L-11): a lapsed-window resume finalizes V2 (Phase 7) while 6b waits for a re-initiated minter
+        // window. That state is NOT a verified cutover - say so first, before any record or step check.
+        require(
+            !minterMovePending && _doneMinterWithdrawalExecuted(),
+            "verify: Phase6b: PENDING - the minter DOLA totalWithdrawal has not executed (story 096 lapsed-window resume: V2 is live, DOLA minting disabled). Re-initiate (initiate-dola-ys-withdrawal:broadcast), wait 6h, run :preview + :broadcast to complete 6b, then verify again"
+        );
         require(
             minterConfigRecorded && minterRecoveredRecorded && minterExecRecorded,
             "verify: Phase6b: minterMove records (pre-repoint minter config / execution record / recovered R) absent from the progress file - refusing to guess them"

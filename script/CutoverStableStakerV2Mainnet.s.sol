@@ -34,7 +34,10 @@ import {
  *      owners, V1 phUSD mint, PhusdStableMinter registration, strategy map, phUSD minter baseline.
  *      Story 092: the PhusdStableMinter's DOLA `totalWithdrawal` on the autoDOLA strategy (story 090's initiate) must be
  *      Initiated with `initiatedAt + 6h <= now < initiatedAt + 78h - WINDOW_SAFETY_MARGIN`; skipped once it has
- *      executed (minter principal on the autoDOLA strategy == 0). The minter's DOLA registration may point at the
+ *      executed (minter principal on the autoDOLA strategy == 0). Story 096 (audit-35 L-11): a RESUME PAST PHASE 6 (V1
+ *      drained into V2) whose window is not so executable does NOT revert: 6b is deferred after step (a) (DOLA minting
+ *      disabled), Phase 7 still UNPAUSES V2, and the run ends `awaiting_minter_window`; 6b and DOLA minting stay pending
+ *      until a re-initiated window opens. A fresh session with a lapsed window still hard-fails here. The minter's DOLA registration may point at the
  *      autoDOLA strategy (before the Phase 6b repoint) or the sDOLA strategy (after it); a retired DOLA source is
  *      accepted unpaused-check-free.
  *   1  Retire V1 for the window (story 084, audit L-04): setPauser(OWNER) -> Pauser.unregister(V1) ->
@@ -171,6 +174,15 @@ import {
  *   PHASE 6b HALT POINTS (story 092, 088's pattern). Timing first: the minter's `totalWithdrawal` executes only inside
  *   [initiatedAt + 6h, initiatedAt + 78h] and is whenNotPaused, so a halt that outlives the window (or a global pause
  *   during it) leaves the step undone: wait for expiry, rerun `initiate-dola-ys-withdrawal:broadcast`, wait 6h, resume.
+ *   LAPSED WINDOW AFTER PHASE 6 (story 096, audit-35 L-11): V2 does NOT stay paused for that wait. A halt after Phase 6
+ *   holds every migrated staker in a paused V2; resume IMMEDIATELY. Phase 0 sees V1 drained and the window not executable
+ *   and defers 6b instead of reverting: step (a) runs (config recorded, DOLA minting DISABLED - V2's autoAnnihilate(DOLA)
+ *   would otherwise mint into the autoDOLA source), the rest of 6b is skipped, Phase 7 unpauses and registers V2, Phase 8
+ *   asserts the pending shape, and the progress status is `awaiting_minter_window` (never `completed`; :verify refuses it
+ *   with `verify: Phase6b: PENDING`). 6b and DOLA minting stay pending until the re-initiated window opens; the next
+ *   resume inside it completes 6b through story 094's two legs. Phase 7 needs no 6b output: its buffer recipient is set on
+ *   the sDOLA destination (Phase 3b), and the V1 revoke / V1 backstop / V2 + Antimatter pauser steps never read the minter,
+ *   SYA or the source. The source stays registered and unpaused under the breaker while 6b is pending.
  *     (a) after setStablecoinEnabled(DOLA, false), before the execute: DOLA minting is off (V2's autoAnnihilate(DOLA)
  *         reverts - V2 is still paused, so nobody can call it). Nothing is exposed. Resume.
  *     (b) after the execute, before noMintDeposit: THE MINTER'S DOLA COLLATERAL SITS ON THE OWNER EOA. Since story 094
@@ -280,6 +292,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     ///      the audit-35 rehearsal measured 67 before the leg split), leg 2 must follow once it mines, and a halted
     ///      session may need a resume leg; 6 hours covers a slow session plus one halt-and-resume with room to spare, and still leaves a
     ///      66-hour start window. Too late to start means: wait for expiry, re-initiate, wait 6h.
+    ///      Story 096 (audit-35 L-11): the margin gates a session START and the 6b execute of a resume, never the V2
+    ///      unpause. A resume past Phase 6 that falls outside it (lapsed, or under 6h left) defers 6b and still unpauses V2
+    ///      in Phase 7; 6b and DOLA minting stay pending until a re-initiated window opens.
     uint256 public constant WINDOW_SAFETY_MARGIN = 6 hours;
     /// @dev AYieldStrategy.WithdrawalStatus ordinals (enum { None, Initiated, Executable, Expired }).
     uint8 internal constant WITHDRAWAL_INITIATED = 1;
@@ -331,6 +346,14 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     string public constant PROGRESS_STATUS_AWAITING_RESEED = "awaiting_reseed";
     /// @dev Story 094: the last status `_writeProgress` serialised (also in preview, where nothing is written).
     string public lastProgressStatus;
+    /// @dev Story 096 (audit-35 L-11): set by Phase 0 when a RESUME past Phase 6 (V1 fully drained into V2) finds the
+    ///      minter's withdrawal unexecuted and NOT executable with WINDOW_SAFETY_MARGIN to spare (lapsed, not initiated,
+    ///      or still in a re-initiated 6h wait). Phase 6b then runs only step (a) (record config + disable DOLA minting),
+    ///      Phase 7 unpauses V2, Phase 8 asserts the pending shape and the run ends with progress status
+    ///      `PROGRESS_STATUS_AWAITING_MINTER_WINDOW`, never `completed`. Re-derived from chain on every run, never persisted.
+    bool public minterMovePending;
+    /// @dev Story 096: progress status of a run that finalized V2 while Phase 6b waits for a (re-)opened minter window.
+    string public constant PROGRESS_STATUS_AWAITING_MINTER_WINDOW = "awaiting_minter_window";
 
     function setUp() public view {
         require(block.chainid == CHAIN_ID, "Wrong chain id - expected Mainnet (1)");
@@ -355,6 +378,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
 
         isPreview = _previewModeFromEnv();
         minterLegEndedAfterExecute = false;
+        minterMovePending = false;
         _loadProgressFile();
 
         _phase0_preconditions();
@@ -410,6 +434,18 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
 
         _phase8_wiringAssertions();
+
+        if (minterMovePending) {
+            // Story 096 (audit-35 L-11): V2 is live, Phase 6b waits for a re-initiated minter window. NOT completed.
+            _writeProgress(PROGRESS_STATUS_AWAITING_MINTER_WINDOW);
+            if (isPreview) {
+                _assertGlobalPauseWorks("after-phase8", false);
+                _previewSmokeTests();
+            }
+            _printMinterMovePending();
+            _printSummary();
+            return;
+        }
 
         if (!isPreview) {
             _writeProgress("completed");
@@ -663,14 +699,47 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     /// @dev Story 092. Skipped once the minter's withdrawal has executed (its autoDOLA principal is 0), which covers every
     ///      resume past the execute and the post-broadcast verifier. Otherwise the session may only START with at least
     ///      WINDOW_SAFETY_MARGIN left in the execution window.
-    function _phase0_minterWithdrawalWindow() internal view {
+    ///      Story 096 (audit-35 L-11): a RESUME past Phase 6 (`_resumePastPhase6`: V1 stakers already sit in V2) whose window
+    ///      is not executable with the margin to spare does NOT revert - reverting would keep V2 paused, and every
+    ///      migrated staker frozen, for the rest of the halt plus a re-initiate plus 6h. It sets `minterMovePending`
+    ///      instead: Phase 6b runs step (a) only and Phase 7 unpauses V2. The START gate is unchanged: a session that has
+    ///      not drained V1 still hard-fails here.
+    function _phase0_minterWithdrawalWindow() internal {
+        minterMovePending = false;
         if (_doneMinterWithdrawalExecuted()) {
             console.log("  minter DOLA withdrawal already executed (autoDOLA principal 0) - window preflight skipped");
+            return;
+        }
+        if (_resumePastPhase6() && !_minterWithdrawalExecutable(WINDOW_SAFETY_MARGIN)) {
+            minterMovePending = true;
+            console.log("  RESUME PAST PHASE 6 with the minter DOLA withdrawal NOT executable (lapsed / not initiated / waiting, or");
+            console.log("  under WINDOW_SAFETY_MARGIN left) - story 096: Phase 6b DEFERRED after step (a); Phase 7 still unpauses V2");
             return;
         }
         _requireMinterWithdrawalExecutable("Phase0", WINDOW_SAFETY_MARGIN);
         (uint256 initiatedAt,,) = ISourceDolaStrategy(YS_DOLA).withdrawalStates(DOLA, PHUSD_STABLE_MINTER);
         console.log("  minter DOLA withdrawal window OK (initiatedAt / closes at):", initiatedAt, initiatedAt + DOLA_WITHDRAWAL_WAITING_PERIOD + DOLA_WITHDRAWAL_EXECUTION_WINDOW);
+    }
+
+    /// @dev Story 096: the non-reverting twin of `_requireMinterWithdrawalExecutable` (same four conditions).
+    function _minterWithdrawalExecutable(uint256 margin) internal view returns (bool) {
+        (uint256 initiatedAt, uint8 status,) = ISourceDolaStrategy(YS_DOLA).withdrawalStates(DOLA, PHUSD_STABLE_MINTER);
+        if (status != WITHDRAWAL_INITIATED && status != WITHDRAWAL_EXECUTABLE) return false;
+        uint256 closesAt = initiatedAt + DOLA_WITHDRAWAL_WAITING_PERIOD + DOLA_WITHDRAWAL_EXECUTION_WINDOW;
+        if (block.timestamp < initiatedAt + DOLA_WITHDRAWAL_WAITING_PERIOD) return false;
+        if (block.timestamp > closesAt) return false;
+        return margin == 0 || block.timestamp + margin < closesAt;
+    }
+
+    /// @dev Story 096: the session has passed Phase 6 - the migrator named by the progress file is live and wired to V2,
+    ///      every V1 pool is Migrating and V1 books no principal on any source strategy (its stakers are in V2). Requires
+    ///      `tokens` hydrated by `_phase0_readChecks`. False on a fresh session (no migrator) and on a halt inside Phase 6.
+    function _resumePastPhase6() internal view returns (bool) {
+        if (!_doneMigratorIdentity() || tokens.length == 0 || !_allV1PoolsMigrating()) return false;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (ICutoverStrategy(_sourceStrategyFor(tokens[i])).principalOf(tokens[i], STABLE_STAKER_V1) != 0) return false;
+        }
+        return true;
     }
 
     /// @dev Reverts with operator guidance unless the minter's `totalWithdrawal` would EXECUTE now and stays executable for
@@ -1082,6 +1151,13 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             "Phase6b: V1 still books DOLA principal on the autoDOLA strategy - the minter totalWithdrawal must run AFTER Phase 6"
         );
         _minterRecordConfigAndDisable();
+        // Story 096 (audit-35 L-11): lapsed-window resume. DOLA minting stays DISABLED (V2 unpauses in Phase 7 and its
+        // autoAnnihilate(DOLA) would otherwise mint into the autoDOLA source), the collateral stays on the source, and
+        // the rest of 6b waits for a resume inside a re-initiated window.
+        if (minterMovePending) {
+            console.log("  Phase 6b PENDING (story 096): step (a) done - DOLA minting disabled; execute / re-seed / repoint / SYA / retire deferred");
+            return;
+        }
         _minterExecuteWithdrawal();
         // Story 094 (audit-35 L-09): a broadcast that executed in THIS run stops here; the next leg re-seeds the mined R.
         if (minterLegEndedAfterExecute) return;
@@ -1422,6 +1498,15 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(address(v2.yieldStrategy(DOLA)) == address(sdolaStrategy), "Phase8: V2 DOLA strategy != sDOLA strategy");
         require(!sdolaStrategy.paused(), "Phase8: sDOLA strategy paused");
 
+        if (minterMovePending) {
+            // Story 096: 6b deferred after step (a). Assert exactly that shape; the full 6b block runs on the resume that
+            // completes it. `run()` never writes `completed` on this branch and the verifier refuses it.
+            require(minterConfigRecorded, "Phase8: pending 6b: pre-repoint minter config not recorded");
+            require(_minterYieldStrategy(DOLA) == YS_DOLA, "Phase8: pending 6b: minter DOLA registration moved off the autoDOLA strategy");
+            require(!_minterDolaEnabled(), "Phase8: pending 6b: DOLA minting must stay disabled until 6b completes");
+            require(!_doneMinterWithdrawalExecuted(), "Phase8: pending 6b: minter withdrawal executed - 6b is not pending");
+            require(IPauserRegistry(PAUSER).isRegistered(YS_DOLA), "Phase8: pending 6b: autoDOLA strategy must stay under the Pauser");
+        } else {
         // Story 092: minter collateral, SYA, retired source.
         require(minterConfigRecorded && minterRecoveredRecorded, "Phase8: minterMove records (pre-repoint config / R) absent");
         require(_doneMinterRepointed(), "Phase8: minter DOLA registration != sDOLA strategy with previous rate / decimals / maxMintPerDay / enabled");
@@ -1433,6 +1518,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(_sourceDolaRetirementStarted(), "Phase8: autoDOLA strategy clients V1 / minter not revoked");
         require(_doneMinterWithdrawalExecuted(), "Phase8: minter still books principal on the autoDOLA strategy");
         require(_doneSourceDolaRetired(), "Phase8: autoDOLA strategy not retired (pauser OWNER, unregistered, paused)");
+        }
 
         require(v2.pauser() == PAUSER, "Phase8: V2 pauser");
         require(antimatter.pauser() == PAUSER, "Phase8: Antimatter pauser");
@@ -1454,7 +1540,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         for (uint256 i = 0; i < registrants.length; i++) {
             address r = registrants[i];
             require(r != STABLE_STAKER_V1, "Phase8: V1 is listed by Pauser.getPausableContracts()");
-            require(r != YS_DOLA, "Phase8: retired autoDOLA strategy is listed by Pauser.getPausableContracts()");
+            // Story 096: while 6b is pending the autoDOLA source is not retired yet and stays a (pausable) registrant.
+            require(minterMovePending || r != YS_DOLA, "Phase8: retired autoDOLA strategy is listed by Pauser.getPausableContracts()");
             require(
                 IPausableLike(r).pauser() == PAUSER,
                 string.concat("Phase8: registrant pauser != Pauser (bricks global pause): ", vm.toString(r))
@@ -1581,7 +1668,11 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         for (uint256 i = 0; i < tokens.length; i++) {
             _probeStakeWithdraw(tokens[i]);
         }
-        _probeAutoAnnihilate(DOLA);
+        if (minterMovePending) {
+            _probeAutoAnnihilateDolaBlockedWhilePending();
+        } else {
+            _probeAutoAnnihilate(DOLA);
+        }
         console.log("  all smoke tests passed");
     }
 
@@ -1627,6 +1718,24 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         (uint256 left,) = v2.userInfo(t, actor);
         require(left == 0, "smoke: V2 withdraw left principal");
         console.log("  V2 stake/withdraw OK (token / credited / returned):", t, principal, IERC20(t).balanceOf(actor));
+    }
+
+    /// @dev Story 096: while 6b is pending, V2's autoAnnihilate(DOLA) must REVERT (DOLA minting disabled), so nothing is
+    ///      minted into the autoDOLA source the pending execute will withdraw from.
+    function _probeAutoAnnihilateDolaBlockedWhilePending() internal {
+        address actor = makeAddr("story096-annihilator");
+        uint256 amount = 1000 * 10 ** IERC20Metadata(DOLA).decimals();
+        deal(DOLA, actor, amount);
+        vm.startPrank(actor);
+        IERC20(DOLA).approve(address(v2), amount);
+        v2.stake(DOLA, amount);
+        vm.stopPrank();
+        vm.warp(block.timestamp + 10 minutes);
+        vm.prank(actor);
+        try v2.autoAnnihilate(DOLA) {
+            revert("smoke: autoAnnihilate(DOLA) succeeded while Phase 6b is pending - DOLA minting must be disabled");
+        } catch {}
+        console.log("  autoAnnihilate(DOLA) REVERTS while Phase 6b is pending (DOLA minting disabled) - expected");
     }
 
     function _probeAutoAnnihilate(address t) internal {
@@ -2116,6 +2225,21 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         vm.serializeAddress(k, "address", addr);
         string memory entry = vm.serializeBool(k, "deployed", addr != address(0));
         contractsJson = vm.serializeString("s082.contracts", name, entry);
+    }
+
+    /// @dev Story 096: operator guidance for the deferred Phase 6b.
+    function _printMinterMovePending() internal pure {
+        console.log("");
+        console.log("=================================================");
+        console.log("  V2 FINALIZED; PHASE 6b PENDING (story 096, audit-35 L-11)");
+        console.log("=================================================");
+        console.log("  Progress status:", PROGRESS_STATUS_AWAITING_MINTER_WINDOW);
+        console.log("  V2 is UNPAUSED and registered - migrated stakers can withdraw.");
+        console.log("  DOLA minting on PhusdStableMinter stays DISABLED; the minter's DOLA collateral stays on the autoDOLA strategy.");
+        console.log("  NEXT: once the old window has expired run  npm run initiate-dola-ys-withdrawal:broadcast,");
+        console.log("        wait 6h (npm run dola-ys-withdrawal:status), then  :preview  and  :broadcast  again: leg 1 executes,");
+        console.log("        leg 2 re-seeds, repoints, restores DOLA minting, repoints SYA and retires the source.");
+        console.log("  The :broadcast tail (patch -> :verify -> :preview) is EXPECTED to stop at :verify ('verify: Phase6b: PENDING').");
     }
 
     function _printSummary() internal view {

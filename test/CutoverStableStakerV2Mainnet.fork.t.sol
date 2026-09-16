@@ -1348,6 +1348,155 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertEq(_count(src, "IERC20(DOLA).approve(PHUSD_STABLE_MINTER, (r * 3 + 1) / 2);"), 1, "1.5R approve");
     }
 
+    // ---- Story 096 (audit-35 L-11): a resume past Phase 6 with a lapsed minter window still unpauses V2 ----
+
+    /// The audit PoC shape: initiate, age 6h, Phases 0-6 land (every V1 staker now sits in a PAUSED V2), then the halt
+    /// outlives initiatedAt + 78h. Before story 096 every resume reverted in Phase 0 and the stakers stayed frozen.
+    function _haltAfterPhase6ThenLapse() internal returns (MinterCfg memory pre, uint256 ownerDolaPre, uint256 minterPrincipalPre) {
+        pre = _minterCfg();
+        ownerDolaPre = IERC20(DOLA_T).balanceOf(OWNER);
+        minterPrincipalPre = ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER);
+        assertGt(minterPrincipalPre, 0, "setup: minter holds DOLA principal on the autoDOLA strategy");
+        _throughPhase6();
+        assertTrue(h.v2().paused(), "setup: halted after Phase 6 with V2 still paused");
+        assertGt(h.v2().stakerCount(DOLA_T), 0, "setup: V1 DOLA stakers migrated into the paused V2");
+        _ageWithdrawal(78 hours + 1);
+        h.harnessResetTokens();
+    }
+
+    /// The on-chain effect of a pending resume, phase by phase: the same phases `run()` executes, without the preview
+    /// smoke tests (they mutate the fork, and a second preview `run()` in one test would trip over the first's probes).
+    function _pendingResumeViaPhases() internal {
+        _toPhase6b();
+        h.harnessPhase7AsOwner();
+        h.harnessPhase8();
+    }
+
+    function test_fork_096_lapsedWindowResume_unpausesV2_minterMovePending() public {
+        if (!_fork()) return;
+        (MinterCfg memory pre,, uint256 minterPrincipalPre) = _haltAfterPhase6ThenLapse();
+
+        h.run(); // the resume: must NOT revert in Phase 0
+
+        StableStakerV2 v2 = h.v2();
+        assertTrue(h.minterMovePending(), "6b recorded as pending");
+        assertEq(h.lastProgressStatus(), h.PROGRESS_STATUS_AWAITING_MINTER_WINDOW(), "progress status names the pending 6b");
+        assertEq(h.PROGRESS_STATUS_AWAITING_MINTER_WINDOW(), "awaiting_minter_window");
+        assertFalse(v2.paused(), "Phase 7 ran: V2 unpaused");
+        assertTrue(IPauserRegistry(PAUSER).isRegistered(address(v2)), "Phase 7 ran: V2 registered");
+        assertEq(h.globalPauseStageCount(), 11, "breaker proven at phase0, every strict stage and after-phase8");
+
+        // A migrated V2 DOLA staker can withdraw.
+        address staker = v2.getStakers(DOLA_T)[0];
+        (uint256 principal,) = v2.userInfo(DOLA_T, staker);
+        assertGt(principal, 0, "setup: migrated staker holds principal");
+        uint256 balBefore = IERC20(DOLA_T).balanceOf(staker);
+        vm.prank(staker);
+        v2.withdraw(DOLA_T, principal);
+        assertGt(IERC20(DOLA_T).balanceOf(staker), balBefore, "migrated V2 DOLA staker withdrew");
+
+        // 6b step (a) ran and nothing after it: DOLA minting disabled, collateral untouched on the source.
+        MinterCfg memory mid = _minterCfg();
+        assertFalse(mid.enabled, "DOLA minting disabled while 6b is pending");
+        assertEq(mid.ys, YS_DOLA_SOURCE, "minter DOLA registration not moved");
+        assertTrue(h.minterConfigRecorded(), "pre-repoint config recorded");
+        assertEq(h.minterPrevEnabled(), pre.enabled, "recorded enabled flag is the pre-cutover one");
+        assertEq(h.minterPrevMaxMintPerDay(), pre.maxPerDay, "recorded cap is the pre-cutover one");
+        assertEq(ISourceDolaStrategy(YS_DOLA_SOURCE).principalOf(DOLA_T, MINTER), minterPrincipalPre, "no execute");
+        assertTrue(IPauserRegistry(PAUSER).isRegistered(YS_DOLA_SOURCE), "source not retired");
+
+        // V2's DOLA autoAnnihilate cannot mint into the autoDOLA source while 6b is pending.
+        address actor = makeAddr("story096-annihilator");
+        deal(DOLA_T, actor, 1000e18);
+        vm.startPrank(actor);
+        IERC20(DOLA_T).approve(address(v2), 1000e18);
+        v2.stake(DOLA_T, 1000e18);
+        vm.stopPrank();
+        _warpTo(block.timestamp + 10 minutes);
+        vm.prank(actor);
+        vm.expectRevert();
+        v2.autoAnnihilate(DOLA_T);
+    }
+
+    /// Re-initiate, resume inside the 6h wait (still pending, idempotent), age 6h, then the story-094 two legs: leg 1
+    /// ends after the execute, leg 2 re-seeds and the run converges to completed.
+    function test_fork_096_reinitiatedWindow_resumeCompletes6b() public {
+        if (!_fork()) return;
+        (MinterCfg memory pre, uint256 ownerDolaPre,) = _haltAfterPhase6ThenLapse();
+        _pendingResumeViaPhases();
+        assertTrue(h.minterMovePending(), "setup: lapsed-window resume left 6b pending");
+
+        _initiateMinterWithdrawal(); // story 090's script: a lazily expired window is re-initiable
+        h.harnessResetTokens();
+        _pendingResumeViaPhases(); // inside the fresh 6h waiting period
+        assertTrue(h.minterMovePending(), "waiting period: 6b still pending");
+        assertFalse(h.v2().paused(), "V2 stays unpaused");
+
+        _ageWithdrawal(6 hours + 60);
+        h.harnessForceBroadcastLegEnd(true);
+        h.harnessResetTokens();
+        h.run(); // leg 1: executes and ends
+        assertFalse(h.minterMovePending(), "leg 1: window open, 6b not deferred");
+        assertTrue(h.minterLegEndedAfterExecute(), "leg 1 ended after the execute");
+        assertEq(h.lastProgressStatus(), h.PROGRESS_STATUS_AWAITING_RESEED());
+
+        h.harnessResetTokens();
+        h.run(); // leg 2
+        assertFalse(h.minterMovePending(), "leg 2: nothing pending");
+        assertFalse(h.minterLegEndedAfterExecute(), "leg 2 ran to the end");
+        _assertMinterMoved(pre, ownerDolaPre);
+        assertFalse(h.v2().paused(), "V2 unpaused");
+        h.harnessPhase8();
+    }
+
+    /// The start gate is NOT weakened: a fresh session with a lapsed window hard-fails Phase 0.
+    function test_fork_096_freshSession_lapsedWindow_stillReverts() public {
+        if (!_fork()) return;
+        _ageWithdrawal(78 hours + 1);
+        vm.expectRevert(
+            bytes(
+                "Phase0: minter DOLA withdrawal window EXPIRED - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+            )
+        );
+        h.run();
+    }
+
+    /// Nor for a session halted BEFORE Phase 6 finished: only a resume with V1 fully drained may defer 6b.
+    function test_fork_096_haltBeforePhase6_lapsedWindow_stillReverts() public {
+        if (!_fork()) return;
+        h.harnessPhase0(true);
+        h.harnessPhase1AsOwner();
+        h.harnessPhase2AsOwner();
+        h.harnessPhase3AsOwner();
+        h.harnessPhase3bAsOwner();
+        h.harnessPhase4AsOwner();
+        h.harnessPhase5AsOwner();
+        _ageWithdrawal(78 hours + 1);
+        h.harnessResetTokens();
+        vm.expectRevert(
+            bytes(
+                "Phase0: minter DOLA withdrawal window EXPIRED - run initiate-dola-ys-withdrawal:broadcast and wait (see dola-ys-withdrawal:status)"
+            )
+        );
+        h.run();
+    }
+
+    /// Source guard: Phase 6b defers AFTER step (a) and BEFORE the execute; run() skips Phase 8's 6b block and never
+    /// writes `completed` while pending.
+    function test_096_pendingBranch_wiring() public view {
+        string memory src = vm.readFile(SCRIPT_SRC);
+        uint256 body = _indexOf(src, "function _phase6b_minterSyaRetireSource()", 0);
+        uint256 recordA = _indexOf(src, "_minterRecordConfigAndDisable();", body);
+        uint256 defer = _indexOf(src, "if (minterMovePending)", body);
+        uint256 exec = _indexOf(src, "_minterExecuteWithdrawal();", body);
+        assertTrue(recordA < defer && defer < exec, "6b defers after step (a), before the execute");
+        uint256 runAt = _indexOf(src, "function run()", 0);
+        uint256 p7 = _indexOf(src, "_phase7_finalize();", runAt);
+        uint256 pendingEnd = _indexOf(src, "_writeProgress(PROGRESS_STATUS_AWAITING_MINTER_WINDOW);", runAt);
+        uint256 completed = _indexOf(src, "_writeProgress(\"completed\");", runAt);
+        assertTrue(p7 < pendingEnd && pendingEnd < completed, "pending run ends after Phase 7, before `completed`");
+    }
+
     // ---- V1 exit vs pending minter withdrawal (human-requested proof), cases (a) - (c) ----
 
     /// Phases 0 (read checks only - Phase 0's window gate is untouched) .. 6 with the minter withdrawal pending, then
