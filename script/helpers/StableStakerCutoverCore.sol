@@ -416,52 +416,58 @@ abstract contract StableStakerCutoverCore {
     //  Post-conditions
     // =====================================================================
 
-    /// @notice The aggregate principal floor (story 085, audit F-01): the least V2 may book for `token`
-    ///         after the cutover, anchored on V1's pre-migration principal snapshot.
-    /// @dev    floor = (P - v1Staked) * (MAX_BPS - maxLossBps) / MAX_BPS - nMigrated * weiSlack, saturating
-    ///         at zero. `P - v1Staked` is the principal that was due to move: stragglers stay on V1 by
-    ///         design and are never credited into V2, so anchoring on the raw snapshot would false-fail
-    ///         every run that leaves dust behind. Floor division rounds the floor DOWN, loosening the gate
-    ///         by < 1 unit; acceptable because this is a gate, not a credit. Reverts loudly (never an
-    ///         underflow panic) when the snapshot is zero or smaller than the straggler principal.
-    function _aggregatePrincipalFloor(
+    /// @notice The exit-realization loss bound (story 087, audit-33 L-06; replaces story 085's aggregate floor).
+    ///         True iff V1's terminal exit of `token` realized at least `(MAX_BPS - maxLossBps)` of its principal
+    ///         snapshot, less one `weiSlack`: `(min(R, P) + weiSlack) * MAX_BPS >= P * (MAX_BPS - maxLossBps)`.
+    /// @dev    WHY R / P AND NOT `P - v1Staked`. `StableStakerV1.initiateMigration` fixes
+    ///         `migrationInfo[token] = {realized: R, principalSnapshot: P}` ONCE, and every exit - `batchMigrate`
+    ///         through the migrator OR a staker's own permissionless `userMigrate` - credits
+    ///         `amount * min(R, P) / P`. So `min(R, P) / P` IS the pre -> credit haircut of every staker, however
+    ///         they leave, and neither R nor P can be moved by anyone for the life of the migration.
+    ///         Story 085 anchored on `P - v1Staked` against V2's booked total. A `userMigrate` self-exit landing
+    ///         between the broadcast `initiateMigration` and `migrate` transactions keeps its principal inside
+    ///         `P`, removes it from `v1Staked` and never reaches V2, so that floor counted a legitimate,
+    ///         designed exit as V2 loss: a false-red `:verify` and a resume that could not finish (audit-33
+    ///         L-06). The rule this bound follows: a post-condition must never read a quantity a permissionless
+    ///         actor can move between two broadcast transactions.
+    ///         Coverage kept from story 085 (audit F-01): a strategy exit haircut beyond the bound is caught on
+    ///         EVERY leg, including a resume leg whose `plan.migratable` is empty, because R and P are pool-wide.
+    ///         The credit -> credited (V2 re-deposit) leg stays bounded per user: in-leg by
+    ///         `_assertPoolPostMigration`, and after the broadcast by the verifier's `MigratedOut` / `DepositedFor`
+    ///         re-check plus its self-exit-aware aggregate (`VerifyStableStakerV2Cutover`).
+    ///         R > P (a strategy exit that realized a gain) is capped at par, exactly as V1 caps the credit.
+    ///         ONE `weiSlack` for the pool, not one per user: the exit is a single strategy withdraw of `P`, whose
+    ///         vault share rounding can realize a few wei under par even with no economic loss (unit-tested at a
+    ///         high share price). On mainnet 1000 wei is below 1e-9 of a 2 bps allowance on any live pool.
+    ///         Multiplication, not division: no rounding in either direction.
+    function _exitRealizationWithinBound(
+        uint256 realized,
         uint256 principalSnapshot,
-        uint256 v1Staked,
         uint256 maxLossBps,
-        uint256 nMigrated,
         uint256 weiSlack
-    ) internal pure returns (uint256 floor) {
+    ) internal pure returns (bool) {
         require(principalSnapshot > 0, "cutover-post: V1 principalSnapshot is zero");
-        require(principalSnapshot >= v1Staked, "cutover-post: V1 principalSnapshot < V1 straggler principal");
         require(maxLossBps <= CUTOVER_MAX_BPS, "cutover-post: maxLossBps above MAX_BPS");
-        uint256 migratingPrincipal = principalSnapshot - v1Staked;
-        floor = migratingPrincipal * (CUTOVER_MAX_BPS - maxLossBps) / CUTOVER_MAX_BPS;
-        uint256 slack = nMigrated * weiSlack;
-        floor = floor > slack ? floor - slack : 0;
+        uint256 capped = realized < principalSnapshot ? realized : principalSnapshot;
+        return (capped + weiSlack) * CUTOVER_MAX_BPS >= principalSnapshot * (CUTOVER_MAX_BPS - maxLossBps);
     }
 
     /// @notice 080's `_assertStableStakerCutover`, extended for stragglers, resume legs, a V2 book /
-    ///         strategy lockstep and the story-085 aggregate principal floor.
-    /// @dev    AGGREGATE FLOOR (story 085, audit F-01; the loss gate story 067 and story 082 Phase 6 asked
-    ///         for). `V2.totalStaked >= _aggregatePrincipalFloor(P, v1Staked, maxLossBps, nMigrated, weiSlack)`
-    ///         with `P = V1.migrationInfo(token).principalSnapshot`, fixed at `initiateMigration` and never
-    ///         reset by the cutover (only `finalizeAndReset` zeroes it, and the cutover never calls it).
-    ///         `v1Staked` is the straggler principal (asserted equal above) and is subtracted from `P`.
-    ///         `nMigrated = V2.stakerCount + plan.zeroCreditCount`: zero-credit users never reach V2, and
-    ///         `plan.zeroCreditCount` counts only THIS leg's, so on a resume leg the slack is under-counted
-    ///         and the floor is marginally stricter - the safe direction.
-    ///         Why it adds coverage: on a single leg that migrates everyone, summing the per-user bound
-    ///         gives this same floor, so the per-user loop fires first. The floor is what still guards a
-    ///         RESUME leg (empty `plan.migratable`) and any divergence between `P` and the planned amounts.
-    ///         Pool totals are leg-independent, so the floor is meaningful on every leg.
-    ///         Organic stakes: V2 is paused until Phase 7, so on a fresh V2 `totalStaked` is exactly the
-    ///         migrated credit. If this check runs after V2 is unpaused (post-broadcast re-runs), organic
-    ///         stakes can only RAISE `totalStaked`: they can MASK a migration shortfall, never trip the floor.
-    ///         Scope: the floor measures booked principal against the snapshot, not realizable asset value,
-    ///         which stays bounded by the strategies' own `minOut` floors.
+    ///         strategy lockstep and the story-087 exit-realization bound.
+    /// @dev    LOSS GATE (story 087, audit-33 L-06; the loss gate story 067 and story 082 Phase 6 asked for):
+    ///         `_exitRealizationWithinBound(R, P, maxLossBps, weiSlack)` with `(R, P) = V1.migrationInfo(token)`, both fixed
+    ///         at `initiateMigration` and never reset by the cutover (only `finalizeAndReset` zeroes them, and
+    ///         the cutover never calls it). It reads nothing a self-exit, an organic stake/withdraw or a
+    ///         donation can move, so it is equally valid on a fresh leg, on a resume leg (empty
+    ///         `plan.migratable`) and in the post-broadcast verifier. See `_exitRealizationWithinBound`.
+    ///         The per-user in-leg bound below still covers the full pre -> credited loss of THIS leg's users.
+    ///         Organic stakes: V2 is paused until Phase 7; checks here that read V2 totals are equalities over
+    ///         V2's own staker set, which organic stakes keep true.
     /// @param plan The plan `_migratePool` executed in THIS leg (per-user checks cover its users).
-    /// @param maxLossBps Principal loss allowed in bps, per user and in aggregate (0 for ERC4626; market: see caller).
-    /// @param weiSlack Absolute per-user rounding slack, in token wei (multiplied by nMigrated for the floor).
+    /// @param maxLossBps Principal loss allowed in bps, per user and on the exit leg (`_maxLossBps`: 2 for the
+    ///        ERC4626 autopools, 2 * slippageToleranceBps + 1 for the market strategy).
+    /// @param weiSlack Absolute rounding slack, in token wei: per user in the per-user bound, and once for the pool's
+    ///        single V1 exit in the realization bound.
     function _assertPoolPostMigration(
         ICutoverStaker v1,
         ICutoverStaker v2,
@@ -507,23 +513,25 @@ abstract contract StableStakerCutoverCore {
         }
         require(v2Staked == sum, "cutover-post: V2 totalStaked != sum of V2 staker principal");
 
-        // ---- Aggregate principal floor (story 085): V2 books at least what V1's snapshot said was moving ----
+        // ---- Exit-realization bound (story 087, audit-33 L-06): anchored on V1's immutable R / P only ----
         {
-            (, uint256 principalSnapshot) = v1.migrationInfo(token);
-            uint256 nMigrated = n + plan.zeroCreditCount;
-            uint256 floor = _aggregatePrincipalFloor(principalSnapshot, v1Staked, maxLossBps, nMigrated, weiSlack);
-            console.log("  aggregate floor (token / floor / V2 totalStaked):", token, floor, v2Staked);
-            console.log("    V1 principalSnapshot / straggler principal:", principalSnapshot, v1Staked);
-            require(v2Staked >= floor, "cutover-post: V2 booked total below pre-migration principal floor (067)");
+            (uint256 realized, uint256 principalSnapshot) = v1.migrationInfo(token);
+            console.log("  exit realization (token / R realized / P snapshot):", token, realized, principalSnapshot);
+            console.log("    loss bound bps / V2 totalStaked:", maxLossBps, v2Staked);
+            require(
+                _exitRealizationWithinBound(realized, principalSnapshot, maxLossBps, weiSlack),
+                "cutover-post: V1 exit realization below loss bound"
+            );
         }
 
         // ---- V2 book / strategy lockstep (not a loss floor) ----
         // `depositFor` credits `strategy.principalOf(token, V2)` and `V2.totalStaked` from the same value, so
         // on a clean cutover these are equal by construction. This detects a booking desync between V2 and
-        // its strategy; it cannot detect principal lost in the cutover (the aggregate floor above does that).
+        // its strategy; it cannot detect principal lost in the cutover (the realization bound above and the
+        // per-user bounds do that).
         uint256 stratPrincipal = ICutoverStrategy(strategy).principalOf(token, address(v2));
         require(
-            stratPrincipal >= v2Staked, "cutover-post: strategy principal for V2 != V2 booked totalStaked (lockstep)"
+            stratPrincipal >= v2Staked, "cutover-post: strategy principal for V2 below V2 booked totalStaked (lockstep)"
         );
 
         console.log("  post-migration OK (token / V2 totalStaked / V2 stakers):", token, v2Staked, n);

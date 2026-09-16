@@ -21,7 +21,7 @@ import {
 } from "../script/helpers/StableStakerCutoverCore.sol";
 
 /**
- * @title StableStakerCutoverDustTest  (story 082)
+ * @title StableStakerCutoverDustTest  (stories 082, 085, 087)
  * @notice Proves the dust predicate and straggler handling that `CutoverStableStakerV2Mainnet` runs,
  *         by inheriting the SAME `StableStakerCutoverCore` the mainnet script inherits and driving it
  *         against the real `StableStakerV1` (frozen), `StableStakerV2`, `CrossVersionMigrator` and
@@ -206,30 +206,100 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         );
     }
 
-    // ------------------------------------------------------------------ story 085: aggregate principal floor
+    // ------------------------------------------------------------------ story 087: exit-realization bound
+    //  Story 085's `P - v1Staked` aggregate floor was replaced (audit-33 L-06): a permissionless V1 `userMigrate`
+    //  self-exit made it a false loss alarm. The F-01 coverage it provided (a strategy haircut beyond the bound,
+    //  caught on a resume leg with an empty plan) is kept by the realization bound on V1's immutable R / P.
 
-    string constant FLOOR_REVERT = "cutover-post: V2 booked total below pre-migration principal floor (067)";
+    string constant BOUND_REVERT = "cutover-post: V1 exit realization below loss bound";
 
-    /// Clean migration (no loss, no stragglers): the aggregate floor holds exactly and the lockstep holds.
-    function test_aggregateFloor_cleanMigrationPasses() public {
+    address exiter = makeAddr("selfExiter");
+    uint256 constant EXIT = 100e18; // 5% of the pool - far above any wei slack or bps headroom
+
+    function doUserMigrate(address who) external {
+        vm.prank(who);
+        v1.userMigrate(address(dola));
+    }
+
+    /// The pre-085 (story 085) floor, restated inline ONLY to prove the regression scenario would have tripped it.
+    function _story085Floor(uint256 bps, uint256 weiSlack) internal view returns (uint256 floor) {
+        (, uint256 P) = v1.migrationInfo(address(dola));
+        (,,, uint256 v1Staked) = v1.poolInfo(address(dola));
+        floor = (P - v1Staked) * (CUTOVER_MAX_BPS - bps) / CUTOVER_MAX_BPS;
+        uint256 slack = v2.stakerCount(address(dola)) * weiSlack;
+        floor = floor > slack ? floor - slack : 0;
+    }
+
+    /// Clean migration (no loss, no stragglers): R == P, the bound holds at 0 bps, the lockstep holds.
+    function test_realizationBound_cleanMigrationPasses() public {
         this.doInitiate();
         PoolPlan memory plan = this.doMigrate(CAP);
         assertEq(plan.stragglers.length, 0, "setup: no stragglers");
 
-        (, uint256 P) = v1.migrationInfo(address(dola));
-        (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
-        uint256 floor = _aggregatePrincipalFloor(P, 0, 0, v2.stakerCount(address(dola)), 0);
+        (uint256 R, uint256 P) = v1.migrationInfo(address(dola));
         assertEq(P, 2 * BIG, "snapshot is the pre-migration V1 total");
-        assertEq(floor, 2 * BIG, "zero loss, zero slack: floor is the full snapshot");
-        assertGe(v2Staked, floor, "clean 1:1 migration books the whole snapshot on V2");
+        assertTrue(_exitRealizationWithinBound(R, P, 0, 0), "zero loss passes a 0 bps, 0 wei bound");
+        (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
         assertEq(ys.principalOf(address(dola), address(v2)), v2Staked, "lockstep: strategy book == V2 book");
 
         this.doAssert(plan, 0, 0);
     }
 
-    /// Injected haircut on the single-leg path: a vault loss before initiation makes R < P, so every credit
-    /// is cut 5 bps. With a 0 bps allowance the post-condition reverts (the per-user loop fires first).
-    function test_aggregateFloor_singleLegHaircutReverts() public {
+    /// (i) AUDIT-33 L-06 REGRESSION. A staker self-exits via the permissionless `userMigrate` between
+    /// `initiateMigration` and `migrate`; everyone else migrates cleanly. Both post-condition shapes pass: the
+    /// fresh leg re-planned from live state, and the resume/verifier leg (empty plan) after the broadcast-shaped
+    /// migrate whose user list was computed BEFORE the exit. The old story-085 floor fails the same state.
+    function test_selfExitBetweenInitiateAndMigrate_passes() public {
+        _stake(exiter, EXIT);
+        this.doInitiate();
+        PoolPlan memory planned = _planPool(ICutoverStaker(address(v1)), address(dola), address(ys));
+        assertEq(planned.migratable.length, 3, "setup: the exiter was planned for migration");
+
+        uint256 walletBefore = dola.balanceOf(exiter);
+        this.doUserMigrate(exiter);
+        assertGt(dola.balanceOf(exiter) - walletBefore, EXIT - 1e3, "self-exit paid the credit to the wallet");
+
+        // Broadcast shape: the migrate tx carries the pre-exit list; V1 batchMigrate skips the exited user.
+        mig.migrate(address(dola), planned.migratable);
+        assertEq(v1.stakerCount(address(dola)), 0, "every staker left V1 (migrated or self-exited)");
+        (uint256 inV2,) = v2.userInfo(address(dola), exiter);
+        assertEq(inV2, 0, "the exiter never reached V2 - by their own choice");
+
+        (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
+        assertLt(v2Staked, _story085Floor(0, 20), "the story-085 floor would have raised a false loss alarm here");
+
+        PoolPlan memory live = this.doMigrate(CAP); // resume leg: empty plan
+        assertEq(live.migratable.length, 0, "setup: resume plan is empty");
+        this.doAssert(live, 0, 20);
+        this.doAssert(live, 2, 1_000); // the mainnet ERC4626 parameters
+    }
+
+    /// (i-b) Same self-exit, fresh leg: `_migratePool` re-plans from live state after the exit and asserts.
+    function test_selfExitBeforeMigrateLeg_freshLegPasses() public {
+        _stake(exiter, EXIT);
+        this.doInitiate();
+        this.doUserMigrate(exiter);
+        PoolPlan memory plan = this.doMigrate(CAP);
+        assertEq(plan.migratable.length, 2, "the exiter is no longer planned");
+        this.doAssert(plan, 0, 20);
+    }
+
+    /// (ii) Self-exit PLUS a strategy haircut beyond the bound: the realization bound still fails closed.
+    function test_selfExitWithBeyondBoundHaircut_reverts() public {
+        _stake(exiter, EXIT);
+        vault.simulateLoss(21e17); // 10 bps of 2100e18
+        this.doInitiate();
+        this.doUserMigrate(exiter);
+        this.doMigrate(CAP);
+        PoolPlan memory again = this.doMigrate(CAP); // resume/verifier shape: the per-user loop sees nothing
+
+        vm.expectRevert(bytes(BOUND_REVERT));
+        this.doAssert(again, 2, 1_000);
+    }
+
+    /// Single-leg haircut: a vault loss before initiation makes R < P, so every credit is cut 5 bps. With a
+    /// 0 bps allowance the post-condition reverts; 6 bps passes.
+    function test_realizationBound_singleLegHaircutReverts() public {
         vault.simulateLoss(1e18); // 5 bps of 2000e18
         this.doInitiate();
         PoolPlan memory plan = this.doMigrate(CAP);
@@ -238,15 +308,14 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         vm.expectRevert();
         this.doAssert(plan, 0, 20);
 
-        // Control: the strategy-explained 6 bps allowance passes both the per-user bound and the floor.
         this.doAssert(plan, 6, 20);
     }
 
-    /// Injected haircut applied during the FIRST leg, asserted on a RESUME leg with an empty plan: the
-    /// per-user loop sees nothing, the lockstep is equal by construction, and only the aggregate floor
+    /// (iii) F-01 coverage kept: haircut applied during the FIRST leg, asserted on a RESUME leg with an empty
+    /// plan. The per-user loop sees nothing, the lockstep is equal by construction, and the realization bound
     /// catches the lost principal.
-    function test_aggregateFloor_resumeLegHaircutReverts() public {
-        vault.simulateLoss(1e18);
+    function test_realizationBound_resumeLegHaircutReverts() public {
+        vault.simulateLoss(1e18); // 5 bps
         this.doInitiate();
         this.doMigrate(CAP); // first leg: no post-assertion run
 
@@ -256,53 +325,64 @@ contract StableStakerCutoverDustTest is Test, StableStakerCutoverCore {
         (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
         assertEq(ys.principalOf(address(dola), address(v2)), v2Staked, "lockstep holds - it cannot see the loss");
 
-        vm.expectRevert(bytes(FLOOR_REVERT));
-        this.doAssert(again, 0, 20);
+        vm.expectRevert(bytes(BOUND_REVERT));
+        this.doAssert(again, 2, 1_000); // the mainnet ERC4626 bound: 5 bps is beyond it
 
-        // Control: the same resume leg passes when the loss is within the allowance.
         this.doAssert(again, 6, 20);
     }
 
-    /// Stragglers left behind on V1 do not trip the floor, because their principal is subtracted from the
-    /// snapshot. Slack is set to the tightest value that admits the real rounding deficit, and the test
-    /// proves an un-subtracted (raw-P) floor with that same slack WOULD have reverted.
-    function test_aggregateFloor_stragglersLeftBehindPass() public {
+    /// (iv) A 1 bps haircut is within the mainnet 2 bps ERC4626 bound on a resume leg.
+    function test_realizationBound_withinBoundHaircutPasses() public {
+        vault.simulateLoss(2e17); // 1 bps of 2000e18
+        this.doInitiate();
+        this.doMigrate(CAP);
+        PoolPlan memory again = this.doMigrate(CAP);
+        (uint256 R, uint256 P) = v1.migrationInfo(address(dola));
+        assertLt(R, P, "setup: the exit realized less than the snapshot");
+        this.doAssert(again, 2, 1_000);
+    }
+
+    /// Stragglers left behind on V1 do not trip the bound: R / P is pool-wide and says nothing about who stayed.
+    function test_realizationBound_stragglersLeftBehindPass() public {
         _stake(dust, 9_000); // 9,000 wei at 1:1
         vault.simulateYield(vault.totalAssets() * 99_999); // share price 1e5: 9,000 wei buys 0 shares
         this.doInitiate();
         this.doMigrate(CAP);
-        PoolPlan memory again = this.doMigrate(CAP); // resume plan isolates the aggregate floor
+        PoolPlan memory again = this.doMigrate(CAP);
         assertEq(again.stragglers.length, 1, "setup: the dust staker is a straggler");
-
-        (, uint256 P) = v1.migrationInfo(address(dola));
         (,,, uint256 v1Staked) = v1.poolInfo(address(dola));
-        (,,, uint256 v2Staked) = v2.poolInfo(address(dola));
-        uint256 n = v2.stakerCount(address(dola));
         assertEq(v1Staked, 9_000, "straggler principal stays on V1");
-        uint256 deficit = P - v1Staked - v2Staked;
-        uint256 slack = (deficit + n - 1) / n; // ceil: smallest per-user slack admitting the deficit
-        assertLt(n * slack, deficit + v1Staked, "setup: slack must not also cover the straggler principal");
-
-        assertLt(v2Staked, _aggregatePrincipalFloor(P, 0, 0, n, slack), "a raw-P floor would false-fail");
-        this.doAssert(again, 0, slack);
+        this.doAssert(again, 0, 1e5);
     }
 
-    /// Unit: floor arithmetic - straggler subtraction, bps haircut, saturating slack, loud guards.
-    function test_aggregateFloor_unitMath() public {
-        assertEq(_aggregatePrincipalFloor(10_000, 1_000, 0, 0, 0), 9_000, "stragglers subtracted");
-        assertEq(_aggregatePrincipalFloor(10_000, 0, 61, 0, 0), 9_939, "bps haircut, floored");
-        assertEq(_aggregatePrincipalFloor(10_000, 0, 0, 3, 1_000), 7_000, "slack scales with nMigrated");
-        assertEq(_aggregatePrincipalFloor(10_000, 0, 0, 20, 1_000), 0, "slack saturates at zero");
-        assertEq(_aggregatePrincipalFloor(10_000, 10_000, 0, 0, 0), 0, "all stragglers: nothing due on V2");
+    /// (v) Unit: the bound's arithmetic - exact boundary, pool-level wei slack, R > P capped at par, loud guards.
+    function test_realizationBound_unitMath() public {
+        assertTrue(_exitRealizationWithinBound(10_000, 10_000, 0, 0), "par passes 0 bps");
+        assertFalse(_exitRealizationWithinBound(9_999, 10_000, 0, 0), "1 bps short fails 0 bps");
+        assertTrue(_exitRealizationWithinBound(9_998, 10_000, 2, 0), "exactly at the 2 bps boundary passes");
+        assertFalse(_exitRealizationWithinBound(9_997, 10_000, 2, 0), "3 bps short fails 2 bps");
+        assertTrue(_exitRealizationWithinBound(9_939, 10_000, 61, 0), "61 bps boundary (market strategy)");
+        assertFalse(_exitRealizationWithinBound(9_938, 10_000, 61, 0), "62 bps short fails 61 bps");
+        assertTrue(_exitRealizationWithinBound(20_000, 10_000, 0, 0), "R > P is capped at par and passes");
+        assertTrue(_exitRealizationWithinBound(0, 10_000, 10_000, 0), "a 100% allowance admits R == 0");
+        assertFalse(_exitRealizationWithinBound(0, 10_000, 9_999, 0), "R == 0 fails any smaller allowance");
+        // Pool-level wei slack: admits exit rounding, once, and nothing more.
+        assertTrue(_exitRealizationWithinBound(1e24 - 7, 1e24, 0, 7), "7 wei of exit rounding within 7 wei slack");
+        assertFalse(_exitRealizationWithinBound(1e24 - 8, 1e24, 0, 7), "8 wei short fails 7 wei slack");
+        // No rounding: 1e18-scale values at the exact bps boundary.
+        assertTrue(_exitRealizationWithinBound(1e24 - 2e20, 1e24, 2, 0), "large values, exact boundary");
+        assertFalse(_exitRealizationWithinBound(1e24 - 2e20 - 1, 1e24, 2, 0), "large values, 1 wei past the boundary");
+        assertTrue(_exitRealizationWithinBound(1e24 - 2e20 - 1000, 1e24, 2, 1_000), "mainnet params: bps + 1000 wei");
+        assertFalse(_exitRealizationWithinBound(1e24 - 2e20 - 1001, 1e24, 2, 1_000), "mainnet params: 1 wei past");
 
         vm.expectRevert(bytes("cutover-post: V1 principalSnapshot is zero"));
-        this.floorExt(0, 0, 0, 0, 0);
-        vm.expectRevert(bytes("cutover-post: V1 principalSnapshot < V1 straggler principal"));
-        this.floorExt(10, 11, 0, 0, 0);
+        this.boundExt(0, 0, 0);
+        vm.expectRevert(bytes("cutover-post: maxLossBps above MAX_BPS"));
+        this.boundExt(1, 1, 10_001);
     }
 
-    function floorExt(uint256 p, uint256 s, uint256 b, uint256 n, uint256 w) external pure returns (uint256) {
-        return _aggregatePrincipalFloor(p, s, b, n, w);
+    function boundExt(uint256 r, uint256 p, uint256 b) external pure returns (bool) {
+        return _exitRealizationWithinBound(r, p, b, 0);
     }
 
     /// Unit: the ERC4626 predicate boundary at share price 10.

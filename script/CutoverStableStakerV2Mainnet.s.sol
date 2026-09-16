@@ -32,10 +32,17 @@ import {
  *      owners, V1 phUSD mint, PhusdStableMinter registration, strategy map, phUSD minter baseline.
  *   1  Retire V1 for the window (story 084, audit L-04): setPauser(OWNER) -> Pauser.unregister(V1) ->
  *      pause(), each step state-gated. V1 is UNREGISTERED BEFORE it is paused so the permissionless
- *      global `Pauser.pause()` (which loops every registrant with no try/catch) stays live all session.
+ *      global `Pauser.pause()` (which loops every registrant with no try/catch) is not bricked by V1.
+ *      BREAKER LIVENESS (stories 084 + 087, audit L-04 / audit-33 L-05): the global breaker is live after
+ *      EVERY transaction of the session EXCEPT ONE forced window - the single tx between
+ *      `V1.setPauser(OWNER)` and `Pauser.unregister(V1)` (unregister requires V1.pauser() != Pauser, and a
+ *      registered V1 whose pauser is OWNER reverts `only pauser`). The rule on both sides: never leave a
+ *      registrant paused or un-pausable by the Pauser - unregister BEFORE pause (Phase 1), unpause BEFORE
+ *      register (Phase 7). `test/CutoverStableStakerV2Mainnet.fork.t.sol` probes this per transaction.
  *      PREVIEW additionally proves the breaker with a simulated EYE-funded `Pauser.pause()` inside a
- *      state snapshot at three stages: end of Phase 0, after Phase 1, after Phase 8
- *      (log `GLOBAL_PAUSE|<stage>|SUCCEEDED|registered=<n>`).
+ *      state snapshot at: end of Phase 0 (V1-only tolerant), then STRICTLY after every phase 1..7 and after
+ *      Phase 8 (log `GLOBAL_PAUSE|<stage>|SUCCEEDED|registered=<n>`, stages phase0, after-phase1 ..
+ *      after-phase8).
  *   2  Deploy Antimatter (name "Antimatter", symbol "AM" - hard-coded in its constructor), owner
  *      OWNER; setPhUSD then setPhUSDMinter; read back.
  *   3  Deploy StableStakerV2(antimatter, OWNER); setPauser(OWNER) + pause() BEFORE any addToken.
@@ -46,8 +53,9 @@ import {
  *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus, initiate, plan
  *      (dust predicate), batch-migrate non-dust, allow-list stragglers under a cap, post-conditions.
  *   7  Finalize: repoint set-aside buffer recipient, revoke V1 phUSD mint, V1 retirement BACKSTOP (the
- *      same state-gated triple Phase 1 ran; normally every step skips - story 083/084), V2 + Antimatter
- *      pauser -> Pauser and registered, V2 unpaused.
+ *      same state-gated triple Phase 1 ran; normally every step skips - story 083/084), then (story 087,
+ *      audit-33 L-05) V2 setPauser(Pauser) -> V2 unpause -> Pauser.register(V2) -> Antimatter
+ *      setPauser(Pauser) -> Pauser.register(Antimatter). V2 is never registered while paused.
  *   8  Wiring assertions (both modes), incl. a static sweep: every Pauser registrant unpaused with
  *      pauser == Pauser (story 084, audit L-03).
  *   -  PREVIEW_MODE only: smoke tests (Antimatter mint-revocation proof, V2 stake/withdraw on every
@@ -56,6 +64,12 @@ import {
  * ================================ RUNNING IT ==============================================
  *   npm run stable-staker-v2-cutover:preview     (impersonates OWNER on live mainnet state)
  *   npm run stable-staker-v2-cutover:broadcast   (Ledger m/44'/60'/46'/0/0; chains :verify && :preview)
+ *
+ *   OWNER ETH (story 087, audit-33 L-07): broadcast mode refuses to start unless OWNER's ON-CHAIN balance (read
+ *   with `eth_getBalance`, never the in-EVM one - forge pre-funds the script sender) is at least
+ *   CUTOVER_GAS_BUDGET * CUTOVER_GAS_PRICE_WEI * 12 / 10, the price every transaction is signed at.
+ *   `:broadcast` exports CUTOVER_GAS_PRICE_WEI (default 300000000 = 0.3 gwei) and passes the same value to
+ *   `--with-gas-price`. Preview logs the budget and the surplus/shortfall (`ETH_BUDGET|...`) and never reverts.
  *
  *   npm run stable-staker-v2-cutover:verify      (story 086: read-only, asserts every phase on chain)
  *
@@ -73,11 +87,12 @@ import {
  *   address loaded from it is required to have code; one that does not aborts with an instruction
  *   to trim the file to the on-chain-confirmed deployments (run-latest.json receipts + `cast nonce`).
  *
- *   HALTED RUNS (story 084): V1 is unregistered from the Pauser in Phase 1. If a broadcast halts before
- *   Phase 1's unregister lands but after V1's pauser moved to OWNER (or V1 was paused manually while still
- *   registered), the global permissionless pause is DEAD until V1 is unregistered. Do not walk away from a
- *   halted run: resume it (Phase 1 converges from any partial state), or at minimum have OWNER call
- *   `Pauser.unregister(V1)`. A preview on such a state reports `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`.
+ *   HALTED RUNS (stories 084 + 087): the ONE halt point that leaves the global permissionless pause DEAD is
+ *   between Phase 1's `V1.setPauser(OWNER)` and `Pauser.unregister(V1)` (or a V1 paused manually while still
+ *   registered). Do not walk away from such a halt: resume it (Phase 1 converges from any partial state), or
+ *   at minimum have OWNER call `Pauser.unregister(V1)`. A preview on such a state reports
+ *   `GLOBAL_PAUSE|phase0|BROKEN_BY_V1`. Every Phase 7 halt point keeps the breaker live, because V2 is
+ *   unpaused before it is registered (audit-33 L-05); a resume from any of them converges.
  */
 contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverCore {
     // =====================================================================
@@ -123,7 +138,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     uint256 public constant MIGRATE_CHUNK = 25;
     /// @dev Straggler cap: summed straggler V1 principal must be < 1 cent, token-decimal aware.
     uint256 public constant STRAGGLER_CAP_CENTS = 1;
-    /// @dev Per-user absolute rounding slack, additive to the bps bound (`_maxLossBps`). Story 083 raised it
+    /// @dev Absolute rounding slack, additive to the bps bound (`_maxLossBps`): per user in the per-user bound, once
+    ///      per pool in the story-087 exit-realization bound (a single V1 exit). Story 083 raised it
     ///      from 080's 2-wei floor to 1000 wei: simulated round trips (V1 exit + V2 re-deposit) lost more
     ///      than 2 wei per user and tripped the Phase 6 post-migration assert. 1000 wei is at most $0.001
     ///      per user even on a 6-decimal token (USDC), so the looser bound is economically negligible.
@@ -178,7 +194,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(MIGRATE_CHUNK > 0 && MIGRATE_CHUNK <= 50, "MIGRATE_CHUNK out of range (1..50)");
         require(STRAGGLER_CAP_CENTS > 0 && STRAGGLER_CAP_CENTS <= 1, "straggler cap must be (0, 1 cent]");
 
-        isPreview = vm.envOr("PREVIEW_MODE", false);
+        isPreview = _previewModeFromEnv();
         _loadProgressFile();
 
         _phase0_preconditions();
@@ -187,27 +203,36 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         if (isPreview) _assertGlobalPauseWorks("phase0", true);
 
         if (isPreview) {
+            // Story 087 (audit-33 L-07): informational only in preview - the operator sees the ETH budget
+            // before signing. Never a revert here.
+            _logOwnerEthBudget();
             console.log("");
             console.log("*** PREVIEW MODE - impersonating OWNER, nothing signed, nothing broadcast ***");
             console.log("*** Progress file is READ if present, NEVER written ***");
             vm.startPrank(OWNER);
         } else {
+            // Story 087 (audit-33 L-07): refuse to start a Ledger session OWNER cannot pay for. Deliberately
+            // NOT inside `_phase0_preconditions`, which the post-broadcast verifier also calls.
+            _preflightOwnerEth();
             vm.startBroadcast();
         }
 
+        // Story 087 (audit-33 L-05, the class check): the breaker is proved STRICTLY after EVERY phase, not
+        // only after Phases 1 and 8. Story 084 sampled three stages and missed the Phase 7 window.
         _phase1_pauseV1();
-        if (isPreview) {
-            // Foundry refuses vm.prank while a startPrank is active: drop OWNER, simulate, resume OWNER.
-            vm.stopPrank();
-            _assertGlobalPauseWorks("after-phase1", false);
-            vm.startPrank(OWNER);
-        }
+        _previewBreakerStage("after-phase1");
         _phase2_antimatter();
+        _previewBreakerStage("after-phase2");
         _phase3_stakerV2();
+        _previewBreakerStage("after-phase3");
         _phase4_pools();
+        _previewBreakerStage("after-phase4");
         _phase5_mintRights();
+        _previewBreakerStage("after-phase5");
         _phase6_migration();
+        _previewBreakerStage("after-phase6");
         _phase7_finalize();
+        _previewBreakerStage("after-phase7");
 
         if (isPreview) {
             vm.stopPrank();
@@ -227,6 +252,104 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             _previewSmokeTests();
         }
         _printSummary();
+    }
+
+    /// @dev The ONE reader of PREVIEW_MODE, shared with the verifier. `virtual` (story 087) only so fork-test harnesses
+    ///      can pin the mode: `vm.setEnv` is process-wide and forge runs suites in parallel, so a test reading the
+    ///      env raced other suites flipping it. Production always reads the env.
+    function _previewModeFromEnv() internal view virtual returns (bool) {
+        return vm.envOr("PREVIEW_MODE", false);
+    }
+
+    /// @dev PREVIEW ONLY, no-op in broadcast. Called with OWNER's startPrank active: Foundry refuses vm.prank
+    ///      while a startPrank is active, so drop OWNER, run the strict simulated global pause, resume OWNER.
+    function _previewBreakerStage(string memory stage) internal {
+        if (!isPreview) return;
+        vm.stopPrank();
+        _assertGlobalPauseWorks(stage, false);
+        vm.startPrank(OWNER);
+    }
+
+    // =====================================================================
+    //  STORY 087 - OWNER ETH preflight (audit-33 L-07)
+    // =====================================================================
+
+    /// @dev Gas budget for the WHOLE cutover, in gas units. Derived from the audit-33 anvil rehearsal
+    ///      (fork block 25981150, `fork-logs/anvil-broadcast-gas-budget.txt`): 46 transactions, total
+    ///      gasUsed 18,317,077. A node checks `balance >= gasLimit * price` UPFRONT per transaction, and
+    ///      `--gas-estimate-multiplier 200` roughly doubles each limit, so the balance must also cover the
+    ///      unused limit headroom of the largest LATE transaction: #37 USDe `migrate`, actual limit 3,383,096.
+    ///      18,317,077 + 3,383,096 = 21,700,173, rounded UP to 22,000,000. The preflight then adds 20% on top.
+    ///      A RESUME requires the full budget too (conservative: a top-up is cheap, a second halt is not).
+    uint256 public constant CUTOVER_GAS_BUDGET = 22_000_000;
+    /// @dev Env var carrying the broadcast gas price in wei. `:broadcast` exports it and feeds the SAME value to
+    ///      forge's `--with-gas-price`, so the preflight and the signed transactions cannot disagree.
+    string public constant GAS_PRICE_ENV = "CUTOVER_GAS_PRICE_WEI";
+    /// @dev Preview-only fallback when the env var is unset (the `:broadcast` default, 0.3 gwei).
+    uint256 public constant PREVIEW_DEFAULT_GAS_PRICE_WEI = 300_000_000;
+
+    /// @dev OWNER's TRUE on-chain ETH, read with a raw `eth_getBalance` over the script's own RPC.
+    ///      The Solidity `balance` member of OWNER MUST NOT be used here (story 087; the audit's suggested
+    ///      mitigation says otherwise): forge PRE-FUNDS the script's `--sender` inside its local EVM, so that read
+    ///      is not the chain's. Measured 2026-09-15 at mainnet block 25986108: the in-EVM read reported
+    ///      61184840209543666 wei while `eth_getBalance` reported 6424919451687286 wei - a ~10x overstatement, in
+    ///      the direction that makes this check pass exactly when it should fail, i.e. it would be worse than no
+    ///      check at all. `vm.rpc` issues the JSON-RPC call directly and bypasses the local EVM.
+    ///      `virtual` so fork tests can stub the on-chain balance (`vm.deal` moves the local EVM, not the chain).
+    function _ownerEthOnChain() internal virtual returns (uint256) {
+        bytes memory raw = vm.rpc("eth_getBalance", string.concat('["', vm.toString(OWNER), '","latest"]'));
+        require(raw.length <= 32, "Preflight: eth_getBalance returned an unusable response");
+        if (raw.length == 0) return 0;
+        return uint256(bytes32(raw)) >> (8 * (32 - raw.length));
+    }
+
+    /// @dev ETH OWNER must hold before the run: CUTOVER_GAS_BUDGET * price * 12 / 10.
+    function _requiredOwnerEth(uint256 gasPriceWei) internal pure returns (uint256) {
+        return CUTOVER_GAS_BUDGET * gasPriceWei * 12 / 10;
+    }
+
+    /// @dev BROADCAST ONLY. Loud revert when the gas-price env var is missing or OWNER's on-chain balance is below
+    ///      the budget AT THE PRICE THE TRANSACTIONS ARE SIGNED WITH. `:broadcast` pins `--legacy --with-gas-price
+    ///      $CUTOVER_GAS_PRICE_WEI`, so every transaction costs exactly that price and the env value - not
+    ///      `tx.gasprice`, which in forge's local pass is the node's base fee - is what the budget must be priced
+    ///      at. A node price above the pinned one is a DIFFERENT hazard (story 071: transactions that will not be
+    ///      mined), so it is logged loudly here rather than silently inflating the ETH requirement.
+    ///      Never called from `_phase0_preconditions` (the verifier runs that post-broadcast, when OWNER's ETH is
+    ///      irrelevant).
+    function _preflightOwnerEth() internal {
+        uint256 envPrice = vm.envOr(GAS_PRICE_ENV, uint256(0));
+        require(
+            envPrice > 0,
+            "Preflight: CUTOVER_GAS_PRICE_WEI is unset - run via npm run stable-staker-v2-cutover:broadcast (it exports the price it passes to --with-gas-price)"
+        );
+        uint256 required = _requiredOwnerEth(envPrice);
+        uint256 balance = _ownerEthOnChain();
+        console.log("  OWNER ETH preflight (gas price wei / required wei / OWNER balance wei):", envPrice, required, balance);
+        if (tx.gasprice > envPrice) {
+            console.log("  WARNING: node gas price is ABOVE the pinned CUTOVER_GAS_PRICE_WEI (node / pinned):", tx.gasprice, envPrice);
+            console.log("  The run is budgeted at the pinned price, but transactions signed below the base fee may not be mined (story 071) - consider raising CUTOVER_GAS_PRICE_WEI.");
+        }
+        require(
+            balance >= required,
+            string.concat(
+                "Preflight: OWNER ETH below cutover gas budget - need ", vm.toString(required), " wei at ",
+                vm.toString(envPrice), " wei/gas, have ", vm.toString(balance), ". Top up OWNER before signing."
+            )
+        );
+    }
+
+    /// @dev PREVIEW ONLY. Logs budget, balance and surplus/shortfall; never reverts.
+    function _logOwnerEthBudget() internal {
+        uint256 price = vm.envOr(GAS_PRICE_ENV, uint256(0));
+        if (price == 0) price = PREVIEW_DEFAULT_GAS_PRICE_WEI;
+        uint256 required = _requiredOwnerEth(price);
+        uint256 bal = _ownerEthOnChain();
+        console.log("  ETH_BUDGET|gasBudget / gasPriceWei / requiredWei:", CUTOVER_GAS_BUDGET, price, required);
+        if (bal >= required) {
+            console.log("  ETH_BUDGET|OK|OWNER balance / surplus wei:", bal, bal - required);
+        } else {
+            console.log("  ETH_BUDGET|SHORTFALL|OWNER balance / shortfall wei (TOP UP BEFORE :broadcast):", bal, required - bal);
+        }
     }
 
     // =====================================================================
@@ -308,7 +431,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     ///      then pause() - instead of pausing V1 while it stays registered until Phase 7. `Pauser.pause()`
     ///      loops `pause()` over every registrant with no try/catch; a registered V1 whose pauser is OWNER
     ///      reverts `StableStaker: only pauser` and takes the whole permissionless breaker down with it.
-    ///      Unregistering BEFORE pausing keeps the global breaker live for the entire Ledger session.
+    ///      Unregistering BEFORE pausing keeps the global breaker live for the rest of the Ledger session; the
+    ///      only forced dead window is the single tx between `setPauser(OWNER)` and `unregister` (the unregister
+    ///      precondition). Phase 7 applies the mirror rule to V2: unpause BEFORE register (story 087).
     ///      Each step is independently state-gated (no "already paused - skip" shortcut), so a resume from
     ///      "V1 paused but still registered" (a run halted under the old ordering, or a manual owner pause)
     ///      still unregisters V1. Phase 7 calls the same helper as an idempotent backstop.
@@ -319,7 +444,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             return;
         }
         _retireV1("Phase1");
-        console.log("  V1 pauser OWNER, unregistered from Pauser, paused - global Pauser.pause() stays live");
+        console.log("  V1 pauser OWNER, unregistered from Pauser, paused - global Pauser.pause() live again");
     }
 
     /// @dev V1 retirement triple. ORDER IS FORCED: `Pauser.unregister` reverts while V1.pauser() == PAUSER,
@@ -602,19 +727,30 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         // Must run BEFORE V2's pauser hand-back (the finalized marker).
         _retireV1("Phase7");
 
+        // STORY 087 (audit-33 L-05): the mirror of Phase 1's rule - NEVER REGISTER A PAUSED CONTRACT. A paused
+        // registrant makes `Pauser.pause()` revert `EnforcedPause()` for every registrant. Order:
+        //   setPauser(PAUSER) -> unpause() -> register(V2) -> Antimatter setPauser(PAUSER) -> register(Antimatter)
+        // The pauser hand-back stays FIRST: it is the finalized marker (`_doneCutoverFinalized`), so a resume
+        // that halted after it skips Phase 3's re-pause and converges here. Unpausing before the hand-back
+        // would leave "unpaused, pauser OWNER" and a resume would re-pause V2 in Phase 3. `unpause` is
+        // owner-or-pauser, so it works after the hand-back. Every tx in this block keeps the breaker live.
         if (v2.pauser() != PAUSER) v2.setPauser(PAUSER);
+        // Unpause BEFORE registering: a paused registrant makes Pauser.pause() revert EnforcedPause (audit-33 L-05).
+        if (!_doneV2Unpaused()) v2.unpause();
+        require(_doneV2Unpaused(), "Phase7: V2 still paused");
         if (!IPauserRegistry(PAUSER).isRegistered(address(v2))) IPauserRegistry(PAUSER).register(address(v2));
         if (antimatter.pauser() != PAUSER) antimatter.setPauser(PAUSER);
         if (!IPauserRegistry(PAUSER).isRegistered(address(antimatter))) {
+            // Antimatter's pauser is address(0) from deployment until the line above, so nothing can pause it
+            // before this point (`pause` is onlyPauser, and the Pauser only pauses registrants). A paused
+            // Antimatter here means an out-of-band emergency: STOP rather than unpause it or register it paused.
+            require(!antimatter.paused(), "Phase7: Antimatter is paused - refusing to register a paused contract (audit-33 L-05)");
             IPauserRegistry(PAUSER).register(address(antimatter));
         }
         require(_doneV2PauseWired(), "Phase7: V2 pauser / Pauser registration did not land");
         require(_doneAntimatterPauseWired(), "Phase7: Antimatter pauser / Pauser registration did not land");
-        // unpause is owner-or-pauser, so it works after the pauser hand-back.
-        if (!_doneV2Unpaused()) v2.unpause();
-        require(_doneV2Unpaused(), "Phase7: V2 still paused");
         require(_doneClaimStillDisabled(), "Phase7: claimEnabled must stay false");
-        console.log("  V1 pauser -> OWNER, unregistered from Pauser, left paused; V2 + Antimatter registered with Pauser; V2 unpaused");
+        console.log("  V1 pauser -> OWNER, unregistered from Pauser, left paused; V2 unpaused THEN registered; Antimatter registered");
     }
 
     // =====================================================================
@@ -718,8 +854,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     ///      active `startPrank`.
     ///      `tolerateV1Only`: at Phase 0 of a RESUME from "V1 paused, pauser OWNER, still registered" the
     ///      breaker is genuinely dead until Phase 1 unregisters V1. That exact, self-healing case is
-    ///      reported loudly and allowed through; any other broken registrant still reverts. The post-Phase-1
-    ///      and post-Phase-8 calls pass `false` and are strict.
+    ///      reported loudly and allowed through; any other broken registrant still reverts. Every later call
+    ///      (after each of Phases 1-8, story 087) passes `false` and is strict.
     function _assertGlobalPauseWorks(string memory stage, bool tolerateV1Only) internal {
         require(isPreview, "simulated global pause is preview-only");
         IPauserRegistry pauser = IPauserRegistry(PAUSER);
@@ -1075,7 +1211,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         revert("V1 stakes a token with no known strategy - STOP AND REPORT (update the strategy map deliberately)");
     }
 
-    /// @dev Per-user loss bound (bps part; Phase 6 adds the absolute WEI_SLACK = 1000 wei on top, story 083).
+    /// @dev Loss bound, bps part (Phase 6 adds the absolute WEI_SLACK = 1000 wei on top, story 083). Used per user
+    ///      (pre -> credited) AND, since story 087, for the pool's exit-realization bound (pre -> credit, on V1's
+    ///      immutable R / P), which is a sub-leg of the per-user total and so is bounded by the same allowance.
     ///      ERC4626 strategies: ERC4626_MAX_LOSS_BPS (WEI_SLACK is a separate wei term, not added here). The market strategy
     ///      haircuts TWICE: the V1 exit sells shares with minOut = ideal * (1 - bps) and the V2 re-deposit
     ///      books credited = credit * (1 - bps). Worst case 1 - (1 - bps)^2 < 2 * bps; +1 bps slack.
