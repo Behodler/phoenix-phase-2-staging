@@ -112,7 +112,8 @@ import {
  *   also needs claimEnabled (false); userMigrate needs a Migrating V2 pool (all Active). For (b) Antimatter's
  *   pause gates only annihilate.
  *   REMEDY at either gap (OWNER): calling pause() on the contract directly REVERTS - it is onlyPauser
- *   ("StableStaker: only pauser") and the pauser is already the Pauser. Instead run setPauser(OWNER) then
+ *   (V2 reverts "StableStaker: only pauser"; Antimatter reverts with the custom error OnlyPauser()) and
+ *   the pauser is already the Pauser. Instead run setPauser(OWNER) then
  *   pause() on that contract (setPauser is onlyOwner). Alternative: OWNER calls Pauser.register(<contract>)
  *   (valid, the pauser is already the Pauser) and then triggers the global pause (burns EYE).
  *   RESUME HAZARD after the setPauser(OWNER) remedy on V2: the finalized marker (`_doneCutoverFinalized`,
