@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-09-14T10:27:05.632Z
+// Generated interface from local.json on 2026-09-16T12:33:37.433Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -17,6 +17,8 @@ export interface ContractAddresses {
   WBTC: string;
   Pauser: string;
   AutoDOLA: string;
+  YieldStrategyDolaLegacy: string;
+  SDOLA: string;
   YieldStrategyDola: string;
   AutoUSDC: string;
   YieldStrategyUSDC: string;
