@@ -68,8 +68,9 @@ import {
  *      Pauser.register (registered while UNPAUSED, before any V2 deposit) -> setWithdrawer(SYA). Minter
  *      client wiring is NOT here (story 092).
  *   4  Per V1 token, on the DESTINATION strategy: addToken, strategy.setClient(V2), idle-balance guard,
- *      setYieldStrategy, setSetAsideBuffer(V2, <V1's pct on the SOURCE>), antimatterPerDay(C * 21 / 10),
- *      autoAnnihilateAvailable.
+ *      setYieldStrategy, setSetAsideBuffer(V2, `_targetBufferPct`), antimatterPerDay(C * 21 / 10),
+ *      autoAnnihilateAvailable. The buffer pct is V1's pct on the SOURCE for USDC / USDe and ZERO on the
+ *      sDOLA destination (see `_targetBufferPct`).
  *   5  Mint rights: Antimatter.setApprovedMinter(V2), phUSD.setMinter(V2), phUSD.setMinter(Antimatter)
  *      (see the Phase 5 NatSpec for why the third grant exists), two-sided minter delta.
  *   6  CrossVersionMigrator; setMigrator on both; per token: relinquish surplus + initiate on the SOURCE,
@@ -687,6 +688,9 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             console.log("    strategy / principalOf(V1):", ys, ICutoverStrategy(ys).principalOf(t, STABLE_STAKER_V1));
             console.log("    V1 phusdPerSecond / C (phUSD per day):", perSecond, cPerDay[t]);
             console.log("    setAsideBufferSize(V1) %:", v1BufferPct[t]);
+            // DOLA's destination is a different strategy and takes a ZERO buffer, so V1's pct is read here
+            // for the log and the source-side picture only. See `_targetBufferPct`.
+            if (t == DOLA) console.log("    -> V2 target buffer % on the sDOLA destination: 0 (deliberate)");
             (bool hasRecipient, address recipient) = _bufferRecipient(ys);
             if (hasRecipient) {
                 console.log("    setAsideBufferRecipient:", recipient);
@@ -1032,11 +1036,13 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
         require(_donePoolStrategySet(t), "Phase4: V2 yieldStrategy did not land");
 
-        uint256 buf = v1BufferPct[t];
+        uint256 buf = _targetBufferPct(t);
         if (!_donePoolBufferCopied(t)) {
             IYieldStrategy(ys).setSetAsideBuffer(address(v2), buf);
         }
-        require(_donePoolBufferCopied(t), "Phase4: V2 set-aside buffer != V1's");
+        require(
+            _donePoolBufferCopied(t), "Phase4: V2 set-aside buffer != target (V1's pct; ZERO on the sDOLA strategy)"
+        );
 
         uint256 c = cPerDay[t];
         require(c > 0, "Phase4: V1 phUSD rate for token is 0 - refusing a zero Antimatter emission");
@@ -1487,7 +1493,10 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             require(_contains(v2Tokens, t), "Phase8: V2 token set != V1 token set");
             require(address(v2.yieldStrategy(t)) == ys, "Phase8: V2 strategy");
             require(IClientGetter(ys).authorizedClients(address(v2)), "Phase8: V2 not a strategy client");
-            require(ICutoverBuffer(ys).setAsideBufferSize(address(v2)) == v1BufferPct[t], "Phase8: V2 buffer %");
+            require(
+                ICutoverBuffer(ys).setAsideBufferSize(address(v2)) == _targetBufferPct(t),
+                "Phase8: V2 buffer % != target (V1's pct; ZERO on the sDOLA strategy)"
+            );
             (bool hasRecipient, address recipient) = _bufferRecipient(ys);
             if (hasRecipient) require(recipient == address(v2), "Phase8: buffer recipient != V2");
             (uint256 perSecond,,,) = v2.poolInfo(t);
@@ -1915,8 +1924,11 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         return address(v2.yieldStrategy(t)) == _destinationStrategyFor(t);
     }
 
+    /// @dev Target, not V1's pct: zero on the sDOLA destination. A freshly deployed strategy already reads 0,
+    ///      so for DOLA this is satisfied without a call; a resume leg that already wrote a non-zero pct is
+    ///      corrected by the Phase 4 `setSetAsideBuffer`.
     function _donePoolBufferCopied(address t) internal view returns (bool) {
-        return ICutoverBuffer(_destinationStrategyFor(t)).setAsideBufferSize(address(v2)) == v1BufferPct[t];
+        return ICutoverBuffer(_destinationStrategyFor(t)).setAsideBufferSize(address(v2)) == _targetBufferPct(t);
     }
 
     /// @dev Requires `cPerDay[t]` hydrated by Phase 0.
@@ -2071,6 +2083,25 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
             return address(sdolaStrategy);
         }
         return _sourceStrategyFor(t);
+    }
+
+    /// @dev The set-aside buffer pct this cutover configures for V2 on the DESTINATION strategy.
+    ///      USDC / USDe keep V1's pct verbatim: both run on strategies where an exit can realize less than
+    ///      booked principal (the USDe one is the AMM market strategy, which haircuts on every swap), so the
+    ///      buffer funds `StableStakerV2._routeExit`'s underwater branch.
+    ///      DOLA's destination is the sDOLA strategy and is deliberately ZERO. sDOLA is a plain ERC4626 whose
+    ///      DOLA-denominated share price only rises, and every rounding on the path is protocol-favouring:
+    ///      `_acquireShares` credits `convertToAssets(sharesReceived)` rather than the nominal deposit,
+    ///      `_disposeShares` burns a FLOORED share count while principal is written down by the full requested
+    ///      amount, and `_skimSurplus` is ceilinged at the aggregate surplus. `totalBalanceOf` can therefore
+    ///      only fall below `principalOf` if the vault's own rate drops, which the buffer would not save us from
+    ///      anyway (the underwater branch needs the WHOLE withdrawal sitting idle on V2, not just the shortfall).
+    ///      A non-zero pct here would permanently divert a tenth of DOLA yield out of the skim recipient into an
+    ///      idle pile recoverable only by `rescueERC20`. If a cushion is ever wanted on this pool, transfer DOLA
+    ///      to V2 directly - that is the same idle balance the underwater branch reads, with no yield diversion.
+    function _targetBufferPct(address t) internal view returns (uint256) {
+        if (_destinationStrategyFor(t) == address(sdolaStrategy)) return 0; // DOLA only
+        return v1BufferPct[t];
     }
 
     /// @dev Story 091: per-user pre -> credited loss bound for `t` (source + destination bps, once when equal).

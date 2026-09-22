@@ -835,7 +835,11 @@ contract CutoverStableStakerV2MainnetForkTest is Test {
         assertTrue(IPauserRegistry(PAUSER).isRegistered(address(sys)), "sDOLA strategy registered with the Pauser");
         assertTrue(sys.authorizedWithdrawers(h.STABLE_YIELD_ACCUMULATOR()), "SYA withdrawer");
         assertTrue(sys.authorizedClients(v2), "V2 client");
-        assertEq(sys.setAsideBufferSize(v2), IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferSize(V1), "V1's buffer pct copied");
+        // The sDOLA destination takes a ZERO buffer: V1's non-zero pct on the autoDOLA source is deliberately
+        // NOT copied here (see `_targetBufferPct`). Asserting the source is still non-zero keeps this honest -
+        // a zero on both sides would let the check pass for the wrong reason.
+        assertGt(IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferSize(V1), 0, "setup: source buffer pct is non-zero");
+        assertEq(sys.setAsideBufferSize(v2), 0, "sDOLA destination buffer pct is zero");
         assertEq(sys.setAsideBufferRecipient(), v2, "destination recipient V2");
         assertEq(IStrategyBufferLike(YS_DOLA_SOURCE).setAsideBufferRecipient(), V1, "source recipient left as V1 (story 092 retires the strategy)");
         assertTrue(sys.authorizedClients(h.PHUSD_STABLE_MINTER()), "story 092: the minter is a client of the sDOLA strategy");

@@ -230,7 +230,8 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
 
     /// @dev Story 091: the sDOLA destination strategy. Address from the progress file only (code required by the
     ///      loader); every property from chain. V2 client + V2 buffer are Phase 4's `_donePoolClientSet` /
-    ///      `_donePoolBufferCopied`, which read the destination.
+    ///      `_donePoolBufferCopied`, which read the destination. On THIS strategy the buffer target is ZERO
+    ///      (`_targetBufferPct`), so Phase 4 here asserts `setAsideBufferSize(V2) == 0`, not V1's pct.
     function _verifyPhase3b_sdolaStrategy() internal view {
         console.log("\n=== verify Phase 3b: sDOLA destination strategy ===");
         require(
@@ -263,8 +264,14 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             require(
                 _donePoolStrategySet(t), string.concat("verify: Phase4: V2.setYieldStrategy(", sym, ") not on chain")
             );
+            // Target pct, not V1's: zero on the sDOLA destination (DOLA), V1's pct on USDC / USDe.
             require(
-                _donePoolBufferCopied(t), string.concat("verify: Phase4: setSetAsideBuffer(V2) for ", sym, " not on chain")
+                _donePoolBufferCopied(t),
+                string.concat(
+                    "verify: Phase4: setAsideBufferSize(V2) for ",
+                    sym,
+                    " != target on chain (ZERO on the sDOLA strategy, V1's pct elsewhere)"
+                )
             );
             require(_donePoolRateSet(t), string.concat("verify: Phase4: V2.antimatterPerDay(", sym, ") not on chain"));
             console.log("  pool configured:", t, sym);
