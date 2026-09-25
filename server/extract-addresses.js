@@ -6,6 +6,7 @@ const path = require('path');
  */
 const CHAIN_OUTPUT_MAP = {
     31337: 'local.json',      // Anvil/Local
+    11155111: 'sepolia.json', // Sepolia (story 098: DeployMocksSepolia; same filtering as 31337)
     1: 'mainnet.json'         // Mainnet
 };
 
@@ -14,6 +15,7 @@ const CHAIN_OUTPUT_MAP = {
  */
 const CHAIN_NAME_MAP = {
     31337: 'anvil',
+    11155111: 'sepolia',
     1: 'mainnet'
 };
 
@@ -212,6 +214,7 @@ function parseArgs() {
             console.error('Usage: node extract-addresses.js [chainId]');
             console.error('Supported chain IDs:');
             console.error('  31337     - Anvil/Local (default)');
+            console.error('  11155111  - Sepolia');
             console.error('  1         - Mainnet');
             process.exit(1);
         }

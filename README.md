@@ -19,8 +19,10 @@ forge test
 # Local (Anvil)
 npm run dev:anvil
 
-# Testnet
-npm run deploy:sepolia
+# Testnet (Sepolia mock stack: script/DeployMocksSepolia.s.sol; env RPC_SEPOLIA, DEPLOYER_SEPOLIA_pk)
+npm run deploy:sepolia-preview   # simulate only
+npm run deploy:sepolia           # broadcast, then write server/deployments/sepolia-addresses.ts
+npm run deploy:sepolia:resume    # after a partial broadcast (forge --resume)
 
 # Production
 npm run deploy:mainnet

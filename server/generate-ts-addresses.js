@@ -4,7 +4,13 @@
  * Generate TypeScript-compatible address object from extracted deployment data.
  * Outputs an object literal that can be copied directly into TypeScript code.
  *
- * ANVIL (chainId 31337) ONLY.
+ * ANVIL (chainId 31337) and SEPOLIA (chainId 11155111).
+ *
+ * 31337 is the ONLY chain that (re)generates the `ContractAddresses` interface in
+ * `deployments/addresses.ts`. Sepolia (story 098) writes `deployments/sepolia-addresses.ts`
+ * (`export const sepoliaAddresses: ContractAddresses`) AGAINST the existing interface and never
+ * touches `addresses.ts`: if the Sepolia key set differs from the interface's in any way, the
+ * script fails loudly and writes nothing, so drift is fixed deliberately rather than papered over.
  *
  * The mainnet (chainId 1) codegen path was removed deliberately. Mainnet is an
  * ever-evolving target whose addresses are maintained by hand in
@@ -20,25 +26,85 @@
  *
  * Examples:
  *   node server/generate-ts-addresses.js 31337     # Local/Anvil
+ *   node server/generate-ts-addresses.js 11155111  # Sepolia (interface read-only)
  *   node server/generate-ts-addresses.js           # Defaults to 31337
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// Chain ID to input file mapping (anvil only)
+// Chain ID to input file mapping
 const CHAIN_FILE_MAP = {
-    31337: 'local.json'
+    31337: 'local.json',
+    11155111: 'sepolia.json'
 };
 
-// Chain ID to output file mapping (anvil only)
+// Chain ID to output file mapping
 const CHAIN_OUTPUT_MAP = {
-    31337: 'local-addresses.ts'
+    31337: 'local-addresses.ts',
+    11155111: 'sepolia-addresses.ts'
 };
 
 const CHAIN_NAME_MAP = {
-    31337: 'anvil'
+    31337: 'anvil',
+    11155111: 'sepolia'
 };
+
+// The only chain whose extraction defines the ContractAddresses interface.
+const INTERFACE_SOURCE_CHAIN_ID = 31337;
+
+/**
+ * Reads the key set of `export interface ContractAddresses { ... }` from addresses.ts.
+ * Exits non-zero if the file or the interface block cannot be found.
+ */
+function readInterfaceKeys() {
+    const interfacePath = path.join(__dirname, 'deployments', 'addresses.ts');
+    if (!fs.existsSync(interfacePath)) {
+        console.error(`Error: interface file not found: ${interfacePath}`);
+        process.exit(1);
+    }
+    const source = fs.readFileSync(interfacePath, 'utf-8');
+    const block = source.match(/export interface ContractAddresses\s*\{([\s\S]*?)\n\}/);
+    if (!block) {
+        console.error(`Error: no 'export interface ContractAddresses { ... }' block in ${interfacePath}`);
+        process.exit(1);
+    }
+    const keys = [];
+    for (const line of block[1].split('\n')) {
+        const m = line.match(/^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*string\s*;/);
+        if (m) keys.push(m[1]);
+    }
+    if (keys.length === 0) {
+        console.error(`Error: ContractAddresses in ${interfacePath} has no keys`);
+        process.exit(1);
+    }
+    return keys;
+}
+
+/**
+ * Fails loudly (exit 2) unless `contractNames` is exactly the interface key set.
+ */
+function assertKeySetMatchesInterface(chainId, inputFile, contractNames, interfaceKeys) {
+    const have = new Set(contractNames);
+    const want = new Set(interfaceKeys);
+    const missing = interfaceKeys.filter((k) => !have.has(k));
+    const extra = contractNames.filter((k) => !want.has(k));
+    if (missing.length === 0 && extra.length === 0) {
+        console.log(`Key set OK: ${contractNames.length}/${interfaceKeys.length} keys match ContractAddresses`);
+        return;
+    }
+    console.error('\n' + '='.repeat(60));
+    console.error(`REFUSING: ${inputFile} (chainId ${chainId}) key set != ContractAddresses interface`);
+    console.error('='.repeat(60));
+    console.error(`Interface keys: ${interfaceKeys.length}, extracted keys: ${contractNames.length}`);
+    if (missing.length) console.error(`Missing from ${inputFile}: ${missing.join(', ')}`);
+    if (extra.length) console.error(`Not in the interface: ${extra.join(', ')}`);
+    console.error('addresses.ts is generated from chain 31337 only and is NOT rewritten here.');
+    console.error('Fix the deploy script (or the interface, via a local deploy) so the sets agree.');
+    console.error('Nothing was written.');
+    console.error('='.repeat(60) + '\n');
+    process.exit(2);
+}
 
 function generateInterfaceFile(chainId, inputFile, contracts) {
     const interfacePath = path.join(__dirname, 'deployments', 'addresses.ts');
@@ -91,7 +157,7 @@ function generateTsAddresses(chainId) {
 
     if (!inputFile) {
         console.error(`Error: Unsupported chainId '${chainId}'.`);
-        console.error('Supported chain IDs: 31337 (Anvil)');
+        console.error('Supported chain IDs: 31337 (Anvil), 11155111 (Sepolia)');
         process.exit(1);
     }
 
@@ -100,17 +166,28 @@ function generateTsAddresses(chainId) {
 
     if (!fs.existsSync(inputPath)) {
         console.error(`Error: Input file not found: ${inputPath}`);
-        console.error("Run 'npm run extract:addresses' first.");
+        console.error(chainId === 11155111
+            ? "Run 'npm run extract:sepolia' first."
+            : "Run 'npm run extract:addresses' first.");
         process.exit(1);
     }
 
     // Read extracted addresses
     const data = JSON.parse(fs.readFileSync(inputPath, 'utf-8'));
 
-    const contracts = Object.entries(data.contracts || {});
+    let contracts = Object.entries(data.contracts || {});
 
-    // Generate the interface file first
-    generateInterfaceFile(chainId, inputFile, contracts);
+    if (chainId === INTERFACE_SOURCE_CHAIN_ID) {
+        // Generate the interface file first
+        generateInterfaceFile(chainId, inputFile, contracts);
+    } else {
+        // Non-anvil chains type against the EXISTING interface and must match it exactly.
+        const interfaceKeys = readInterfaceKeys();
+        assertKeySetMatchesInterface(chainId, inputFile, contracts.map(([name]) => name), interfaceKeys);
+        // Emit in interface order so diffs against local-addresses.ts line up.
+        const byName = new Map(contracts);
+        contracts = interfaceKeys.map((name) => [name, byName.get(name)]);
+    }
 
     // Build TypeScript object literal
     const lines = [];
@@ -155,7 +232,7 @@ function parseArgs() {
         if (isNaN(parsed)) {
             console.error(`Error: Invalid chainId '${args[0]}'. Must be a number.`);
             console.error('Usage: node server/generate-ts-addresses.js [chainId]');
-            console.error('  chainId: 31337 (Anvil)');
+            console.error('  chainId: 31337 (Anvil) | 11155111 (Sepolia)');
             process.exit(1);
         }
         chainId = parsed;

@@ -71,7 +71,7 @@ phStaging2/
 │   └── immutable/               # Immutable dependencies (full source)
 ├── script/
 │   ├── DeployAnvil.s.sol        # Anvil deployment script
-│   ├── DeploySepolia.s.sol      # Sepolia deployment script
+│   ├── DeployMocksSepolia.s.sol # Sepolia MOCK-stack deployment script (story 098)
 │   ├── DeployMainnet.s.sol      # Mainnet deployment script
 │   └── helpers/                 # Deployment helper contracts
 ├── src/
@@ -228,9 +228,11 @@ The `package.json` should provide scripts for each network:
 ```json
 {
   "scripts": {
-    "deploy:sepolia": "forge script script/DeploySepolia.s.sol:DeploySepolia --rpc-url $SEPOLIA_RPC_URL --broadcast --verify",
+    "deploy:sepolia-preview": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --private-key $DEPLOYER_SEPOLIA_pk -vvv",
+    "deploy:sepolia": "rm -f server/deployments/progress.11155111.json && forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
+    "deploy:sepolia:resume": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --resume --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
     "extract:sepolia": "node server/extract-addresses.js 11155111",
-    "dev:sepolia": "npm run deploy:sepolia && npm run extract:sepolia && npm run generate:hooks && npm run serve"
+    "generate:ts-sepolia": "node server/generate-ts-addresses.js 11155111"
   }
 }
 ```
@@ -248,7 +250,8 @@ The `package.json` should provide scripts for each network:
 
 ### Deployment Script Structure
 
-Each deployment script (DeployAnvil.s.sol, DeploySepolia.s.sol, DeployMainnet.s.sol) should:
+Each deployment script (DeployAnvil.s.sol, DeployMocksSepolia.s.sol, DeployMainnet.s.sol) should:
+(DeployMocksSepolia is a one-shot fresh deploy: it writes `progress.11155111.json` at the end and recovers from a partial broadcast with forge's `--resume` via `npm run deploy:sepolia:resume`, not by skipping steps.)
 
 1. **Load progress file**: Read `progress.<chainId>.json`
 2. **Skip completed steps**: Check which contracts are already deployed
@@ -460,9 +463,9 @@ git rm --cached .envrc .npmrc
 ANVIL_PORT=8545
 ANVIL_CHAIN_ID=31337
 
-# Sepolia Configuration
-SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_INFURA_KEY
-SEPOLIA_CHAIN_ID=11155111
+# Sepolia Configuration (names as used by the npm scripts; set in .envrc)
+RPC_SEPOLIA=https://sepolia.infura.io/v3/YOUR_INFURA_KEY
+SEPOLIA_WETH_SEED=  # optional, wei; total ETH wrapped for the two WETH UniV2 pools (default 0.1 ether)
 
 # Mainnet Configuration (PRODUCTION - USE WITH EXTREME CAUTION)
 MAINNET_RPC_URL=https://mainnet.infura.io/v3/YOUR_INFURA_KEY
@@ -474,7 +477,7 @@ API_HOST=localhost
 
 # Deployment Keys (NEVER COMMIT REAL KEYS)
 ANVIL_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-SEPOLIA_PRIVATE_KEY=  # Load from secure vault
+DEPLOYER_SEPOLIA_pk=  # Sepolia deployer key (.envrc); never print it
 MAINNET_PRIVATE_KEY=  # Load from hardware wallet or secure vault
 
 # Etherscan API Keys (for verification)
@@ -662,9 +665,8 @@ Deployments can fail partway through. The progress file system enables recovery:
 npm run deploy:sepolia
 # Error: Network timeout
 
-# Resume deployment (skips already-deployed contracts)
-npm run deploy:sepolia
-# Continues from contract 3
+# Resume deployment (forge --resume re-sends only the unconfirmed transactions)
+npm run deploy:sepolia:resume
 ```
 
 **Scenario 2: Gas Price Spike**
@@ -685,8 +687,8 @@ npm run deploy:sepolia
 # Ctrl+C after 2 contracts
 
 # Verify contracts on Etherscan
-# Continue when satisfied
-npm run deploy:sepolia
+# Continue when satisfied (never re-run deploy:sepolia here: it starts a fresh deployment)
+npm run deploy:sepolia:resume
 ```
 
 ### Progress File Best Practices
@@ -766,13 +768,32 @@ forge test -vvv
 5. **Verify**: Check `http://localhost:3001/contracts?network=31337`
 6. **Integrate**: Phoenix UI fetches contracts and uses generated hooks
 
-### Sepolia (Testnet)
-1. **Configure**: Set `SEPOLIA_RPC_URL` and `SEPOLIA_PRIVATE_KEY` in .env
-2. **Test**: Ensure all Foundry tests pass
-3. **Deploy**: Run `npm run deploy:sepolia`
-4. **Verify**: Check Sepolia Etherscan for deployed contracts
-5. **Extract**: Run `npm run extract:sepolia` to generate deployment JSON
-6. **Test Integration**: Point Phoenix UI to Sepolia network
+### Sepolia (Testnet) — `script/DeployMocksSepolia.s.sol` (story 098)
+A fresh, full-surface deployment of the current contract set onto Sepolia, backed entirely by
+**mock** tokens (unrestricted `mint`). It is a standalone copy derived from `DeployMocks.s.sol`,
+which stays the anvil script and is not shared with it — re-derive by hand when DeployMocks changes.
+The script header lists exactly what was dropped (anvil gates, `vm.roll`, the 300-ETH WETH seed,
+the StableStakerV1 -> V2 cutover rehearsal, the DOLA autoDOLA -> sDOLA repoint rehearsal, the
+anvil seed stakers and the Kendu promo) and what was kept (the disabled index-6 placeholder, so
+NudgeRatchet sits at dispatcher index / ERC-1155 id 7 as on mainnet).
+
+**Ownership exception.** Every contract is owned by the deployer EOA. Rules 4-5 under *Required
+Behavior* gate relaxations on chainId 31337; this mock Sepolia stack is an explicit product-owner
+exception, because every token is a mock and nothing of value is at stake. It does not extend to
+any script that touches real assets.
+
+1. **Configure**: `.envrc` provides `RPC_SEPOLIA`, `DEPLOYER_SEPOLIA_pk` and `ETHERSCAN_API_KEY`;
+   optionally `SEPOLIA_WETH_SEED` (wei, default 0.1 ether total). Fund the deployer with the
+   Sepolia ETH the story-098 completion notes measured.
+2. **Test**: `forge build --sizes`, `forge fmt --check`, `forge test`
+3. **Preview**: `npm run deploy:sepolia-preview` (simulation, no broadcast)
+4. **Deploy**: `npm run deploy:sepolia` — broadcasts `--slow` (roughly an hour), then runs
+   `extract:sepolia` and `generate:ts-sepolia`
+5. **Resume**: after a partial broadcast, `npm run deploy:sepolia:resume` (forge `--resume`)
+6. **Result**: `server/deployments/sepolia-addresses.ts` exports
+   `sepoliaAddresses: ContractAddresses`. `generate:ts-sepolia` never rewrites `addresses.ts`;
+   it fails loudly if the Sepolia key set differs from the interface. Commit the generated file.
+7. **Verify** (optional): `forge verify-contract <address> <name> --chain sepolia`
 
 ### Mainnet (Production)
 1. **Audit**: Ensure contracts are audited and reviewed
