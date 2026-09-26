@@ -1,0 +1,407 @@
+{
+  "chainId": 11155111,
+  "networkName": "sepolia",
+  "deploymentStatus": "completed",
+  "extractedAt": "2026-09-25T23:06:50.295Z",
+  "contracts": {
+    "PhUSD": {
+      "address": "0x93F12bA5537bB6D2C2A6D39CfAee1251568674Da",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 890615,
+      "configGas": 0
+    },
+    "USDC": {
+      "address": "0x106C89C553a77c1c0DAAf531eBCB19100916317e",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 604591,
+      "configGas": 0
+    },
+    "USDS": {
+      "address": "0x6CC4Af9f860f72A123b1729da18D07c3704d6231",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 580951,
+      "configGas": 0
+    },
+    "SUSDS": {
+      "address": "0x79f4DDdB35552E616d91d3eDf7532ECD1D38aeaB",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1142445,
+      "configGas": 0
+    },
+    "USDe": {
+      "address": "0xb1Cb8eC89eF1B27e9cc32e9848B9187Be30Be88c",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 580951,
+      "configGas": 0
+    },
+    "SUSDe": {
+      "address": "0x93d09dfBC738a57A1Ede33b4B35DcAb65FF06982",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1142246,
+      "configGas": 0
+    },
+    "Dola": {
+      "address": "0xd224558Fae4f0132141d4FBCb1a3DeBC69a24Fd5",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 580951,
+      "configGas": 0
+    },
+    "EYE": {
+      "address": "0xabea16Df430D4f53a9213A424889533dEd81f3FD",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 616414,
+      "configGas": 0
+    },
+    "SCX": {
+      "address": "0x85232C27e5bDE2255a1Dd200462f24143918f352",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 616414,
+      "configGas": 0
+    },
+    "Kendu": {
+      "address": "0x88DF78B2D28F5D98e1A7f4aad2e88F67BFe24C03",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 580951,
+      "configGas": 0
+    },
+    "Flax": {
+      "address": "0xaAb9aA45f4B1eDF40f0C91c9629a94Fe2F8D0b46",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 616453,
+      "configGas": 0
+    },
+    "WBTC": {
+      "address": "0xDAbaaE64da759B38B155067F9F4469658624241F",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 580990,
+      "configGas": 0
+    },
+    "Pauser": {
+      "address": "0x99741e681b7e3592d33C8866037B6b75BE9C2409",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1046056,
+      "configGas": 0
+    },
+    "AutoDOLA": {
+      "address": "0x63C73d1294812e924C46f34f6C8AedA4981E7bC3",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1220146,
+      "configGas": 0
+    },
+    "YieldStrategyDolaLegacy": {
+      "address": "0xA884676433DFAC79B4b6d8C250B1e4e88efe6660",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2901129,
+      "configGas": 0
+    },
+    "SDOLA": {
+      "address": "0x01E2Da0025E0fA62115B75Ea97066ad5a805422D",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1142175,
+      "configGas": 0
+    },
+    "YieldStrategyDola": {
+      "address": "0xb522a7453d31e35B18ACd518A92F20cC4bc2b191",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2899849,
+      "configGas": 0
+    },
+    "AutoUSDC": {
+      "address": "0xa0b5AE88B69d7724bE4eB37f3baa563A124f0803",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1219749,
+      "configGas": 0
+    },
+    "YieldStrategyUSDC": {
+      "address": "0x9556b844d31F44Fd9dB88B0EBFFc138CFe2c9ae4",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2899937,
+      "configGas": 0
+    },
+    "USDeAMMAdapter": {
+      "address": "0x42a9a503C508089480c62AA524d5f7569F7da7F7",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 622714,
+      "configGas": 0
+    },
+    "YieldStrategyUSDe": {
+      "address": "0x092c9808a954173BD836481b40B10179C052fbde",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 3111216,
+      "configGas": 0
+    },
+    "PhusdStableMinter": {
+      "address": "0x74030C5C9886A89744C9655E562452779A641d46",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1308905,
+      "configGas": 0
+    },
+    "PhlimboV3": {
+      "address": "0x184a060318789FA81A0d9dD15a1220655705f68c",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 3083150,
+      "configGas": 0
+    },
+    "StableYieldAccumulator": {
+      "address": "0x97f817C180DDc28Ed08fcf0cd98A50805e7e2131",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2287344,
+      "configGas": 0
+    },
+    "BalancerPool": {
+      "address": "0x1248262B095d821bF13012d9E9a6D57aBc1C1ba9",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 633393,
+      "configGas": 0
+    },
+    "BalancerVault": {
+      "address": "0x5E07e6037b89CE1216be104516C079f0f2c877B2",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 746085,
+      "configGas": 0
+    },
+    "BurnRecorder": {
+      "address": "0x50337fEb1fA16EE9A9f15c1e5Cb52E84783041dC",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 368777,
+      "configGas": 0
+    },
+    "BalancerRouter": {
+      "address": "0x1bddE640973F291D466e76C91a846240103aDF23",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 191974,
+      "configGas": 0
+    },
+    "NFTMinter": {
+      "address": "0x69FaD9391eb95761B444B9b651f61453B294990a",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2735379,
+      "configGas": 0
+    },
+    "UniboostEYE": {
+      "address": "0xD49c5F968544D6BE74a374708aBBC10D477fFd95",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2465662,
+      "configGas": 0
+    },
+    "UniboostSCX": {
+      "address": "0x739b3C2ae0C7983F6c69CC2652924875d90eA5cC",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2464732,
+      "configGas": 0
+    },
+    "UniboostFLX": {
+      "address": "0xc25CC1B22A9Dc983B1e990D230DCA2d81584bd23",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2464683,
+      "configGas": 0
+    },
+    "BalancerPooler": {
+      "address": "0xee4E1Ab8679163bc997D30013E011D147f54adf7",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2803149,
+      "configGas": 0
+    },
+    "GatherWBTC": {
+      "address": "0x914580652e2757a2b04362A6d4763717B2bB0F92",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1257360,
+      "configGas": 0
+    },
+    "MultiPooler": {
+      "address": "0xAa178b9C5914530e9d030E3919e762ffBe85Bf54",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 363770,
+      "configGas": 0
+    },
+    "UniboostHookEYE": {
+      "address": "0x2310ca60bfb374DCC42f60644116f81Dd6632c4c",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "UniboostHookSCX": {
+      "address": "0x6AA4a56095856033DFec1AE4f8ba6D1e3c1Fa66D",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "UniboostHookFLX": {
+      "address": "0x50fC11160b1e07376A75749243a5b804659595D6",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "WaUSDC": {
+      "address": "0x78C770f239ce34Aef975b5C8f47250FBcef17Ee2",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 700866,
+      "configGas": 0
+    },
+    "SkyPSM": {
+      "address": "0xbd45Cda2b53BB7E1cb4961422f5e4e0DB5E44208",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 341380,
+      "configGas": 0
+    },
+    "BalancerPoolerMintDebtHook": {
+      "address": "0xa6CBAd6e5310De140D87d856cB67D27e84089073",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 669980,
+      "configGas": 0
+    },
+    "NFTStaker": {
+      "address": "0x55BE811cD3ff16D6bB7f0315E699265A28713338",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2394299,
+      "configGas": 0
+    },
+    "NudgeStreamer": {
+      "address": "0xd0b92CbEFcB0606a250BfEdcA86c486c64bF211b",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 749921,
+      "configGas": 0
+    },
+    "BatchNFTMinter": {
+      "address": "0x0A1328Ae360791d90544354f4545DC95391815dB",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1545167,
+      "configGas": 0
+    },
+    "UniboostStakerEYE": {
+      "address": "0x3E7468cf470ED96f99d6b216dB425DDA3c7982e3",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "UniboostStakerSCX": {
+      "address": "0x5B96DD369d16626293A12e23728B464AC40FD1c5",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "UniboostStakerFLX": {
+      "address": "0xb7cd41fD8b83187EAE7f25e52eE3057D9D5DBACB",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "EyeBatchNFTMinter": {
+      "address": "0x052b3Ea6d8300c66e7a5a57A327Ee1945bb84610",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 1042501,
+      "configGas": 0
+    },
+    "ScxBatchNFTMinter": {
+      "address": "0x664e4069e1A9D1e51632A95234DC9B682cd78123",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 1042501,
+      "configGas": 0
+    },
+    "FlxBatchNFTMinter": {
+      "address": "0x98679D4AF8fAB694CC79857E0EFfcacFb3A8eB28",
+      "deployed": true,
+      "configured": false,
+      "deployGas": 1042501,
+      "configGas": 0
+    },
+    "NudgeRatchet": {
+      "address": "0x25e1bc509B988F9464d9009310a0a5E94AB54ba7",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1545994,
+      "configGas": 0
+    },
+    "NudgeRatchetMintDebtHook": {
+      "address": "0xeD222ebab4fED21Fd47c1a09618D706E99B910ea",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 697431,
+      "configGas": 0
+    },
+    "RatchetNFTStaker": {
+      "address": "0x8b6F7B243cfc4185Dd9db90C120E17D2BB7b6910",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2417896,
+      "configGas": 0
+    },
+    "RatchetBatchNFTMinter": {
+      "address": "0x3fDBD9bA002624Ecc8B0EdF4136bD5EFE81C1942",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1064614,
+      "configGas": 0
+    },
+    "Antimatter": {
+      "address": "0xf9801f60945bBe5e01376D5F8445f380A0F701F1",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2000945,
+      "configGas": 0
+    },
+    "StableStakerV2": {
+      "address": "0x3996F77f54f4Aa8d26146054c526A4e62967b1C0",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 4058677,
+      "configGas": 0
+    },
+    "ViewRouter": {
+      "address": "0x8F16599BF6BC5fdE3581bD49DCB94586b98F8ED7",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 516177,
+      "configGas": 0
+    }
+  }
+}
