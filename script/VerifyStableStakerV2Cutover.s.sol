@@ -30,8 +30,9 @@ import {ICutoverStaker} from "./helpers/StableStakerCutoverCore.sol";
  *         READ-ONLY CONTRACT. No broadcast context, no prank, no balance cheat, no time warp, no state
  *         snapshot, no storage write, no file write, no forge-std test import. Inherited mutators of the
  *         cutover script (the phase bodies, the preview smoke tests, the simulated global pause, the progress
- *         writer) are never called. `test/VerifyStableStakerV2CutoverGuards.t.sol` pins all of this at
- *         source level, so those identifiers are deliberately never spelled out in this file.
+ *         writer) are never called. `test/VerifyStableStakerV2CutoverGuards.t.sol` pinned all of this at
+ *         source level (retired after the 2026-09-23 cutover; recover it from git history), so those
+ *         identifiers are deliberately never spelled out in this file.
  *
  *         Phase 0 of the cutover script IS called: it only reads chain state (it fills this contract's own
  *         `tokens` / `cPerDay` / `v1BufferPct` memory, which Phase 4 and Phase 8 need) and adopts the persisted

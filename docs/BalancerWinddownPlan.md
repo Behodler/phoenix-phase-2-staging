@@ -256,8 +256,8 @@ The build follows four stages in strict order. Each stage finishes, and is audit
 |---|---|
 | owner `0xCad1…D0B6` | Owner |
 | `MultiPooler` `0xd1E5…7b51` | Gated to its own `pooler` |
-| `0x186c…a77F` | A 7702-delegated EOA from `WhitelistPoolersV2` |
-| `0x6309…d476` | An EOA from `WhitelistPoolersV2` |
+| `0x186c…a77F` | A 7702-delegated EOA, granted by a `Temp.s.sol` transaction |
+| `0x6309…d476` | An EOA, granted by a `Temp.s.sol` transaction |
 
 - **Why revoke:** that isn't theft, because the BPT stays on the pooler. But every sUSDS added has to come back out through the exit, and a `pool()` with a loose `minBPT` is sandwichable.
 - **How:** one owner transaction, `BalancerPoolerV2.incrementAuthVersion()`, revokes all four at once.

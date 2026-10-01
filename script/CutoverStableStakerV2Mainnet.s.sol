@@ -54,7 +54,8 @@ import {
  *      Pauser.register(Antimatter). See HALTED RUNS below for why nothing is exposed and the remedy.
  *      The rule on both sides: never leave a
  *      registrant paused or un-pausable by the Pauser - unregister BEFORE pause (Phase 1), unpause BEFORE
- *      register (Phase 7). `test/CutoverStableStakerV2Mainnet.fork.t.sol` probes this per transaction.
+ *      register (Phase 7). `test/CutoverStableStakerV2Mainnet.fork.t.sol` probed this per transaction
+ *      (retired after the 2026-09-23 cutover; recover it from git history).
  *      PREVIEW additionally proves the breaker with a simulated EYE-funded `Pauser.pause()` inside a
  *      state snapshot at: end of Phase 0 (V1-only tolerant), then STRICTLY after every phase 1..7 and after
  *      Phase 8 (log `GLOBAL_PAUSE|<stage>|SUCCEEDED|registered=<n>`, stages phase0, after-phase1 ..

@@ -11,8 +11,10 @@ import "@forge-std/console.sol";
  *         0x7f6874332c4629429d70D15f685A8230323F11F1, revokes all four authorized poolers at once:
  *           - OWNER        0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6
  *           - MultiPooler  0xd1E5774159381915f5579dFd68507E2614f67b51
- *           - 0x186c77B80Bbfd21b01C7D7FA44bA27031322a77F (7702-delegated EOA, WhitelistPoolersV2)
- *           - 0x630966B668b321Cc6441754f96519a55F72Cd476 (EOA, WhitelistPoolersV2)
+ *           - 0x186c77B80Bbfd21b01C7D7FA44bA27031322a77F (7702-delegated EOA, granted by a Temp.s.sol transaction)
+ *           - 0x630966B668b321Cc6441754f96519a55F72Cd476 (EOA, granted by a Temp.s.sol transaction)
+ *         (script/archives/WhitelistPoolersV2.s.sol authorized these two on the RETIRED pooler 0x26F8..b38A, not on
+ *         this one.)
  *         After it, nobody can call `pool(minBPT)` and push sUSDS into the dying Balancer pool. Mints are unaffected:
  *         `dispatch` is `onlyMinter` and does not consult pooler auth; sUSDS simply accumulates on the pooler.
  *
