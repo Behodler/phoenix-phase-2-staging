@@ -276,23 +276,26 @@ It is `BalancerPoolerV2` with the Balancer parts removed and a Uniswap V2 zap in
 **What is removed:** `IUnlockCallback`, `unlockCallback`, `getIdealBPT`, `withdrawBPT`, and the vault and router immutables.
 
 **What is new:**
-- Immutables `_router` (Uniswap V2 Router02 `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D`) and `_pair`. The constructor validates that `{pair.token0, pair.token1} == {sUSDS, phUSD}`.
+- Immutables `_router` (Uniswap V2 Router02 `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D`) and `_pair`. The constructor validates that `{pair.token0, pair.token1} == {sUSDS, phUSD}`, and reverts `UniPoolerV2__PairNotCanonical` unless `pair` is the router factory's canonical pair (`IUniswapV2Factory(router.factory()).getPair(sUSDS, phUSD) == pair`). The pair must therefore already exist when the pooler is deployed (it may be empty), which fixes the Stage 2 order.
 - `pool(uint256 sUSDSIn, uint256 minPhusdOut, uint256 minLP)`, and the view `quotePool(uint256 sUSDSIn) returns (uint256 swapIn, uint256 phusdOut, uint256 expectedLP)`.
 
-**The efficiency requirement is met by computing the swap amount on-chain.** The contract reads the pair's reserves at execution time and derives the exact swap from them:
+**The efficiency requirement is met by computing the swap amount on-chain.** `pool()` first calls `pair.sync()`, then reads the pair's reserves and derives the exact swap from them:
 
 ```solidity
-// r = live sUSDS reserve read inside pool(), a = sUSDSIn, 0.30% fee:
+// r = sUSDS reserve read inside pool() right after pair.sync(), a = sUSDSIn, 0.30% fee:
 //   s = (sqrt(r * (r * 3988009 + a * 3988000)) - r * 1997) / 1994
 // Swapping s leaves (a - s) sUSDS and phusdOut phUSD in exactly the post-swap reserve ratio,
 // so addLiquidity consumes both sides with at most wei-level rounding dust.
 ```
+
+**Why the `sync()` matters.** V2 `swap()` credits its input as `balance - reserve`, so tokens sent to the pair without a sync (a donation) would be absorbed into our swap while `s`, sized from the stale reserves, no longer balances the two legs. Syncing first folds any such donation into the reserves (to the pair's LPs, which is overwhelmingly our POL), so `s` balances again. `pool()` never calls `skim()`, which would hand the donation to an arbitrary recipient.
 
 **Why it can't be sized off-chain.** If the UI computed the swap amount itself, any price movement between quote and execution would leave one side over-supplied, and the router would refund the surplus. Deriving `s` from the reserves the swap actually executes against removes that failure mode entirely:
 - A front-run changes `s` and the price we buy at, but not the leftover, which stays near zero.
 - The worst the front-run can do is make us buy at a worse price, and that is what the slippage parameters bound.
 
 **The UI's job** is to call `quotePool(sUSDSIn)` and then call `pool(sUSDSIn, minPhusdOut, minLP)`:
+- `quotePool` is a `view`, so it can't sync. It sizes from the pair's token balances (`balanceOf(pair)`), which are exactly the reserves `pool()`'s `sync()` will produce, so the quote matches execution even after an unsynced donation.
 - `minPhusdOut` and `minLP` are `quotePool`'s outputs reduced by a tolerance.
 - The UI never passes `s`.
 
@@ -300,11 +303,16 @@ It is `BalancerPoolerV2` with the Balancer parts removed and a Uniswap V2 zap in
 - `minPhusdOut` and `minLP` must be non-zero.
 - There is **deliberately no price ceiling.** Pooling that pushes phUSD above the $1 mint price is intended: arbitrageurs then mint phUSD through `PhusdStableMinter` and sell it into the pair, and every such mint adds collateral to the yield strategies, which grows protocol-owned yield.
 
+**Kill switches.** There are two, and they do different things. Both exist on `BalancerPoolerV2` and `UniPoolerV2`:
+- **`incrementAuthVersion()` (owner) is the pool-only kill switch.** It revokes every authorized pooler at once, so `pool()` stops while `dispatch`, and so every index-4 mint, keeps working. This is the switch the holding pattern uses, and the one to reach for if pooling misbehaves.
+- **`pause()` / `unpause()` stop mints.** They live on the `ATokenDispatcherV2` base and are `onlyMinter`, so the only normal caller is `NFTMinterV2.setDispatcherActive`. `dispatch` is `whenNotPaused`, so pausing a live dispatcher blocks every index-4 mint (and `pool()`, which is gated too). Use it only when mints themselves must stop.
+- **The Pauser can't hold a dispatcher.** No dispatcher implements `pauser()`, and `Pauser.register` requires `IPausable(c).pauser() == address(this)` (`lib/pauser/src/Pauser.sol`), so registering a dispatcher would revert. Dispatchers are never registered with the Pauser, and the cutover doesn't try.
+
 **Tests:**
 - The zap consumes both sides to within dust across a range of reserve sizes and `sUSDSIn` values.
 - A front-run reserve shift reverts on `minPhusdOut` or `minLP`, and never strands a refund.
 - `pool()` reverts on an empty pair.
-- Dispatch still works while the pooler is paused.
+- Dispatch still works while `pool()` is revoked via `incrementAuthVersion()`.
 - The donation branch passes the existing `BalancerPoolerV2` dispatch suite unchanged.
 - A mainnet-fork test runs against the real V2 router.
 
@@ -318,7 +326,7 @@ The anvil script first builds the stack as it exists on mainnet today, then perf
 1. **Build today's stack:**
    - Deploy the mock Balancer pool and `BalancerPoolerV2` at index 4.
    - Mint some NFTs so sUSDS accrues, and `pool()` it so the pooler holds BPT.
-2. **Run the cutover sequence** (Stage 2 steps 1–10).
+2. **Run the cutover sequence** (Stage 2 steps 1–12).
 3. **Leave the post-cutover state as the anvil state the UI develops against.** The UniV2 factory, router and WETH are already deployed there for Uniboost.
 
 **Work item: the mocks need a proportional exit.** `MockBalancerVault` has no `removeLiquidity` today, so it needs a proportional exit (and ideally a recovery exit) for the rehearsal to be faithful.
@@ -360,44 +368,77 @@ This is a new `script/DeployMainnetUniPoolerCutover.s.sol`. It carries the usual
 
 The script uses a progress file, `progress.unipooler-cutover.1.json`. **A crash mid-broadcast poisons the progress file**, so resume from receipts, not from the progress file.
 
-**Ordering and preconditions.** The sequence below is the same one the Stage 1 rehearsal runs:
+**Ordering and preconditions.** The sequence below is the same one the Stage 1 rehearsal runs. `UniPoolerV2`'s constructor requires the canonical pair to exist (Stage 1a), so the pair is created before the pooler is deployed, and seeded only after the BPT has been exited:
 
 0. **Preconditions** (all `require`d):
    - The pooler's authorized-pooler set is revoked.
-   - The pair doesn't exist, or its reserves are `(0,0)`.
    - Every configuration value is read live.
-1. **Deploy `UniPoolerV2`,** but don't wire it in yet.
-2. **Take the BPT out:** `BalancerPoolerV2.withdrawBPT(OWNER, fullBalance)`.
-3. **Proportional exit:**
+1. **Create the pair if it is missing:** `factory.createPair(sUSDS, phUSD)` on the Uniswap V2 factory (`router.factory()`). If the pair already exists (someone else created it), use it. Creation is permissionless and harmless in itself.
+2. **Make sure the pair is empty:**
+   - If the pair's sUSDS or phUSD balance exceeds its reserve (an unsynced pre-donation), call `pair.skim(OWNER)` first.
+   - Then `require` reserves `(0,0)` **and** token balances `(0,0)`. Checking reserves alone misses a donation that was transferred but never synced.
+3. **Deploy `UniPoolerV2`** against that pair, but don't wire it in yet. The constructor's canonical-pair check passes because step 1 created the pair through the router's own factory.
+4. **Take the BPT out:** `BalancerPoolerV2.withdrawBPT(OWNER, fullBalance)`.
+5. **Proportional exit:**
    - Before 30 Oct: `removeLiquidityProportional`.
    - After 30 Oct: `removeLiquidityRecovery`.
    - `minAmountsOut` is the live proportional share minus a tight tolerance. It is never 0.
-4. **Seed the pair in one atomic helper call.** The helper runs `addLiquidity` with **all** the recovered sUSDS and phUSD, with `to = UniPoolerV2`. The proportional exit returns tokens in exactly the Balancer pool's reserve ratio, so seeding with both amounts carries the existing price over unchanged and leaves nothing behind (decision 3). Doing it in one call means the new price can't be sandwiched between creating the pair and the first add.
-5. **Clean the hook ledger:** `BalancerPoolerMintDebtHook.pull()`.
-6. **Repoint the hook:** `hook.setDispatcher(UniPoolerV2)`, then `UniPoolerV2.setHook(hook)`.
-7. **Configure `UniPoolerV2`:**
+6. **Seed the pair in one atomic call.** Router02 `addLiquidity` with **all** the recovered sUSDS and phUSD, with `to = UniPoolerV2`. `amountAMin`/`amountBMin` are the recovered amounts minus a tight tolerance, never 0. The proportional exit returns tokens in exactly the Balancer pool's reserve ratio, so seeding with both amounts carries the existing price over unchanged and leaves nothing behind (decision 3). Only tokens recovered from Balancer seed the pair.
+7. **Clean the hook ledger:** `BalancerPoolerMintDebtHook.pull()`, then `require(mintDebt() == 0)`.
+8. **Repoint the hook:** `hook.setDispatcher(UniPoolerV2)`, then `UniPoolerV2.setHook(hook)`.
+   - `setHook` must come before step 10. Until it replaces the constructor's `DefaultDispatchHook`, `UniPoolerV2._dispatch` reverts `UniPoolerV2__HookNotSet`, so **every index-4 mint reverts until `setHook`**. That is deliberate: a missed `setHook` fails loudly instead of silently accruing no mint debt.
+9. **Configure `UniPoolerV2`:**
    - `setMinter(NFTMinterV2)`. `replaceDispatcher` doesn't wire this, and without it index 4 bricks.
    - The PSM, `maxTout`, `batchMinter`, `nudgeStreamer` and `batchDonationSize` values, each copied live from the old pooler.
    - `setAuthorizedPooler` for the same four poolers as today (owner, `MultiPooler`, `0x186c…a77F`, `0x6309…d476`).
-   - Register with the Pauser.
-8. **Swap the dispatcher:** `NFTMinterV2.replaceDispatcher(4, UniPoolerV2)`.
-9. **Move leftovers:** `BalancerPoolerV2.rescueERC20(sUSDS, UniPoolerV2, balance)` for sUSDS accrued since the holding pattern began, plus a USDS dust sweep.
-10. **Retire the old pooler:** pause it and unregister it from the Pauser.
-11. **Verify:**
+   - No Pauser registration. Dispatchers have no `pauser()`, so `Pauser.register` would revert (see *Kill switches* in Stage 1a).
+10. **Swap the dispatcher:** `NFTMinterV2.replaceDispatcher(4, UniPoolerV2)`. From here on every index-4 mint lands on `UniPoolerV2`.
+11. **Move the old pooler's balances**, each amount read live after step 10, so no later mint can land on the old pooler:
+    - **Accrued sUSDS:** `BalancerPoolerV2.rescueERC20(sUSDS, UniPoolerV2, fullBalance)`.
+    - **Parked USDS:** see *Interim mints* below for the destination. It is not necessarily dust.
+12. **Retire the old pooler:** `old.setMinter(OWNER)`, then `old.pause()`. `pause()` is `onlyMinter`, and `NFTMinterV2.setDispatcherActive` can't reach the old pooler any more because step 10 removed it from `dispatcherToIndex`. Nothing is unregistered from the Pauser, because it was never registered. `rescueERC20` and `withdrawBPT` aren't pause-gated, so the owner can still recover anything later.
+13. **Verify:**
     - `configs(4).dispatcher` is the new pooler.
     - `hook.dispatcher()` is the new pooler.
     - The pair's reserves match what was seeded.
     - The new pooler holds the LP.
+    - `BalancerPoolerV2` holds 0 sUSDS, 0 USDS and 0 BPT.
+    - `UniPoolerV2`'s sUSDS balance equals the sUSDS rescued in step 11 (plus the wrapped parked USDS, if that route was taken), checked before the test mint below. On the post-broadcast `verify` it may be higher by exactly the sUSDS of index-4 mints made after step 10.
     - A forked test mint dispatches, wraps and accrues debt.
     - A `pool()` preview with `quotePool` floors succeeds.
 
+**Griefing window between steps 1 and 6.** `createPair` is permissionless, so the pair exists in public before we seed it. A front-run `createPair` is harmless: step 1 just uses the existing pair. The real nuisance is a donation:
+- **Donation without `sync()`:** before step 2, `skim(OWNER)` returns it to us. Between step 2 and step 6, the router's first mint credits `balance - reserve`, so the donation is added to our seed and becomes our LP. The donor loses it.
+- **Donation followed by `sync()`:** the reserves become non-zero and set a price. Step 2's `require` fails if this happens before it. If it happens after step 2, Router02 would quote the seed at the griefer's ratio, and step 6's tight `amountAMin`/`amountBMin` make the seed revert.
+
+**Mitigation adopted:** steps 1–6 run in the **same broadcast**, so the window is a few consecutive blocks, and a griefer must pay real tokens for a nuisance that costs us nothing. If the seed does revert, it reverts loudly before any wiring step (7–12) has run. The hook, the dispatcher and index 4 are then untouched, and the recovered sUSDS and phUSD sit on OWNER. The operator re-runs from step 6 with a reviewed recovery. For example, a helper that sends the recovered tokens to the pair and calls `pair.mint(UniPoolerV2)` absorbs the griefer's reserves into our LP, provided the resulting price is checked against the Balancer price within tolerance.
+
+**Interim mints: where every unit goes.** Mints keep landing on `BalancerPoolerV2` until step 10. This is how each balance reaches `UniPoolerV2` or its rightful destination:
+
+| Balance on `BalancerPoolerV2` | Step | Destination |
+|---|---|---|
+| BPT (the protocol's share) | 4 `withdrawBPT` → 5 exit → 6 seed | The pair, as `UniPoolerV2`'s LP |
+| sUSDS wrapped by mints since the holding pattern, up to step 10 | 11 `rescueERC20(sUSDS, UniPoolerV2, fullBalance)`, read live after step 10 | `UniPoolerV2`, pooled later through `pool()` (Stage 4 step 6) |
+| USDS parked by `DonationSkipped` | 11 | See below |
+| phUSD mint debt from interim mints | 7 `pull()` | phUSD minted to the hook's recipient (`NFTStaker`) |
+
+- **Parked USDS.** It is the donation share of mints whose PSM donation failed. A PSM outage parks every donation share, so it isn't necessarily dust. Its destination depends on whether `UniPoolerV2`'s donation is live after step 9:
+  - **Donation live** (`batchDonationSize > 0`, `batchMinter` and `psm` set): `rescueERC20(USDS, UniPoolerV2, fullBalance)`. The next index-4 dispatch's donation sweep picks it up and retries it, which is the outcome the USDS was parked for.
+  - **Donation disabled** (as at block 26,093,540, `batchDonationSize == 0`): `UniPoolerV2` would never sweep it, so `rescueERC20(USDS, OWNER, fullBalance)`, then approve and `sUSDS.deposit(amount, UniPoolerV2)` from OWNER. It is then pooled with the accrued sUSDS.
+- **Mint debt.** The debt ledger lives on the hook, not on the dispatcher, so step 7 settles every interim mint before step 8 repoints the hook. A mint between steps 7 and 8 accrues to the same ledger and is settled by the next `pull()`, so it is never lost.
+- **Mints between steps 8 and 10 revert.** `hook.onDispatch` is gated to `hook.dispatcher()`, so once step 8 repoints the hook, an index-4 mint still routed to the old pooler reverts `OnlyDispatcher`. The mint fails loudly and nothing is lost. The UI is in maintenance during the broadcast (Stage 4), which keeps this window quiet.
+
 **Audit:** run script-auditor on the cutover (fork preview, intent conformance, side effects) before Stage 3 starts.
 
-**Minimum viable fallback.** If Stages 1–2 slip past 30 October, nothing breaks and nothing is lost. Mints keep accruing sUSDS on `BalancerPoolerV2`. The BPT can still be recovered through `removeLiquidityRecovery`, and step 3 already allows for that.
+**Minimum viable fallback.** If Stages 1–2 slip past 30 October, nothing breaks and nothing is lost. Mints keep accruing sUSDS on `BalancerPoolerV2`. The BPT can still be recovered through `removeLiquidityRecovery`, and step 5 already allows for that.
 
 ### Stage 3: Sepolia fresh deployment
 
 `DeployMocksSepolia.s.sol` deploys the new contracts directly: a mock-token V2 pair plus `UniPoolerV2` at index 4, with the Balancer mocks removed and **no cutover rehearsal**. This is the same policy as the story-098 script, which dropped every anvil-only rehearsal. Update the script header's "dropped/kept" list to match.
+
+**Order on Sepolia.** The same two `UniPoolerV2` constraints apply as on mainnet:
+- Create the mock pair through the router's factory before deploying `UniPoolerV2`, or the constructor reverts `UniPoolerV2__PairNotCanonical`.
+- Call `UniPoolerV2.setHook(hook)` before the first index-4 mint, including any smoke mint. Until then every index-4 mint reverts `UniPoolerV2__HookNotSet`. Registering the dispatcher at index 4 before `setHook` is fine, as long as no mint happens in between.
 
 **Legacy keys on Sepolia.** The `ContractAddresses` interface keeps the Balancer keys until the wind-down is complete, and `generate:ts-sepolia` fails loudly on a key-set mismatch. With no Balancer mocks deployed, Sepolia must therefore emit zero-address placeholders for `BalancerPooler`, `BalancerPool`, `BalancerVault` and `BalancerRouter`. This is the same convention `mainnet-addresses.ts` uses for undeployed keys.
 
@@ -410,7 +451,12 @@ The script uses a progress file, `progress.unipooler-cutover.1.json`. **A crash 
 3. Patch `mainnet-addresses.ts`.
 4. Run `npm run deploy:sepolia` for the fresh Sepolia set, then commit the regenerated `sepolia-addresses.ts`.
 5. Publish the hooks package, then release the new UI build and lift maintenance once verification passes (UI step U3).
-6. Make the first `pool()` of the accumulated sUSDS through the new pooler.
+6. Make the first `pool()` of the accumulated sUSDS through the new pooler, sized as below.
+
+**Sizing the first `pool()`.** The accumulated sUSDS (everything Stage 2 step 11 rescued, plus mints since) may be large, and the seeded pair is about 1.59x shallower than the full Balancer pool (section 5). `pool(sUSDSIn, …)` accepts any amount up to the pooler's balance, so the operator chooses the size:
+- **First call: about the crossing.** Read the pair's balances right after the cutover and compute Δ\* = Y − X (phUSD reserve minus the sUSDS reserve valued in USDS, section 5). At the block-26,093,540 depth that is about $640 of sUSDS. A first call of about Δ* lifts phUSD to peg with no arbitrage skim.
+- **Then chunk.** Pool the rest in chunks of roughly $1–2k, letting arbitrage bring phUSD back to $1 between calls. A zap ends at the same price however it is split, so chunking doesn't change how far the price moves, but the skim each overshoot hands the arbitrageur grows with the square of the overshoot. At the seeded depth, $10k pooled in one call loses about $818 of POL to the arb, against about $79 in ten $1k chunks and about $167 in five $2k chunks. Arbitrage mints about the same phUSD (≈ 4,270–4,660, which is the collateral the no-ceiling design wants) either way.
+- **Every call is re-quoted.** Take `minPhusdOut` and `minLP` from a fresh `quotePool` before each chunk, because the previous chunk and the arbitrage both move the pair.
 
 ### After 30 November
 
@@ -430,13 +476,20 @@ Take reserves `X` sUSDS-value and `Y` phUSD, with spot price `p = X / Y`:
 | **Buy-and-pool zap** (swap `s`, add rest) | `(X+Δ, Y)` (swap moves `s` in and `phUSD` out, then the add returns that phUSD) | `(X+Δ)/Y` | **Yes** (LP for the whole Δ, minus 0.3% on `s`) | 0.3% on `s ≈ Δ/2`. 5/6 of that accrues to LPs (≈ us), 1/6 to the Uniswap fee switch |
 | Donation (`transfer` + `sync()`) | `(X+Δ, Y)` | `(X+Δ)/Y` | **No.** Value spreads pro-rata to all LP holders | ~1/6 of Δ to Uniswap `feeTo` at the next mint/burn (via the `√k` growth rule). Any non-protocol LP share also leaks. Sandwichable without a pre-check |
 
-**Worked example at today's reserves** (X ≈ 33,804, Y ≈ 34,817, p ≈ 0.971):
+Because the add returns the phUSD the swap bought, the zap ends at reserves `(X+Δ, Y)` whatever the fee. The price reaches $1 at **Δ\* = Y − X ≈ Y·(1 − p)**.
 
-| Δ (USDS value in sUSDS) | Price after |
-|---|---|
-| 250 | 0.978 |
-| 500 | 0.985 |
-| 1,000 | 0.9996 |
+**Worked example at the depth the cutover actually seeds.** The V2 pair is seeded only with what the protocol's own BPT recovers (Stage 2 steps 4–6). The EOA `0xc65f…e8db`'s 37.1% is not ours and is not seeded. At block 26,093,540 the protocol's 62.9% is X ≈ 19,129 sUSDS (≈ 21,258 USDS at 1.11128 USDS/sUSDS) and Y ≈ 21,896 phUSD, with p ≈ 0.971. That is about 1.59x shallower than the full Balancer pool (X ≈ 33,804, Y ≈ 34,817), which is shown for comparison:
+
+| Δ (USDS value in sUSDS) | Price after, seeded pair | Price after, full Balancer pool |
+|---|---|---|
+| 250 | 0.982 | 0.978 |
+| 500 | 0.994 | 0.985 |
+| **638 (seeded crossing)** | **1.000** | 0.989 |
+| 1,000 | 1.017 | 0.9996 |
+
+- **The crossing is about $638** at the seeded depth, against about $1,013 for the full pool. The audit's ~$636 agrees to within the rounding of the inputs.
+- **How these were checked:** the figures come from simulating `UniPoolerV2`'s exact zap (the closed-form swap leg `s`, the 0.30% fee, then `addLiquidity` with the remainder). The same simulation reproduces the full-pool column.
+- **The seeded depth is read live, not a constant.** It is whatever the protocol's BPT share recovers at cutover. Recompute Δ\* from the pair's balances right after seeding rather than taking it from this table.
 
 **The zap is the right choice.** It reproduces the current strategy's price-and-depth effect exactly, and the protocol keeps ownership of everything it adds. It is also the "protocol tokens approach" `Uniboost` already runs for EYE, SCX and FLX, so it is the design you suggested.
 
@@ -447,9 +500,19 @@ Take reserves `X` sUSDS-value and `Y` phUSD, with spot price `p = X / Y`:
 - **Uniswap V4's `donate()` is a different thing entirely:** it pays in-range LPs as fees and doesn't move the price at all.
 
 **Pushing through the mint price is intended.**
-- **The pool is shallow:** about $1k of sUSDS moves phUSD from 0.971 to peg, so a modest `pool()` can lift the price above $1.
+- **The pool is shallow:** about $640 of sUSDS moves phUSD from 0.971 to peg at the seeded depth, so a modest `pool()` can lift the price above $1.
 - **Why that's wanted:** above $1, arbitrageurs mint phUSD 1:1 through `PhusdStableMinter` and sell it into the pair. Every such mint adds collateral to the yield strategies, and more collateral means more protocol-owned yield.
 - **Consequence:** the pooler has no price ceiling. Only `minPhusdOut` and `minLP` bound each call, and they exist to stop sandwiches, not to cap price.
+- **What the arbitrage takes from POL:** the arbitrageur's profit comes out of the pair, which is almost all our LP. It grows roughly with the square of the overshoot, and the shallower seeded pair makes it larger for the same Δ. For a single zap followed by an arbitrage back to $1 (0.30% fee):
+
+| Δ (single zap) | Price after, seeded pair | Arb skim off POL, seeded | Arb skim off POL, full pool | phUSD minted by the arb, seeded |
+|---|---|---|---|---|
+| 1,000 | 1.017 | ≈ $1 | $0 (below peg) | ≈ 180 |
+| 2,000 | 1.062 | ≈ $19 | ≈ $5 | ≈ 672 |
+| 5,000 | 1.199 | ≈ $192 | ≈ $102 | ≈ 2,085 |
+| 10,000 | 1.428 | ≈ $818 | ≈ $503 | ≈ 4,272 |
+
+  The skim is the price of the collateral the arbitrage mints. Chunking a large `pool()` keeps the minting and avoids most of the skim (Stage 4 step 6).
 
 **Arbitrage doesn't need another phUSD venue.** The mint-and-sell loop runs through `PhusdStableMinter`, the pair, the sUSDS redeem and the Sky PSM, so it works even if we are the only phUSD liquidity on Uniswap V2.
 
