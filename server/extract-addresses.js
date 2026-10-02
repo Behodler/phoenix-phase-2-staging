@@ -84,8 +84,8 @@ const DROPPED_CONTRACT_NAMES = [
  * mainnet file, whose key-set must mirror that interface).
  *
  * Story 102 (Balancexit Stage 1c): the router is NO LONGER dropped. The UI's "buy phUSD"
- * and price widgets read the phUSD/sUSDS V2 pair through Router02, so it is surfaced as
- * `UniswapV2Router` (see RENAMED_CONTRACT_NAMES). The pair itself is tracked as
+ * and price widgets will read the phUSD/sUSDS V2 pair through Router02 (phlimbo-ui step U1),
+ * so it is surfaced as `UniswapV2Router` (see RENAMED_CONTRACT_NAMES). The pair itself is tracked as
  * "PhusdSusdsPair" and surfaces under that name. Matching here is exact, so these names
  * never swallow "UniPoolerV2" or "PhusdSusdsPair".
  */
