@@ -178,6 +178,9 @@ abstract contract UniPoolerCutoverCore {
     uint256 internal constant CUTOVER_MAX_BPS = 10_000;
     /// @notice Ceiling on both tolerances: "tight" means at most 1%.
     uint256 internal constant CUTOVER_MAX_TOLERANCE_BPS = 100;
+    /// @notice Ceiling on how far ahead the seed deadline may sit. Long enough for a Ledger-signed
+    ///         `--slow` broadcast, short enough that a signed-but-stuck seed cannot land days later.
+    uint256 internal constant CUTOVER_MAX_SEED_DEADLINE_WINDOW = 1 days;
 
     /// @notice Which Balancer V3 exit step 5 uses. A parameter, never derived from the clock:
     ///         PROPORTIONAL while the pool is live (before 30 Oct), RECOVERY once it is paused.
@@ -200,6 +203,11 @@ abstract contract UniPoolerCutoverCore {
         uint256[] minAmountsOut; // Balancer pool-token order; every entry > 0
         uint256 exitToleranceBps; // max gap of minAmountsOut below the live proportional share
         uint256 seedToleranceBps; // addLiquidity amountAMin/amountBMin below the recovered amounts
+        // Router02 addLiquidity deadline (absolute unix time). Must be forward-dated by the caller:
+        // under `forge script --broadcast` the value is fixed into the calldata at simulation
+        // time, so a raw `block.timestamp` would revert `UniswapV2Router: EXPIRED` once the seed
+        // is mined in any later block. Callers use e.g. `block.timestamp + 1 hours`.
+        uint256 seedDeadline;
     }
 
     /// @notice Addresses read live in step 0.
@@ -265,6 +273,14 @@ abstract contract UniPoolerCutoverCore {
         require(
             p.exitToleranceBps <= CUTOVER_MAX_TOLERANCE_BPS && p.seedToleranceBps <= CUTOVER_MAX_TOLERANCE_BPS,
             "UniPoolerCutoverCore: tolerance too wide"
+        );
+
+        // The seed deadline is strictly in the future (never the raw simulation timestamp, which
+        // expires as soon as the broadcast seed lands in a later block) and not unboundedly so.
+        require(p.seedDeadline > block.timestamp, "UniPoolerCutoverCore: seed deadline not in future");
+        require(
+            p.seedDeadline <= block.timestamp + CUTOVER_MAX_SEED_DEADLINE_WINDOW,
+            "UniPoolerCutoverCore: seed deadline too far"
         );
 
         // The authorized-pooler set is revoked: every pooler fails `onlyAuthorizedPooler`.
@@ -411,7 +427,7 @@ abstract contract UniPoolerCutoverCore {
         uint256 a;
         uint256 b;
         (a, b, liquidity) = ICutoverUniV2Router(p.uniV2Router)
-            .addLiquidity(l.sUSDS, l.phUSD, sAmt, pAmt, sMin, pMin, l.newPooler, block.timestamp);
+            .addLiquidity(l.sUSDS, l.phUSD, sAmt, pAmt, sMin, pMin, l.newPooler, p.seedDeadline);
         // Into an empty pair the router uses the desired amounts exactly: nothing is left behind.
         require(a == sAmt && b == pAmt, "UniPoolerCutoverCore: seed not exact");
         require(liquidity > 0, "UniPoolerCutoverCore: no LP minted");

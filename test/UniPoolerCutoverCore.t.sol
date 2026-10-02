@@ -74,6 +74,7 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
     uint256 constant PRICE = 100e18;
     uint256 constant GROWTH = 50; // 0.5% per mint
     uint256 constant TOL_BPS = 10; // 0.1%
+    uint256 constant SEED_DEADLINE_OFFSET = 1 hours; // what the broadcast callers (101/103) pass
 
     function setUp() public {
         usds = new MockUSDS();
@@ -207,6 +208,7 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         p.minAmountsOut = _expectedMins();
         p.exitToleranceBps = TOL_BPS;
         p.seedToleranceBps = TOL_BPS;
+        p.seedDeadline = block.timestamp + SEED_DEADLINE_OFFSET;
     }
 
     function runExt(CutoverParams memory p) external returns (CutoverResult memory) {
@@ -440,6 +442,73 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         vm.expectCall(address(pauser), abi.encodeWithSelector(Pauser.register.selector), 0);
         vm.expectCall(address(pauser), abi.encodeWithSelector(Pauser.unregister.selector), 0);
         _runCutover(_params(ExitMode.PROPORTIONAL));
+    }
+
+    // ------------------------------------------------------------ seed deadline
+
+    /// @notice The deadline handed to Router02 is the caller's forward-dated value, never the raw
+    ///         execution timestamp (which a broadcast fixes at simulation time).
+    function test_seedDeadline_forwardedToRouter() public {
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        vm.startStateDiffRecording();
+        _runCutover(p);
+        Vm.AccountAccess[] memory acc = vm.stopAndReturnStateDiff();
+        bytes memory data = acc[_firstCall(acc, address(uniRouter), IUniswapV2RouterLike.addLiquidity.selector)].data;
+        uint256 deadline;
+        assembly {
+            deadline := mload(add(data, mload(data))) // last ABI word: the deadline argument
+        }
+        assertEq(deadline, p.seedDeadline, "router deadline == caller's seedDeadline");
+        assertGt(deadline, block.timestamp, "router deadline strictly in the future");
+    }
+
+    /// @notice Broadcast semantics: the params (and so the deadline) are built at simulation time,
+    ///         and the seed lands in a later block. With a forward-dated deadline it still succeeds.
+    ///         Times are literals: via_ir may re-read `block.timestamp` after a `vm.warp`.
+    function test_seedDeadline_survivesLaterBlock() public {
+        uint256 simTime = 2_000_000_000;
+        vm.warp(simTime);
+        Pre memory s = _pre();
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        p.seedDeadline = simTime + SEED_DEADLINE_OFFSET;
+        vm.warp(simTime + 30 minutes);
+        vm.roll(block.number + 150);
+        CutoverResult memory r = this.runExt(p);
+        _assertPost(r, s);
+    }
+
+    /// @notice The regression the parameter exists to prevent: a deadline equal to the simulation
+    ///         timestamp is rejected by Router02 once the seed is mined one block later.
+    function test_simulationTimestampDeadline_expiresInLaterBlock() public {
+        uint256 simTime = 2_000_000_000;
+        vm.warp(simTime);
+        susds.deposit(10e18, address(this));
+        phusd.mint(address(this), 10e18);
+        susds.approve(address(uniRouter), 10e18);
+        phusd.approve(address(uniRouter), 10e18);
+        vm.warp(simTime + 12); // the next block
+        vm.expectRevert(bytes("UniswapV2Router: EXPIRED"));
+        uniRouter.addLiquidity(address(susds), address(phusd), 10e18, 10e18, 0, 0, address(0xBEEF), simTime);
+    }
+
+    function test_revert_seedDeadlineNotInFuture() public {
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        p.seedDeadline = block.timestamp;
+        vm.expectRevert(bytes("UniPoolerCutoverCore: seed deadline not in future"));
+        this.runExt(p);
+        p.seedDeadline = 0;
+        vm.expectRevert(bytes("UniPoolerCutoverCore: seed deadline not in future"));
+        this.runExt(p);
+    }
+
+    function test_revert_seedDeadlineTooFar() public {
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        p.seedDeadline = block.timestamp + CUTOVER_MAX_SEED_DEADLINE_WINDOW + 1;
+        vm.expectRevert(bytes("UniPoolerCutoverCore: seed deadline too far"));
+        this.runExt(p);
+        p.seedDeadline = type(uint256).max;
+        vm.expectRevert(bytes("UniPoolerCutoverCore: seed deadline too far"));
+        this.runExt(p);
     }
 
     // ------------------------------------------------------- precondition reverts
