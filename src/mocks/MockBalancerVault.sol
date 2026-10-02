@@ -49,7 +49,9 @@ contract MockBalancerVault is IBalancerVault {
 
     event PoolTokensSet(address[] tokens);
     event PoolPausedSet(bool paused);
-    event LiquidityRemoved(address indexed from, address indexed to, uint256 bptIn, uint256[] amountsOut, bool recovery);
+    event LiquidityRemoved(
+        address indexed from, address indexed to, uint256 bptIn, uint256[] amountsOut, bool recovery
+    );
 
     /// @notice Configurable swap rate per (tokenIn, tokenOut) pair, expressed as
     ///         numerator/denominator. amountOut = amountIn * num / den. Default 1:1.

@@ -36,9 +36,8 @@ contract MockBalancerRouter is IBalancerRouter {
         bytes memory /*userData*/
     ) external payable returns (uint256[] memory amountsOut) {
         require(!wethIsEth, "MockBalancerRouter: wethIsEth unsupported");
-        amountsOut = MockBalancerVault(MockBalancerPool(pool).vault()).removeLiquidityProportional(
-            pool, msg.sender, msg.sender, exactBptAmountIn, minAmountsOut
-        );
+        amountsOut = MockBalancerVault(MockBalancerPool(pool).vault())
+            .removeLiquidityProportional(pool, msg.sender, msg.sender, exactBptAmountIn, minAmountsOut);
     }
 
     /// @notice Balancer V3 Router recovery exit of `exactBptAmountIn` of the caller's BPT.
@@ -47,8 +46,7 @@ contract MockBalancerRouter is IBalancerRouter {
         payable
         returns (uint256[] memory amountsOut)
     {
-        amountsOut = MockBalancerVault(MockBalancerPool(pool).vault()).removeLiquidityRecovery(
-            pool, msg.sender, msg.sender, exactBptAmountIn, minAmountsOut
-        );
+        amountsOut = MockBalancerVault(MockBalancerPool(pool).vault())
+            .removeLiquidityRecovery(pool, msg.sender, msg.sender, exactBptAmountIn, minAmountsOut);
     }
 }
