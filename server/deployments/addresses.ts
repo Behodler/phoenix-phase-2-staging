@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-09-16T18:55:20.119Z
+// Generated interface from local.json on 2026-10-02T07:56:06.885Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -32,6 +32,7 @@ export interface ContractAddresses {
   BurnRecorder: string;
   BalancerRouter: string;
   NFTMinter: string;
+  UniswapV2Router: string;
   UniboostEYE: string;
   UniboostSCX: string;
   UniboostFLX: string;
@@ -60,4 +61,6 @@ export interface ContractAddresses {
   Antimatter: string;
   StableStakerV2: string;
   ViewRouter: string;
+  UniPooler: string;
+  PhusdSusdsPair: string;
 }
