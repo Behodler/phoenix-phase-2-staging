@@ -35,4 +35,23 @@ contract MockBalancerPool is ERC20 {
         require(msg.sender == vault, "MockBalancerPool: only vault can mint");
         _mint(to, amount);
     }
+
+    /**
+     * @notice Burns BPT from `from` on behalf of `spender` (story 100: proportional/recovery exits)
+     * @dev Only callable by the authorized vault. Models the Balancer V3 vault's BPT burn on
+     *      `removeLiquidity`: when `spender` (the router, or whoever called the vault) is not
+     *      `from`, it spends `spender`'s BPT allowance from `from` and reverts without it, exactly
+     *      as mainnet reverts `ERC20InsufficientAllowance(router, ...)` when the router is not
+     *      approved. A holder exiting for itself needs no allowance.
+     * @param from The BPT holder whose tokens are burned
+     * @param spender The address acting on the holder's behalf
+     * @param amount The amount of BPT to burn
+     */
+    function burnFrom(address from, address spender, uint256 amount) external {
+        require(msg.sender == vault, "MockBalancerPool: only vault can burn");
+        if (from != spender) {
+            _spendAllowance(from, spender, amount);
+        }
+        _burn(from, amount);
+    }
 }

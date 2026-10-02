@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@yield-claim-nft/interfaces/balancer/IBalancerVault.sol";
 import "@yield-claim-nft/interfaces/balancer/IUnlockCallback.sol";
 import "@yield-claim-nft/interfaces/balancer/BalancerTypes.sol";
@@ -22,8 +23,33 @@ import "./MockERC4626Wrapper.sol";
  *      6. Control returns to unlock which returns
  */
 contract MockBalancerVault is IBalancerVault {
+    using SafeERC20 for IERC20;
+
     /// @notice The MockBalancerPool that mints BPT tokens
     MockBalancerPool public pool;
+
+    /// @notice Mirrors the Balancer V3 `TokenInfo` struct returned by `getPoolTokenInfo`
+    ///         (`TokenType` enum encoded as uint8). The mock reports STANDARD tokens with no rate
+    ///         provider, matching what mainnet returns for the phUSD/sUSDS pool.
+    struct PoolTokenInfo {
+        uint8 tokenType;
+        address rateProvider;
+        bool paysYieldFees;
+    }
+
+    /// @notice The pool's tokens in Balancer (address-sorted) order. Story 100: the exits pay
+    ///         each of these pro rata from this vault's balance of it. Set once via `setPoolTokens`.
+    address[] private _poolTokens;
+
+    /// @notice Story 100 mock-only switch simulating the paused pool after 30 October: while true
+    ///         the proportional exit reverts and the recovery exit works; while false the recovery
+    ///         exit reverts, as mainnet reverts `PoolNotInRecoveryMode`. The existing add path is
+    ///         unaffected.
+    bool public poolPaused;
+
+    event PoolTokensSet(address[] tokens);
+    event PoolPausedSet(bool paused);
+    event LiquidityRemoved(address indexed from, address indexed to, uint256 bptIn, uint256[] amountsOut, bool recovery);
 
     /// @notice Configurable swap rate per (tokenIn, tokenOut) pair, expressed as
     ///         numerator/denominator. amountOut = amountIn * num / den. Default 1:1.
@@ -131,6 +157,125 @@ contract MockBalancerVault is IBalancerVault {
      */
     function sendTo(IERC20 token, address to, uint256 amount) external override {
         token.transfer(to, amount);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Story 100: proportional and recovery exits (Balancexit cutover rehearsal)
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * @notice Mock-only: registers the pool's tokens, in Balancer (address-sorted) order.
+     * @dev One-shot, like `MockBalancerPool.setVault`. The exits pay each listed token pro rata
+     *      from this vault's balance of it, so the list must name exactly the tokens the pool holds.
+     */
+    function setPoolTokens(address[] calldata tokens) external {
+        require(_poolTokens.length == 0, "MockBalancerVault: pool tokens already set");
+        require(tokens.length > 0, "MockBalancerVault: no pool tokens");
+        _poolTokens = tokens;
+        emit PoolTokensSet(tokens);
+    }
+
+    /// @notice Mock-only: simulate the pool being paused (true) or live (false). See `poolPaused`.
+    function setPoolPaused(bool paused_) external {
+        poolPaused = paused_;
+        emit PoolPausedSet(paused_);
+    }
+
+    /// @notice Balancer V3 `getPoolTokens(pool)`.
+    function getPoolTokens(address pool_) external view returns (address[] memory tokens) {
+        require(pool_ == address(pool), "MockBalancerVault: unknown pool");
+        tokens = _poolTokens;
+    }
+
+    /**
+     * @notice Balancer V3 `getPoolTokenInfo(pool)`: tokens, token infos, raw balances and last
+     *         live balances. The mock's raw balances are this vault's ERC20 balances of each pool
+     *         token, and its live balances equal them (no rate providers, 18-decimal tokens).
+     */
+    function getPoolTokenInfo(address pool_)
+        external
+        view
+        returns (
+            address[] memory tokens,
+            PoolTokenInfo[] memory tokenInfo,
+            uint256[] memory balancesRaw,
+            uint256[] memory lastBalancesLiveScaled18
+        )
+    {
+        require(pool_ == address(pool), "MockBalancerVault: unknown pool");
+        tokens = _poolTokens;
+        tokenInfo = new PoolTokenInfo[](tokens.length);
+        balancesRaw = _balances();
+        lastBalancesLiveScaled18 = _balances();
+    }
+
+    /**
+     * @notice Proportional exit. Burns `bptIn` from `from` (spending `msg.sender`'s BPT allowance
+     *         unless `msg.sender == from`) and pays `to` each pool token pro rata,
+     *         `amountOut_i = balance_i * bptIn / totalSupply`.
+     * @dev Reverts while `poolPaused`, and if any `amountOut_i < minAmountsOut[i]`. Mainnet reaches
+     *      this through the Router (see `MockBalancerRouter.removeLiquidityProportional`).
+     */
+    function removeLiquidityProportional(
+        address pool_,
+        address from,
+        address to,
+        uint256 bptIn,
+        uint256[] memory minAmountsOut
+    ) external returns (uint256[] memory amountsOut) {
+        require(!poolPaused, "MockBalancerVault: pool paused");
+        amountsOut = _exit(pool_, from, to, bptIn, minAmountsOut, false);
+    }
+
+    /**
+     * @notice Recovery exit: same pro rata payout as the proportional exit, but only available
+     *         while the pool is paused (in recovery mode).
+     */
+    function removeLiquidityRecovery(
+        address pool_,
+        address from,
+        address to,
+        uint256 bptIn,
+        uint256[] memory minAmountsOut
+    ) external returns (uint256[] memory amountsOut) {
+        require(poolPaused, "MockBalancerVault: pool not in recovery mode");
+        amountsOut = _exit(pool_, from, to, bptIn, minAmountsOut, true);
+    }
+
+    function _balances() internal view returns (uint256[] memory b) {
+        b = new uint256[](_poolTokens.length);
+        for (uint256 i = 0; i < b.length; i++) {
+            b[i] = IERC20(_poolTokens[i]).balanceOf(address(this));
+        }
+    }
+
+    function _exit(
+        address pool_,
+        address from,
+        address to,
+        uint256 bptIn,
+        uint256[] memory minAmountsOut,
+        bool recovery
+    ) internal returns (uint256[] memory amountsOut) {
+        require(pool_ == address(pool), "MockBalancerVault: unknown pool");
+        require(_poolTokens.length > 0, "MockBalancerVault: pool tokens not set");
+        require(minAmountsOut.length == _poolTokens.length, "MockBalancerVault: minAmountsOut length");
+        require(bptIn > 0, "MockBalancerVault: zero BPT");
+
+        uint256 supply = pool.totalSupply();
+        uint256[] memory bal = _balances();
+        amountsOut = new uint256[](bal.length);
+        for (uint256 i = 0; i < bal.length; i++) {
+            amountsOut[i] = (bal[i] * bptIn) / supply;
+            require(amountsOut[i] >= minAmountsOut[i], "MockBalancerVault: amount out below minimum");
+        }
+
+        pool.burnFrom(from, msg.sender, bptIn);
+
+        for (uint256 i = 0; i < bal.length; i++) {
+            if (amountsOut[i] > 0) IERC20(_poolTokens[i]).safeTransfer(to, amountsOut[i]);
+        }
+        emit LiquidityRemoved(from, to, bptIn, amountsOut, recovery);
     }
 
     /**
