@@ -50,7 +50,12 @@ export default defineConfig({
         // NFT Minter infrastructure
         'BurnRecorder.sol/BurnRecorder.json',
         'NFTMinterV2.sol/NFTMinterV2.json',
+        // BalancerPoolerV2 stays through the Balancer wind-down: DeployMocks still deploys it
+        // as the retired index-4 pooler (key `BalancerPooler`).
         'BalancerPoolerV2.sol/BalancerPoolerV2.json',
+        // Story 102 (Balancexit Stage 1c): the live index-4 dispatcher after the cutover
+        // (key `UniPooler`), deployed by DeployMocks' cutover rehearsal.
+        'UniPoolerV2.sol/UniPoolerV2.json',
         'GatherV2.sol/GatherV2.json',
         'MultiPooler.sol/MultiPooler.json',
 

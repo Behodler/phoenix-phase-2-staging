@@ -177,7 +177,9 @@ This package includes hooks for the following Phase 2 contracts:
 - **PhusdStableMinter**: Minting mechanisms for phUSD stablecoin
 - **Phlimbo**: Yield farm for staking phUSD and earning mixed yield in phUSD and stablecoins
 - **NFTStaker**: Masterchef-style staking pool over BalancerPoolerV2 NFT id 4, paying phUSD rewards sized off a target APY
-- **BalancerPoolerMintDebtHook**: Dispatch hook that accrues phUSD mint debt on BalancerPoolerV2 mints; owner/recipient can call `pull()` to settle
+- **UniPoolerV2**: The live NFTMinter index-4 dispatcher (address key `UniPooler`). Zaps minted sUSDS into the phUSD/sUSDS UniswapV2 pair; read `quotePool` for slippage floors before calling `pool`
+- **BalancerPoolerV2**: The retired index-4 pooler (address key `BalancerPooler`), kept only for legacy and wind-down display during the Balancer exit
+- **BalancerPoolerMintDebtHook**: Dispatch hook that accrues phUSD mint debt on index-4 pooler mints (re-pointed from BalancerPoolerV2 to UniPoolerV2 at the cutover; the contract and its key are unchanged); owner/recipient can call `pull()` to settle
 - **BatchNFTMinter**: Stateless helper that loops `ITokenMinterV2.mint()` calls and refunds any dust
 
 ### Mock Contracts (Testing)
