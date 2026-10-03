@@ -1,7 +1,7 @@
 {
   "name": "@behodler/phase2-wagmi-hooks",
-  "version": "0.15.0",
-  "description": "Type-safe Wagmi hooks for Phoenix Phase 2 protocol contracts (MockPhUSD, MockRewardToken, MockKendu, PhusdStableMinter, PhlimboV3, DepositPageViewV3, ViewRouter, MintPageView, NFTStaker, NFTStakerDepletionV2, NFTStakerPriceScaled, NudgeRatchet, NudgeStreamer, Uniboost, BalancerPoolerMintDebtHook, UniboostMintDebtHook, BatchNFTMinter, BatchNFTMinterMultiToken, NudgeRatchetMintDebtHook, StableStakerV2, Antimatter)",
+  "version": "0.16.0",
+  "description": "Type-safe Wagmi hooks for Phoenix Phase 2 protocol contracts (MockPhUSD, MockRewardToken, MockKendu, PhusdStableMinter, PhlimboV3, DepositPageViewV3, ViewRouter, MintPageView, NFTStaker, NFTStakerDepletionV2, NFTStakerPriceScaled, NudgeRatchet, NudgeStreamer, Uniboost, BalancerPoolerV2, UniPoolerV2, BalancerPoolerMintDebtHook, UniboostMintDebtHook, BatchNFTMinter, BatchNFTMinterMultiToken, NudgeRatchetMintDebtHook, StableStakerV2, Antimatter)",
   "main": "generated.ts",
   "types": "generated.ts",
   "type": "module",

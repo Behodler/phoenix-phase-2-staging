@@ -5,6 +5,27 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-10-02
+
+Story-102, Balancexit Stage 1c (end of Stage 1). Adds the ABI for the pooler that replaces
+`BalancerPoolerV2` at NFTMinter dispatcher index 4. **Strictly additive**: no ABI export was
+removed, and no existing ABI's content changed. Not yet published; publish after the Stage 1 audit.
+
+### Added
+- `uniPoolerV2Abi` — the UniswapV2 phUSD/sUSDS pooler (yield-claim-nft `UniPoolerV2`). Its
+  `ContractAddresses` key is `UniPooler`. The admin pool action targets its zap, with slippage
+  floors taken from `quotePool`.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+Three new keys accompany this release: `UniPooler` (the live index-4 dispatcher),
+`PhusdSusdsPair` (the phUSD/sUSDS UniswapV2 pair) and `UniswapV2Router` (canonical Router02).
+On mainnet `UniPooler` and `PhusdSusdsPair` are zero placeholders until the Stage 2 cutover.
+
+### Unchanged
+`balancerPoolerV2Abi` and `balancerPoolerMintDebtHookAbi` stay for the wind-down: the
+`BalancerPooler` key keeps naming the retired pooler until the Balancer keys are removed in a
+later release.
+
 ## [0.15.0] - 2026-09-12
 
 Story-080 plus a scope cut. Two things happened at once: the stable farm moved from

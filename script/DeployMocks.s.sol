@@ -81,6 +81,11 @@ import {StableStakerV1} from "stable-staker/versions/v1/StableStakerV1.sol";
 // drain. `IAntimatter` is StableStakerV2's own local view of the token, which is what its
 // constructor takes; the concrete `Antimatter` comes from the antimatter submodule.
 import {StableStakerV2} from "stable-staker/StableStakerV2.sol";
+// Story 101 (Balancexit Stage 1b): the shared index-4 cutover core (story 100) that the anvil
+// rehearsal below, the mainnet cutover script and its fork test (103) all inherit.
+import {UniPoolerCutoverCore, ICutoverUniV2Pair} from "./helpers/UniPoolerCutoverCore.sol";
+import {UniPoolerV2} from "@yield-claim-nft/dispatchers/UniPoolerV2.sol";
+import {AddLiquidityParams, AddLiquidityKind} from "@yield-claim-nft/interfaces/balancer/BalancerTypes.sol";
 import {CrossVersionMigrator} from "stable-staker/CrossVersionMigrator.sol";
 import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
 import {IAntimatter} from "stable-staker/interfaces/IAntimatter.sol";
@@ -136,7 +141,7 @@ interface IPhlimboAPYLike {
  * - USDC holding account setup for the collectReward swap mechanism
  * - Phlimbo contract integration for yield distribution
  */
-contract DeployMocks is Script {
+contract DeployMocks is Script, UniPoolerCutoverCore {
     // Mock-vs-mainnet parity constants for nudge feature (story 045.5)
     // - MOCK_NUDGE_SPLIT matches mainnet (story 046)
     // - MOCK_NUDGE_SIZE is lowered from mainnet's 40 for dev ergonomics
@@ -1504,6 +1509,18 @@ contract DeployMocks is Script {
         );
         console.log("ViewRouter deposit page -> DepositPageViewV3");
 
+        // ====== PHASE 11.7: BalancerPoolerV2 -> UniPoolerV2 cutover rehearsal (story 101) ======
+        // Builds today's mainnet index-4 stack (BalancerPoolerV2 holding mock BPT + interim
+        // sUSDS), then runs the exact mainnet cutover through `UniPoolerCutoverCore` and leaves
+        // the post-cutover state as the anvil state. Placement is load-bearing in both directions:
+        //   - AFTER Phase 3.6/3.7 (index-4 pooler registered + configured, hook wired, the UniV2
+        //     stack deployed, the batch minter / streamer / PSM the donation needs), and after
+        //     Phase 9/9.55, which give the deployer the phUSD the mock pool's phUSD side needs.
+        //   - BEFORE `_sweepResidualPrivileges`, while the deployer still owns everything.
+        // `_deployStreamerAndBatchMinter` (Phase 3.7) requires BalancerPoolerV2 to be registered;
+        // it ran long before this, so that require is untouched.
+        _rehearseUniPoolerCutover(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1658,7 +1675,10 @@ contract DeployMocks is Script {
         console.log("  - UniboostEYE dispatcher (index 1: boosts EYE/WETH9 UniV2 pool)");
         console.log("  - UniboostSCX dispatcher (index 2: boosts SCX/USDS UniV2 pool)");
         console.log("  - UniboostFLX dispatcher (index 3: boosts FLX/DOLA UniV2 pool)");
-        console.log("  - BalancerPooler dispatcher (index 4: sUSDS single-sided add to phUSD/sUSDS pool)");
+        console.log(
+            "  - UniPoolerV2 dispatcher (index 4: sUSDS zap into the phUSD/sUSDS UniV2 pair; story 101 cutover)"
+        );
+        console.log("    BalancerPoolerV2 retired by the Phase 11.7 rehearsal: drained, minter -> deployer, paused");
         console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
         console.log("  - NFTMinter registered with Global Pauser");
@@ -1848,6 +1868,307 @@ contract DeployMocks is Script {
                 " has the wrong phUSD minter status - do NOT relax this gate, fix the grant"
             )
         );
+    }
+
+    // =====================================================================
+    // Story 101: BalancerPoolerV2 -> UniPoolerV2 cutover dress rehearsal (Balancexit Stage 1b)
+    // =====================================================================
+    //
+    // The anvil leg of docs/BalancerWinddownPlan.md §4 Stage 1b. It first builds the index-4 stack
+    // as it stands on mainnet today (BalancerPoolerV2 holding BPT and interim sUSDS, the owner
+    // holding BPT of its own, a third-party LP that is never exited), then runs the SAME
+    // `UniPoolerCutoverCore` the mainnet script (103) broadcasts, with the PROPORTIONAL exit. The
+    // post-cutover state is what the local chain ends on. Retired, with the Balancer mocks, once
+    // the mainnet cutover has executed (story 106).
+    //
+    // Execution context is the script's, exactly as in story 080's rehearsal: every core call runs
+    // inside `run()`'s `vm.startBroadcast(deployer)`, so the anvil deployer stands in for OWNER.
+
+    /// @dev The owner's own BPT position (mainnet: the owner holds BPT from the original seeding
+    ///      and an earlier `withdrawBPT`). It also supplies the pool's whole phUSD side: the pooler
+    ///      only ever adds sUSDS single-sided, so without it the proportional exit would return no
+    ///      phUSD and the core's non-zero `minAmountsOut` floor could not be met. phUSD-heavy, like
+    ///      the mainnet pool (108: ~19.1k sUSDS / 21.9k phUSD seeded depth).
+    uint256 internal constant UC_OWNER_SUSDS_SEED = 5_000e18; // USDS deposited into sUSDS
+    uint256 internal constant UC_OWNER_PHUSD_SEED = 6_000e18;
+    /// @dev A third-party LP on each side. Never exited by the cutover: it stays in the mock pool,
+    ///      as non-protocol BPT does on mainnet, so the exit is genuinely partial.
+    uint256 internal constant UC_THIRD_PARTY_SUSDS_SEED = 500e18;
+    uint256 internal constant UC_THIRD_PARTY_PHUSD_SEED = 500e18;
+    address internal constant UC_THIRD_PARTY_LP =
+        address(uint160(uint256(keccak256("DeployMocks.story101.thirdPartyBalancerLP"))));
+    /// @dev Index-4 mints before the pool (so the pooler holds BPT of its own) and after the
+    ///      holding-pattern revoke (the interim sUSDS and mint debt step 7 / step 11 must move).
+    uint256 internal constant UC_MINTS_BEFORE_POOL = 20;
+    uint256 internal constant UC_INTERIM_MINTS = 3;
+    /// @dev 0.1%, the same tolerance the core's unit test uses, well inside the core's 1% ceiling.
+    ///      Exit floors, seed floors and the post-cutover `pool()` floors all use it.
+    uint256 internal constant UC_TOLERANCE_BPS = 10;
+    /// @dev The Router02 seed deadline offset. Forward-dated because `--broadcast` fixes the value
+    ///      into calldata at simulation time (see `CutoverParams.seedDeadline`).
+    uint256 internal constant UC_SEED_DEADLINE_OFFSET = 1 hours;
+    uint256 internal constant UC_INDEX = 4;
+
+    /// @dev Set by the rehearsal. Tracked as "UniPoolerV2" and "PhusdSusdsPair"; the final
+    ///      ContractAddresses key names are story 102's.
+    UniPoolerV2 public uniPoolerV2;
+    address public phusdSusdsPair;
+
+    function _rehearseUniPoolerCutover(address deployer) internal {
+        console.log("\n=== Phase 11.7: BalancerPoolerV2 -> UniPoolerV2 cutover rehearsal (story 101) ===");
+        require(
+            nftMinterV2.dispatcherToIndex(address(balancerPoolerV2)) == UC_INDEX,
+            "story-101: BalancerPoolerV2 is not at index 4"
+        );
+
+        // ---- 1. Today's mainnet stack. ----
+        _ucBuildTodaysStack(deployer);
+
+        // ---- 2. Holding pattern (story 099): revoke every authorized pooler at once, then let
+        //         interim mints accrue sUSDS and mint debt on the pooler, as on mainnet between the
+        //         revoke broadcast and the cutover. ----
+        balancerPoolerV2.incrementAuthVersion();
+        require(
+            balancerPoolerV2.poolerAuthVersion(deployer) != balancerPoolerV2.authVersion(),
+            "story-101: deployer still an authorized pooler after incrementAuthVersion"
+        );
+        console.log("  BalancerPoolerV2.incrementAuthVersion() - authorized poolers revoked");
+        _ucMintIndex4(deployer, UC_INTERIM_MINTS);
+        require(susds.balanceOf(address(balancerPoolerV2)) > 0, "story-101: no interim sUSDS on the pooler");
+        require(balancerPoolerHook.mintDebt() > 0, "story-101: no interim mint debt");
+        console.log("  interim sUSDS on BalancerPoolerV2:", susds.balanceOf(address(balancerPoolerV2)));
+        console.log("  interim mint debt on the hook:", balancerPoolerHook.mintDebt());
+
+        // ---- 3. The cutover, steps 0-12, PROPORTIONAL exit. ----
+        (, uint256 price, uint256 growth,) = nftMinterV2.configs(UC_INDEX);
+        uint256 debt = balancerPoolerHook.mintDebt();
+        uint256 stakerPhusd = phUSD.balanceOf(address(nftStaker));
+        CutoverResult memory r = _runCutover(_ucParams(deployer));
+
+        uniPoolerV2 = UniPoolerV2(r.newPooler);
+        phusdSusdsPair = r.pair;
+        // Story 102 finalises the ContractAddresses key names. "BalancerPoolerV2" stays tracked
+        // through the wind-down.
+        _trackDeployment("UniPoolerV2", r.newPooler, 0);
+        _trackDeployment("PhusdSusdsPair", r.pair, 0);
+        console.log("  UniPoolerV2 deployed at:", r.newPooler);
+        console.log("  phUSD/sUSDS UniV2 pair:", r.pair);
+        console.log("  BPT exited (owner's whole balance):", r.bptExited);
+        console.log("  pair seeded - sUSDS:", r.sUSDSRecovered);
+        console.log("  pair seeded - phUSD:", r.phUSDRecovered);
+        console.log("  LP minted to UniPoolerV2:", r.liquidity);
+        console.log("  sUSDS rescued to UniPoolerV2:", r.sUSDSRescued);
+        console.log("  USDS rescued (parked):", r.usdsRescued);
+
+        // ---- 4. Post-state assertions, then the live checks. ----
+        _assertUniPoolerCutover(r, price, growth, debt, stakerPhusd, deployer);
+        _ucPostCutoverMintAndPool(deployer);
+
+        usds.approve(address(nftMinterV2), 0); // tidy the rehearsal's bounded mint allowance
+        _markConfigured("UniPoolerV2", 0);
+        _markConfigured("PhusdSusdsPair", 0);
+        console.log("  cutover rehearsal complete: index 4 now dispatches to UniPoolerV2");
+    }
+
+    /// @dev Builds the pre-cutover index-4 state: pool tokens registered on the mock vault, the
+    ///      owner's and a third party's BPT positions, mints at index 4, and `pool()` so
+    ///      BalancerPoolerV2 holds mock BPT.
+    function _ucBuildTodaysStack(address deployer) internal {
+        // Pool tokens in the order BalancerPoolerV2 was constructed with (`sUSDSIsFirst_ = true`),
+        // so the exits pay [sUSDS, phUSD] and the core's `minAmountsOut` follows that order.
+        address[] memory toks = new address[](2);
+        toks[0] = address(susds);
+        toks[1] = address(phUSD);
+        mockBalancerVault.setPoolTokens(toks);
+
+        require(
+            phUSD.balanceOf(deployer) >= UC_OWNER_PHUSD_SEED + UC_THIRD_PARTY_PHUSD_SEED,
+            "story-101: deployer lacks the phUSD for the mock pool's phUSD side"
+        );
+        usds.approve(address(susds), UC_OWNER_SUSDS_SEED + UC_THIRD_PARTY_SUSDS_SEED);
+        _ucSeedBalancerLp(deployer, UC_OWNER_SUSDS_SEED, UC_OWNER_PHUSD_SEED);
+        _ucSeedBalancerLp(UC_THIRD_PARTY_LP, UC_THIRD_PARTY_SUSDS_SEED, UC_THIRD_PARTY_PHUSD_SEED);
+        console.log("  mock Balancer pool seeded; owner BPT:", mockBalancerPool.balanceOf(deployer));
+        console.log("  third-party BPT (never exited):", mockBalancerPool.balanceOf(UC_THIRD_PARTY_LP));
+
+        // The deployer is already the pooler's authorized pooler (Phase 3.6); re-assert it here so
+        // the rehearsal's pre-state does not depend on that line staying put.
+        balancerPoolerV2.setAuthorizedPooler(deployer, true);
+
+        // Bounded allowance for every index-4 mint in the rehearsal (24 mints at ~10 USDS).
+        usds.approve(address(nftMinterV2), 1_000e18);
+        _ucMintIndex4(deployer, UC_MINTS_BEFORE_POOL);
+
+        uint256 sIn = susds.balanceOf(address(balancerPoolerV2));
+        require(sIn > 0, "story-101: index-4 mints left no sUSDS on BalancerPoolerV2");
+        uint256 bptBefore = mockBalancerPool.balanceOf(address(balancerPoolerV2));
+        // The mock vault mints BPT 1:1 for the sUSDS added, so the whole balance is the exact floor.
+        balancerPoolerV2.pool(sIn);
+        require(
+            mockBalancerPool.balanceOf(address(balancerPoolerV2)) == bptBefore + sIn,
+            "story-101: BalancerPoolerV2 did not receive its BPT"
+        );
+        require(susds.balanceOf(address(balancerPoolerV2)) == 0, "story-101: pool() left sUSDS behind");
+        console.log("  BalancerPoolerV2 pooled sUSDS into BPT:", sIn);
+    }
+
+    /// @dev One Balancer LP position: sUSDS (wrapped from the deployer's USDS) and phUSD sent to the
+    ///      mock vault, then BPT minted to `to` for exactly what arrived.
+    function _ucSeedBalancerLp(address to, uint256 usdsIn, uint256 phusdIn) internal {
+        uint256 sShares = susds.deposit(usdsIn, address(mockBalancerVault));
+        require(phUSD.transfer(address(mockBalancerVault), phusdIn), "story-101: phUSD seed transfer failed");
+        uint256[] memory maxIn = new uint256[](2);
+        maxIn[0] = sShares;
+        maxIn[1] = phusdIn;
+        mockBalancerVault.addLiquidity(
+            AddLiquidityParams({
+                pool: address(mockBalancerPool),
+                to: to,
+                maxAmountsIn: maxIn,
+                minBptAmountOut: sShares + phusdIn,
+                kind: AddLiquidityKind.UNBALANCED,
+                userData: ""
+            })
+        );
+    }
+
+    function _ucMintIndex4(address recipient, uint256 n) internal {
+        for (uint256 i = 0; i < n; i++) {
+            nftMinterV2.mint(UC_INDEX, recipient);
+        }
+    }
+
+    /// @dev The cutover inputs. `minAmountsOut` is the off-chain computation the mainnet script
+    ///      performs: the live proportional share of the owner's whole BPT balance after
+    ///      `withdrawBPT` (owner + pooler), minus the tolerance, in pool-token order.
+    function _ucParams(address deployer) internal view returns (CutoverParams memory p) {
+        p.owner = deployer;
+        p.oldPooler = address(balancerPoolerV2);
+        p.mintDebtHook = address(balancerPoolerHook);
+        p.nftMinter = address(nftMinterV2);
+        p.dispatcherIndex = UC_INDEX;
+        p.uniV2Router = address(uniRouter);
+        p.balancerRouter = address(mockBalancerRouter);
+        // The only authorized pooler on the local BalancerPoolerV2 (Phase 3.6): the deployer.
+        p.poolers = new address[](1);
+        p.poolers[0] = deployer;
+        p.exitMode = ExitMode.PROPORTIONAL;
+
+        uint256 bptIn = mockBalancerPool.balanceOf(deployer) + mockBalancerPool.balanceOf(address(balancerPoolerV2));
+        (,, uint256[] memory raw,) = mockBalancerVault.getPoolTokenInfo(address(mockBalancerPool));
+        uint256 supply = mockBalancerPool.totalSupply();
+        p.minAmountsOut = new uint256[](raw.length);
+        for (uint256 i = 0; i < raw.length; i++) {
+            uint256 share = (raw[i] * bptIn) / supply;
+            p.minAmountsOut[i] = (share * (CUTOVER_MAX_BPS - UC_TOLERANCE_BPS)) / CUTOVER_MAX_BPS;
+        }
+        p.exitToleranceBps = UC_TOLERANCE_BPS;
+        p.seedToleranceBps = UC_TOLERANCE_BPS;
+        p.seedDeadline = block.timestamp + UC_SEED_DEADLINE_OFFSET;
+    }
+
+    /// @dev Post-cutover state, by analogy with `_assertDolaRepoint`. Fails `deploy:local` loudly.
+    function _assertUniPoolerCutover(
+        CutoverResult memory r,
+        uint256 priceBefore,
+        uint256 growthBefore,
+        uint256 debtBefore,
+        uint256 stakerPhusdBefore,
+        address deployer
+    ) internal view {
+        // Index 4 and the hook are on UniPoolerV2; the mint curve is unchanged.
+        (address d, uint256 price, uint256 growth, bool disabled) = nftMinterV2.configs(UC_INDEX);
+        require(d == r.newPooler, "story-101: configs(4).dispatcher != UniPoolerV2");
+        require(price == priceBefore && growth == growthBefore && !disabled, "story-101: index-4 curve changed");
+        require(nftMinterV2.dispatcherToIndex(address(balancerPoolerV2)) == 0, "story-101: old pooler still indexed");
+        require(balancerPoolerHook.dispatcher() == r.newPooler, "story-101: hook.dispatcher() != UniPoolerV2");
+        require(address(UniPoolerV2(r.newPooler).hook()) == address(balancerPoolerHook), "story-101: UniPoolerV2 hook");
+
+        // Interim debt was pulled to the NFTStaker before the hook was repointed.
+        require(balancerPoolerHook.mintDebt() == 0, "story-101: mint debt not settled");
+        require(
+            phUSD.balanceOf(address(nftStaker)) == stakerPhusdBefore + debtBefore,
+            "story-101: interim debt not paid to the NFTStaker"
+        );
+
+        // The canonical pair, seeded with exactly the recovered amounts; UniPoolerV2 holds the LP.
+        require(r.pair == uniFactory.getPair(address(susds), address(phUSD)), "story-101: pair is not canonical");
+        require(UniPoolerV2(r.newPooler).pair() == r.pair, "story-101: UniPoolerV2 pair");
+        (uint112 r0, uint112 r1,) = ICutoverUniV2Pair(r.pair).getReserves();
+        bool s0 = ICutoverUniV2Pair(r.pair).token0() == address(susds);
+        require(
+            (s0 ? r0 : r1) == r.sUSDSRecovered && (s0 ? r1 : r0) == r.phUSDRecovered,
+            "story-101: pair reserves != seeded amounts"
+        );
+        require(r.sUSDSRecovered > 0 && r.phUSDRecovered > 0, "story-101: empty seed");
+        require(
+            r.liquidity > 0 && ICutoverUniV2Pair(r.pair).balanceOf(r.newPooler) == r.liquidity,
+            "story-101: UniPoolerV2 does not hold the LP"
+        );
+
+        // BPT fully out of protocol hands; the third party's position untouched.
+        require(mockBalancerPool.balanceOf(address(balancerPoolerV2)) == 0, "story-101: BPT left on old pooler");
+        require(mockBalancerPool.balanceOf(deployer) == 0, "story-101: owner still holds BPT");
+        // Every remaining BPT is the third party's: the exit burned exactly the protocol's share.
+        require(
+            mockBalancerPool.balanceOf(UC_THIRD_PARTY_LP) > 0
+                && mockBalancerPool.totalSupply() == mockBalancerPool.balanceOf(UC_THIRD_PARTY_LP),
+            "story-101: BPT outside the third-party position remains"
+        );
+
+        // Old pooler drained and paused; its balances are on UniPoolerV2, before any new mint.
+        require(susds.balanceOf(address(balancerPoolerV2)) == 0, "story-101: sUSDS left on old pooler");
+        require(usds.balanceOf(address(balancerPoolerV2)) == 0, "story-101: USDS left on old pooler");
+        require(balancerPoolerV2.paused(), "story-101: old pooler not paused");
+        require(r.sUSDSRescued > 0, "story-101: no interim sUSDS moved");
+        require(
+            susds.balanceOf(r.newPooler) == r.sUSDSRescued + r.usdsWrappedShares,
+            "story-101: UniPoolerV2 sUSDS != rescued"
+        );
+
+        // The deployer is UniPoolerV2's authorized pooler, as it was BalancerPoolerV2's.
+        require(
+            UniPoolerV2(r.newPooler).poolerAuthVersion(deployer) == UniPoolerV2(r.newPooler).authVersion(),
+            "story-101: deployer not authorized on UniPoolerV2"
+        );
+        require(UniPoolerV2(r.newPooler).owner() == deployer, "story-101: UniPoolerV2 owner");
+        console.log("  post-cutover state asserted (index 4, hook, pair reserves == seed, LP custody, old retired)");
+    }
+
+    /// @dev The live checks: a test mint at index 4 dispatches through UniPoolerV2, wraps and
+    ///      accrues debt; then `quotePool` + `pool()` zaps the pooler's sUSDS into the pair with
+    ///      floors from the quote minus the tolerance. The deployer was re-authorized by step 9.
+    function _ucPostCutoverMintAndPool(address deployer) internal {
+        UniPoolerV2 np = uniPoolerV2;
+        uint256 sBefore = susds.balanceOf(address(np));
+        uint256 debtBefore = balancerPoolerHook.mintDebt();
+        (, uint256 price, uint256 growth,) = nftMinterV2.configs(UC_INDEX);
+
+        _ucMintIndex4(deployer, 1);
+        require(susds.balanceOf(address(np)) > sBefore, "story-101: test mint did not wrap on UniPoolerV2");
+        require(balancerPoolerHook.mintDebt() > debtBefore, "story-101: test mint accrued no debt");
+        (, uint256 priceAfter,,) = nftMinterV2.configs(UC_INDEX);
+        require(priceAfter == price + (price * growth) / 10_000, "story-101: index-4 price curve broke");
+        console.log("  test mint at index 4 dispatched via UniPoolerV2; mint debt:", balancerPoolerHook.mintDebt());
+
+        uint256 sIn = susds.balanceOf(address(np));
+        (, uint256 phusdOut, uint256 expectedLP) = np.quotePool(sIn);
+        uint256 minPhusdOut = (phusdOut * (CUTOVER_MAX_BPS - UC_TOLERANCE_BPS)) / CUTOVER_MAX_BPS;
+        uint256 minLP = (expectedLP * (CUTOVER_MAX_BPS - UC_TOLERANCE_BPS)) / CUTOVER_MAX_BPS;
+        require(minPhusdOut > 0 && minLP > 0, "story-101: quotePool floors are zero");
+
+        address pair = np.pair();
+        uint256 lpBefore = ICutoverUniV2Pair(pair).balanceOf(address(np));
+        (uint112 r0Before, uint112 r1Before,) = ICutoverUniV2Pair(pair).getReserves();
+        np.pool(sIn, minPhusdOut, minLP);
+        uint256 lpGained = ICutoverUniV2Pair(pair).balanceOf(address(np)) - lpBefore;
+        require(lpGained >= minLP, "story-101: pool() minted less LP than quoted");
+        require(susds.balanceOf(address(np)) < sIn, "story-101: pool() consumed no sUSDS");
+        (uint112 r0After, uint112 r1After,) = ICutoverUniV2Pair(pair).getReserves();
+        bool s0 = ICutoverUniV2Pair(pair).token0() == address(susds);
+        require((s0 ? r0After : r1After) > (s0 ? r0Before : r1Before), "story-101: pool() added no sUSDS depth");
+        console.log("  quotePool + pool() succeeded; sUSDS zapped:", sIn);
+        console.log("  LP gained by UniPoolerV2:", lpGained);
     }
 
     // =====================================================================

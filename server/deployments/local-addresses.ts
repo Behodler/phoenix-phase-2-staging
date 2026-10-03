@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-09-16T18:55:20.122Z
+// Generated from local.json on 2026-10-02T07:56:06.886Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -33,6 +33,7 @@ export const anvilAddresses: ContractAddresses = {
   BurnRecorder: "0x809d550fca64d94Bd9F66E60752A544199cfAC3D",
   BalancerRouter: "0x4c5859f0F772848b2D91F1D83E2Fe57935348029",
   NFTMinter: "0x1291Be112d480055DaFd8a610b7d1e203891C274",
+  UniswapV2Router: "0xCD8a1C3ba11CF5ECfa6267617243239504a98d90",
   UniboostEYE: "0xfbC22278A96299D91d41C453234d97b4F5Eb9B2d",
   UniboostSCX: "0x46b142DD1E924FAb83eCc3c08e4D46E82f005e0E",
   UniboostFLX: "0xC9a43158891282A2B1475592D5719c001986Aaec",
@@ -61,6 +62,8 @@ export const anvilAddresses: ContractAddresses = {
   Antimatter: "0xcC4c41415fc68B2fBf70102742A83cDe435e0Ca7",
   StableStakerV2: "0x967AB65ef14c58bD4DcfFeaAA1ADb40a022140E5",
   ViewRouter: "0xccA9728291bC98ff4F97EF57Be3466227b0eb06C",
+  UniPooler: "0xF5b81Fe0B6F378f9E6A3fb6A6cD1921FCeA11799",
+  PhusdSusdsPair: "0x5E319e0820a4De078F76d97aAfD252Dd384174dB",
 };
 
 export type AnvilContractName = keyof ContractAddresses;

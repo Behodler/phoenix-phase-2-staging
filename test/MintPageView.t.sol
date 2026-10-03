@@ -105,7 +105,9 @@ contract MintPageViewTest is Test {
         dispatcherBugged6 = new MockDispatcher(address(usds)); // placeholder; token irrelevant
         dispatcherRatchet = new MockDispatcher(address(usdc));
 
-        // Register dispatchers in order: index 1=EYE, 2=SCX, 3=Flax, 4=USDS (BalancerPoolerV2), 5=WBTC.
+        // Register dispatchers in order: index 1=EYE, 2=SCX, 3=Flax, 4=USDS, 5=WBTC. Index 4 is
+        // UniPoolerV2 after the Balancexit cutover (story 101 rehearses it on anvil; BalancerPoolerV2
+        // before it); either way it is USDS-primed. See testGetData_Index4SurvivesDispatcherReplacement.
         nftMinter.registerDispatcher(address(dispatcherEYE), 1 ether, 100); // 1%
         nftMinter.registerDispatcher(address(dispatcherSCX), 2 ether, 200); // 2%
         nftMinter.registerDispatcher(address(dispatcherFlax), 0.5 ether, 50); // 0.5%
@@ -244,7 +246,7 @@ contract MintPageViewTest is Test {
         assertEq(data[5], 1, "EYE dispatcherIndex should be 1");
         assertEq(data[11], 2, "SCX dispatcherIndex should be 2");
         assertEq(data[17], 3, "Flax dispatcherIndex should be 3");
-        assertEq(data[23], 4, "USDS dispatcherIndex should be 4 (BalancerPoolerV2)");
+        assertEq(data[23], 4, "USDS dispatcherIndex should be 4 (UniPoolerV2 post-cutover)");
         assertEq(data[29], 5, "WBTC dispatcherIndex should be 5");
         assertEq(data[35], 7, "Ratchet dispatcherIndex should be 7 (index 6 is the disabled mainnet mirror)");
 
@@ -314,7 +316,31 @@ contract MintPageViewTest is Test {
 
     function testGetData_USDSDispatcherIndex4() public view {
         uint256[] memory data = view_.getData(user);
-        assertEq(data[23], 4, "USDS dispatcher index must be 4 (BalancerPoolerV2)");
+        assertEq(data[23], 4, "USDS dispatcher index must be 4 (UniPoolerV2 post-cutover)");
+    }
+
+    /// @dev Story 101: the Balancexit cutover swaps index 4 from BalancerPoolerV2 to UniPoolerV2
+    ///      via `NFTMinterV2.replaceDispatcher(4, new)`, keeping price and growth. The USDS slot
+    ///      (fields 18-23) must follow the NEW dispatcher at the same index: same index, same
+    ///      curve, mint token read live from the new dispatcher's `primeToken()` (USDS).
+    function testGetData_Index4SurvivesDispatcherReplacement() public {
+        (, uint256 priceBefore, uint256 growthBefore,) = nftMinter.configs(4);
+
+        MockDispatcher uniPooler = new MockDispatcher(address(usds));
+        nftMinter.replaceDispatcher(4, address(uniPooler));
+        (address d,,,) = nftMinter.configs(4);
+        assertEq(d, address(uniPooler), "index 4 now on the replacement dispatcher");
+
+        usds.mint(user, 321 ether);
+        vm.prank(user);
+        usds.approve(address(nftMinter), 42 ether);
+
+        uint256[] memory data = view_.getData(user);
+        assertEq(data[18], 42 ether, "USDS-slot allowance reads the new dispatcher's primeToken");
+        assertEq(data[19], priceBefore, "USDS-slot price unchanged by replaceDispatcher");
+        assertEq(data[20], growthBefore, "USDS-slot growth unchanged by replaceDispatcher");
+        assertEq(data[21], 321 ether, "USDS-slot balance reads the new dispatcher's primeToken");
+        assertEq(data[23], 4, "USDS dispatcher index still 4 after the cutover");
     }
 
     /// @dev Regression for the story-070 staleness bug: the Uniboost dispatchers that replaced

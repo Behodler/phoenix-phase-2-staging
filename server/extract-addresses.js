@@ -28,8 +28,12 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
  * NFT contract base names (V2 only). Contracts with a "V2" suffix matching these names
  * are written to flat `contracts` under the stripped base name. Bare-name (V1) contracts
  * and NFTMigrator are dropped entirely.
+ *
+ * Story 102 (Balancexit Stage 1c): "UniPooler" is added so the tracked "UniPoolerV2"
+ * (DeployMocks' cutover rehearsal) surfaces as the key `UniPooler`, the live index-4
+ * dispatcher. "BalancerPooler" stays: it names the retired pooler during the wind-down.
  */
-const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "BalancerPooler", "GatherWBTC"];
+const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "BalancerPooler", "UniPooler", "GatherWBTC"];
 
 /**
  * Contracts to drop from extraction entirely (V1 NFTs are handled via NFT_BASE_NAMES;
@@ -72,18 +76,22 @@ const DROPPED_CONTRACT_NAMES = [
 
 /**
  * Raw Uniswap V2 stack that backs the Uniboost dispatchers (WETH9, the canonical
- * factory/router, the Uniboost target pools, and the routing pools). These are deployed
- * locally only so Uniboost has an AMM to swap against; the UI never interacts with UniV2
+ * factory, the Uniboost target pools, and the routing pools). These are deployed
+ * locally only so Uniboost has an AMM to swap against; the UI never interacts with them
  * directly (all routing is wired on-chain inside the Uniboost dispatchers/hooks). They are
  * therefore not part of the UI-facing ContractAddresses surface and are dropped from
  * extraction so they stop appearing in the generated interface (and in the hand-maintained
- * mainnet file, whose key-set must mirror that interface). On mainnet Uniboost would reuse
- * the live UniV2 deployment, so there is nothing UI-consumable to surface there either.
+ * mainnet file, whose key-set must mirror that interface).
+ *
+ * Story 102 (Balancexit Stage 1c): the router is NO LONGER dropped. The UI's "buy phUSD"
+ * and price widgets will read the phUSD/sUSDS V2 pair through Router02 (phlimbo-ui step U1),
+ * so it is surfaced as `UniswapV2Router` (see RENAMED_CONTRACT_NAMES). The pair itself is tracked as
+ * "PhusdSusdsPair" and surfaces under that name. Matching here is exact, so these names
+ * never swallow "UniPoolerV2" or "PhusdSusdsPair".
  */
 const UNISWAP_V2_BACKING_NAMES = [
     "WETH9",
     "UniswapV2Factory",
-    "UniswapV2Router02",
     "UniPoolEYE",
     "UniPoolSCX",
     "UniPoolFLX",
@@ -91,6 +99,15 @@ const UNISWAP_V2_BACKING_NAMES = [
     "UniRoutePoolUSDS",
     "UniRoutePoolDOLA",
 ];
+
+/**
+ * Tracked deployment name -> ContractAddresses key, for names whose key differs from the
+ * tracked name. Story 102: DeployMocks tracks the canonical router as "UniswapV2Router02";
+ * the address book key is `UniswapV2Router`.
+ */
+const RENAMED_CONTRACT_NAMES = {
+    UniswapV2Router02: "UniswapV2Router",
+};
 
 /**
  * Extract contract addresses from progress file and generate deployment JSON
@@ -133,8 +150,10 @@ function extractAddresses(chainId = 31337) {
             continue;
         }
 
-        // Strip "Mock" prefix for UI compatibility (e.g., MockPhUSD -> PhUSD, MockUSDS -> USDS)
-        const displayName = name.startsWith('Mock') ? name.slice(4) : name;
+        // Strip "Mock" prefix for UI compatibility (e.g., MockPhUSD -> PhUSD, MockUSDS -> USDS),
+        // then apply any explicit tracked-name -> key rename (e.g. UniswapV2Router02 -> UniswapV2Router)
+        const strippedName = name.startsWith('Mock') ? name.slice(4) : name;
+        const displayName = RENAMED_CONTRACT_NAMES[strippedName] || strippedName;
 
         // Drop explicitly excluded contracts (NFTMigrator and bare V1 NFT names)
         if (DROPPED_CONTRACT_NAMES.includes(displayName)) {

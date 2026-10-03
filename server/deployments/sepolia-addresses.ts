@@ -61,6 +61,13 @@ export const sepoliaAddresses: ContractAddresses = {
   Antimatter: "0xf9801f60945bBe5e01376D5F8445f380A0F701F1",
   StableStakerV2: "0x3996F77f54f4Aa8d26146054c526A4e62967b1C0",
   ViewRouter: "0x8F16599BF6BC5fdE3581bD49DCB94586b98F8ED7",
+  // Story 102 (Balancexit Stage 1c): hand-added zero placeholders so this file's key-set
+  // matches the ContractAddresses interface. Not deployed on Sepolia yet; story 104's fresh
+  // DeployMocksSepolia (UniPoolerV2 at index 4) and its extractor zero-placeholder fix
+  // regenerate this file with real values.
+  PhusdSusdsPair: "0x0000000000000000000000000000000000000000",
+  UniswapV2Router: "0x0000000000000000000000000000000000000000",
+  UniPooler: "0x0000000000000000000000000000000000000000",
 };
 
 export type SepoliaContractName = keyof ContractAddresses;

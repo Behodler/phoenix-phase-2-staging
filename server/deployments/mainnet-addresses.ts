@@ -112,9 +112,12 @@ export const mainnetAddresses: ContractAddresses = {
   // stack (dispatchers + hooks + stakers) below. These are NOT yet deployed on mainnet —
   // zero-address placeholders keep this hand-maintained file's key-set equal to the regenerated
   // interface (tsc drift guard). Patch by hand when they ship.
-  // (The raw UniV2 stack that backs Uniboost — WETH9/factory/router/pools — is intentionally
-  //  NOT surfaced here: it is anvil-only, the UI never touches UniV2 directly, and mainnet would
-  //  reuse the live UniV2 deployment. It is filtered out of extraction in extract-addresses.js.)
+  // (The raw UniV2 stack that backs Uniboost — WETH9/factory/pools — is intentionally NOT
+  //  surfaced here and is filtered out of extraction in extract-addresses.js. Story 102
+  //  (Balancexit Stage 1c) is the exception: the canonical Router02 IS surfaced, as key
+  //  `UniswapV2Router` (live mainnet UniV2 router, set below), together with the phUSD/sUSDS
+  //  V2 pair `PhusdSusdsPair` and the new index-4 dispatcher `UniPooler`, because the UI's
+  //  pool action, price and "buy phUSD" widgets read them after the Balancer wind-down.)
   /*
   BurnerEYE: "0x13fb51bcb3c5ae9e7115730bc1a58ec676ceeef2",
   BurnerSCX: "0xa833603fd82674aec51f8a57c6a27b91bc1725b2",
@@ -140,6 +143,14 @@ export const mainnetAddresses: ContractAddresses = {
   // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
   // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).
   BalancerPooler: "0x7f6874332c4629429d70D15f685A8230323F11F1",
+  // Story 102 (Balancexit Stage 1c): the UniPoolerV2 cutover. `UniPooler` becomes the live
+  // index-4 dispatcher and `PhusdSusdsPair` the phUSD/sUSDS UniV2 pair it zaps into; both are
+  // zero placeholders until the Stage 2 mainnet cutover patcher (story 103) fills them.
+  // `BalancerPooler` above keeps naming the retired pooler through the wind-down.
+  // `UniswapV2Router` is the canonical live UniswapV2 Router02.
+  UniPooler: "0x0000000000000000000000000000000000000000",
+  PhusdSusdsPair: "0x0000000000000000000000000000000000000000",
+  UniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts
