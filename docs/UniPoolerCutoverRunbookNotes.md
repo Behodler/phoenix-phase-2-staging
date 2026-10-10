@@ -1,0 +1,1 @@
+1. As per L-28, report 22, set the exitAndSeed tolerance to 1% to make griefing net unprofitable.
