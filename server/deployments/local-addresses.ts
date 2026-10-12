@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-10-02T07:56:06.886Z
+// Generated from local.json on 2026-10-12T01:44:43.074Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -64,6 +64,7 @@ export const anvilAddresses: ContractAddresses = {
   ViewRouter: "0xccA9728291bC98ff4F97EF57Be3466227b0eb06C",
   UniPooler: "0xF5b81Fe0B6F378f9E6A3fb6A6cD1921FCeA11799",
   PhusdSusdsPair: "0x5E319e0820a4De078F76d97aAfD252Dd384174dB",
+  UniswapHelper: "0x0724F18B2aA7D6413D3fDcF6c0c27458a8170Dd9",
 };
 
 export type AnvilContractName = keyof ContractAddresses;

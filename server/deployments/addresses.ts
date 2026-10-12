@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-10-02T07:56:06.885Z
+// Generated interface from local.json on 2026-10-12T01:44:43.070Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -63,4 +63,5 @@ export interface ContractAddresses {
   ViewRouter: string;
   UniPooler: string;
   PhusdSusdsPair: string;
+  UniswapHelper: string;
 }
