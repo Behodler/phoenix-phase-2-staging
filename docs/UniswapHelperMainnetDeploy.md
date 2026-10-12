@@ -36,8 +36,9 @@ All commands run from the repo root, with `RPC_MAINNET` exported (`.envrc`) and 
    - runs `:verify`.
 3. **Check the receipt.** `broadcast/DeployUniswapHelperMainnet.s.sol/1/run-latest.json` should show status
    `0x1` at the address the progress file names.
-4. **Commit** the progress file and the patched `mainnet-addresses.ts`. Then regenerate or publish what the
-   UI consumes, as for any other address-book change.
+4. **Commit** the progress file and the patched `mainnet-addresses.ts`. Do not regenerate `mainnet-addresses.ts`:
+   it is hand-maintained and the patcher has already written it. Then publish the wagmi hooks the UI
+   consumes, as for any other address-book change.
 5. **After Stage 4.** Run `npm run uniswap-helper:verify` again and confirm `OK: quote smoke test passed on
    every route`.
 
