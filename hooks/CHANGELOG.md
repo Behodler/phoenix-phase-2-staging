@@ -5,6 +5,24 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-10-12
+
+Story-110 (Balancexit side-track). Adds the ABI for `UniswapHelper`, the stateless periphery
+contract that turns every phUSD swap and phUSD/sUSDS liquidity operation into one transaction.
+**Strictly additive**: no ABI export was removed and no existing ABI changed. Not published.
+
+### Added
+- `uniswapHelperAbi` — `swapToPhUSD` / `swapFromPhUSD` (DOLA, USDC, USDe, USDS, sUSDS),
+  `swapETHToPhUSD` / `swapPhUSDToETH`, `addLiquiditySUSDS` / `addLiquidityUSDS`,
+  `removeLiquiditySUSDS` / `removeLiquidityUSDS`, and the quotes. `quoteETHToPhUSD` and
+  `quotePhUSDToETH` are non-view (Uniswap QuoterV2): call them with `simulateContract` /
+  `eth_call` only.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+One new key: `UniswapHelper`. Live on anvil (DeployMocks Phase 11.8, against local V3/Curve venue
+mocks, which have no keys of their own); a zero placeholder on mainnet until story 111's patcher
+fills it after the mainnet broadcast, and on Sepolia (deployment there is out of scope).
+
 ## [0.16.0] - 2026-10-02
 
 Story-102, Balancexit Stage 1c (end of Stage 1). Adds the ABI for the pooler that replaces
