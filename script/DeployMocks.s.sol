@@ -96,6 +96,10 @@ import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+// Story 110: UniswapHelper (story 109) and the venue mocks it calls, shared with
+// test/UniswapHelperAnvil.t.sol so the forge test exercises exactly the anvil wiring.
+import {UniswapHelperLocalStack} from "./helpers/UniswapHelperLocalStack.sol";
+import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 
 /**
  * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
@@ -1521,6 +1525,13 @@ contract DeployMocks is Script, UniPoolerCutoverCore {
         // it ran long before this, so that require is untouched.
         _rehearseUniPoolerCutover(deployer);
 
+        // ====== PHASE 11.8: UniswapHelper + its venue mocks (story 110) ======
+        // APPENDED after every pre-existing deployment, deliberately: the deployer nonce starts at
+        // 0 and the UI's local config depends on every earlier address, so new contracts only ever
+        // go at the end. It also needs the phUSD/sUSDS pair to exist and be seeded, which Phase
+        // 11.7 just did. Before the terminal sweep, which stays the last statement.
+        _deployUniswapHelperStack(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1584,6 +1595,12 @@ contract DeployMocks is Script, UniPoolerCutoverCore {
         _markConfigured("StableStakerV2", 0);
         _markConfigured("ViewRouter", 0);
         _markConfigured("MintPageView", 0);
+        // Story 110: UniswapHelper and its venue mocks (configured inside _deployUniswapHelperStack).
+        _markConfigured("MockUniswapV3SwapRouter", 0);
+        _markConfigured("MockUniswapV3QuoterV2", 0);
+        _markConfigured("MockCurveDolaMetaPool", 0);
+        _markConfigured("MockCurveStableSwapNG", 0);
+        _markConfigured("UniswapHelper", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -1868,6 +1885,69 @@ contract DeployMocks is Script, UniPoolerCutoverCore {
                 " has the wrong phUSD minter status - do NOT relax this gate, fix the grant"
             )
         );
+    }
+
+    // =====================================================================
+    // Story 110: UniswapHelper on anvil
+    // =====================================================================
+
+    /// @dev Demo balances topped up on the anvil deployer so the phlimbo-ui swap tab can be
+    ///      exercised immediately: 10k of each of DOLA, USDe, USDS and sUSDS (18dp), 10k USDC (6dp).
+    uint256 internal constant UH_DEMO_18 = 10_000e18;
+    uint256 internal constant UH_DEMO_USDC = 10_000e6;
+
+    /// @dev Set by `_deployUniswapHelperStack`. Tracked as "UniswapHelper" (ContractAddresses key
+    ///      `UniswapHelper`); the venue mocks are tracked for progress.31337.json only and are
+    ///      excluded from ContractAddresses by server/extract-addresses.js.
+    UniswapHelper public uniswapHelper;
+
+    /// @dev Deploys the V3 router/quoter and Curve mocks, funds them (and MockSkyPSM's new USDS
+    ///      reserve for `sellGem`), deploys UniswapHelper against them, checks the helper resolves
+    ///      the seeded phUSD/sUSDS pair, and tops up the deployer's demo balances.
+    function _deployUniswapHelperStack(address deployer) internal {
+        console.log("\n=== Phase 11.8: UniswapHelper + venue mocks (story 110) ===");
+        require(phusdSusdsPair != address(0), "story-110: phUSD/sUSDS pair not created");
+        require(
+            susds.balanceOf(phusdSusdsPair) > 0 && phUSD.balanceOf(phusdSusdsPair) > 0,
+            "story-110: phUSD/sUSDS pair not seeded"
+        );
+
+        UniswapHelperLocalStack.Inputs memory t = _uhInputs();
+        UniswapHelperLocalStack.Venues memory v = UniswapHelperLocalStack.deploy(t);
+        uniswapHelper = v.helper;
+
+        _trackDeployment("MockUniswapV3SwapRouter", address(v.v3Router), 0);
+        _trackDeployment("MockUniswapV3QuoterV2", address(v.v3Quoter), 0);
+        _trackDeployment("MockCurveDolaMetaPool", address(v.curveDola), 0);
+        _trackDeployment("MockCurveStableSwapNG", address(v.curveUsde), 0);
+        _trackDeployment("UniswapHelper", address(v.helper), 0);
+
+        require(v.helper.pair() == phusdSusdsPair, "story-110: UniswapHelper resolves the wrong pair");
+        require(mockSkyPSM.tin() == 0, "story-110: MockSkyPSM tin not zero");
+
+        UniswapHelperLocalStack.topUpDemoBalances(t, deployer, deployer, UH_DEMO_18, UH_DEMO_USDC);
+
+        console.log("  MockUniswapV3SwapRouter:", address(v.v3Router));
+        console.log("  MockUniswapV3QuoterV2:", address(v.v3Quoter));
+        console.log("  MockCurveDolaMetaPool (DOLA=0, USDC=2):", address(v.curveDola));
+        console.log("  MockCurveStableSwapNG (USDe=0, USDC=1):", address(v.curveUsde));
+        console.log("  UniswapHelper:", address(v.helper));
+        console.log("  MockSkyPSM USDS reserve (for sellGem):", usds.balanceOf(address(mockSkyPSM)));
+        console.log("  deployer demo balances topped up: DOLA, USDC, USDe, USDS, sUSDS");
+    }
+
+    function _uhInputs() internal view returns (UniswapHelperLocalStack.Inputs memory) {
+        return UniswapHelperLocalStack.Inputs({
+            phUSD: address(phUSD),
+            sUSDS: address(susds),
+            usds: address(usds),
+            usdc: address(rewardToken),
+            dola: address(dola),
+            usde: address(usde),
+            weth: weth9,
+            skyPSM: address(mockSkyPSM),
+            v2Router: address(uniRouter)
+        });
     }
 
     // =====================================================================

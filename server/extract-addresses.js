@@ -101,6 +101,22 @@ const UNISWAP_V2_BACKING_NAMES = [
 ];
 
 /**
+ * Story 110: the local venue mocks UniswapHelper calls on anvil (Uniswap V3 SwapRouter +
+ * QuoterV2, Curve DOLA-3CRV metapool, Curve USDe/USDC stableswap-ng). DeployMocks tracks them
+ * (as "Mock..." names, so they appear in progress.31337.json) but the UI never calls them: every
+ * swap and liquidity route goes through the `UniswapHelper` key, which takes these addresses as
+ * immutables. Surfacing them would also force mainnet/Sepolia placeholders for addresses nothing
+ * reads. Matched on the display name, i.e. after the "Mock" prefix is stripped.
+ * `UniswapHelper` itself is NOT listed: it surfaces under its own tracked name.
+ */
+const UNISWAP_HELPER_VENUE_NAMES = [
+    "UniswapV3SwapRouter",
+    "UniswapV3QuoterV2",
+    "CurveDolaMetaPool",
+    "CurveStableSwapNG",
+];
+
+/**
  * Tracked deployment name -> ContractAddresses key, for names whose key differs from the
  * tracked name. Story 102: DeployMocks tracks the canonical router as "UniswapV2Router02";
  * the address book key is `UniswapV2Router`.
@@ -164,6 +180,12 @@ function extractAddresses(chainId = 31337) {
         // Drop the raw UniV2 stack that backs Uniboost — not UI-consumable (see constant above)
         if (UNISWAP_V2_BACKING_NAMES.includes(displayName)) {
             console.log(`  Dropping UniV2 backing contract: ${displayName}`);
+            continue;
+        }
+
+        // Drop UniswapHelper's local venue mocks — reached only through the helper (see constant above)
+        if (UNISWAP_HELPER_VENUE_NAMES.includes(displayName)) {
+            console.log(`  Dropping UniswapHelper venue mock: ${displayName}`);
             continue;
         }
 
