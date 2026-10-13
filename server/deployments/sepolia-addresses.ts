@@ -68,6 +68,9 @@ export const sepoliaAddresses: ContractAddresses = {
   PhusdSusdsPair: "0x0000000000000000000000000000000000000000",
   UniswapV2Router: "0x0000000000000000000000000000000000000000",
   UniPooler: "0x0000000000000000000000000000000000000000",
+  // Story 110: hand-added zero placeholder so the key-set matches the interface. Sepolia
+  // deployment of UniswapHelper is out of scope; it stays zero.
+  UniswapHelper: "0x0000000000000000000000000000000000000000",
 };
 
 export type SepoliaContractName = keyof ContractAddresses;

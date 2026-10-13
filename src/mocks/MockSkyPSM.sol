@@ -30,6 +30,10 @@ contract MockSkyPSM {
     ///         fee-spike scenarios; defaults to 0 to match the live PSM's ~0 tout.
     uint256 public tout;
 
+    /// @notice Sell-side fee, WAD-scaled (1e18 == 100%). Applied on `sellGem`. Story 110:
+    ///         added for UniswapHelper's USDC -> USDS leg; defaults to 0 like the live PSM.
+    uint256 public tin;
+
     /// @param gem_  The USDC mock (6dp).
     /// @param usds_ The USDS mock (18dp).
     constructor(address gem_, address usds_) {
@@ -48,6 +52,24 @@ contract MockSkyPSM {
     /// @notice Test helper: set the buy-side fee.
     function setTout(uint256 newTout) external {
         tout = newTout;
+    }
+
+    /// @notice Test helper: set the sell-side fee (story 110).
+    function setTin(uint256 newTin) external {
+        tin = newTin;
+    }
+
+    /// @notice Sell `gemAmt` USDC from msg.sender, delivering USDS (net of the tin fee) to `usr`.
+    /// @dev    Story 110. Mirrors DssLitePsm._sellGem: usdsOut = gemAmt * conv; usdsOut -= usdsOut * tin / WAD.
+    ///         Delivers USDS from this mock's pre-funded USDS reserve (seeded by the deploy script
+    ///         with `usds().mint(address(mockPSM), ...)`); the pulled USDC joins the USDC reserve.
+    /// @return usdsOutWad The USDS (18dp) delivered to `usr`.
+    function sellGem(address usr, uint256 gemAmt) external returns (uint256 usdsOutWad) {
+        require(gemAmt > 0, "MockSkyPSM: zero gemAmt");
+        usdsOutWad = gemAmt * _conv;
+        usdsOutWad -= usdsOutWad * tin / WAD;
+        require(IERC20(gem).transferFrom(msg.sender, address(this), gemAmt), "MockSkyPSM: USDC pull failed");
+        require(IERC20(usds).transfer(usr, usdsOutWad), "MockSkyPSM: USDS reserve short");
     }
 
     /// @notice Buy `gemAmt` USDC for `usr`, pulling USDS (incl. tout fee) from msg.sender.

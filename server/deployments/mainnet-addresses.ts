@@ -151,6 +151,10 @@ export const mainnetAddresses: ContractAddresses = {
   UniPooler: "0x0000000000000000000000000000000000000000",
   PhusdSusdsPair: "0x0000000000000000000000000000000000000000",
   UniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+  // Story 110: one-tx phUSD swaps + phUSD/sUSDS liquidity periphery (UniswapHelper). Zero
+  // placeholder keeps this file's key-set equal to the ContractAddresses interface; story 111's
+  // patcher fills it after the human's mainnet broadcast.
+  UniswapHelper: "0x0000000000000000000000000000000000000000",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts

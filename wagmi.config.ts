@@ -56,6 +56,9 @@ export default defineConfig({
         // Story 102 (Balancexit Stage 1c): the live index-4 dispatcher after the cutover
         // (key `UniPooler`), deployed by DeployMocks' cutover rehearsal.
         'UniPoolerV2.sol/UniPoolerV2.json',
+        // Story 110: one-tx phUSD swaps (DOLA/USDC/USDe/USDS/sUSDS/ETH) and phUSD/sUSDS liquidity
+        // (key `UniswapHelper`). DeployMocks Phase 11.8 deploys it against local venue mocks.
+        'UniswapHelper.sol/UniswapHelper.json',
         'GatherV2.sol/GatherV2.json',
         'MultiPooler.sol/MultiPooler.json',
 
