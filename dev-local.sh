@@ -28,6 +28,8 @@ set -Eeuo pipefail
 cd "$(dirname "$0")"
 
 RPC_URL="http://localhost:8545"
+# Same default as server/index.js, which `npm run serve` starts at the end of this script.
+API_PORT="${API_PORT:-3001}"
 export PATH="$HOME/.foundry/bin:$PATH"
 
 ANVIL_PID=""
@@ -45,6 +47,51 @@ cleanup() {
 # what poisons the NEXT run.
 trap cleanup EXIT INT TERM
 
+echo "=== Pre-flight: checking nothing already owns API port $API_PORT ==="
+# The API server is the LAST step, so a port clash there used to surface only after the full
+# broadcast - and the EXIT trap then tore down the anvil holding the freshly deployed chain.
+# Check every listening address, not just localhost: server/index.js honours API_HOST, and a
+# leftover `npm run serve` from another checkout may be bound to any interface.
+API_LISTENER=""
+API_PIDS=""
+if command -v ss > /dev/null 2>&1; then
+    API_LISTENER="$(ss -lptnH "sport = :$API_PORT" 2>/dev/null || true)"
+    API_PIDS="$(echo "$API_LISTENER" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' ' || true)"
+elif command -v lsof > /dev/null 2>&1; then
+    API_LISTENER="$(lsof -nP -iTCP:"$API_PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
+    API_PIDS="$(lsof -t -iTCP:"$API_PORT" -sTCP:LISTEN 2>/dev/null | sort -u | tr '\n' ' ' || true)"
+elif (exec 3<>"/dev/tcp/127.0.0.1/$API_PORT") 2>/dev/null; then
+    API_LISTENER="(something accepted a connection on 127.0.0.1:$API_PORT)"
+fi
+API_PIDS="${API_PIDS% }"
+if [ -n "$API_LISTENER" ]; then
+    echo "Error: port $API_PORT is already in use, so the API server would fail to start after" >&2
+    echo "       the deployment and take the fresh chain down with it. Listener:" >&2
+    echo "$API_LISTENER" | sed 's/^/         /' >&2
+    for pid in $API_PIDS; do
+        echo "         pid $pid cwd: $(readlink "/proc/$pid/cwd" 2>/dev/null || echo unknown)" >&2
+    done
+    echo "" >&2
+    if [ -n "$API_PIDS" ]; then
+        echo "       To stop it, run:" >&2
+        echo "" >&2
+        echo "           kill $API_PIDS" >&2
+        echo "" >&2
+        echo "       then re-run. Or set API_PORT to a free port." >&2
+    else
+        # Without a pid (ss output hides other users' processes; /dev/tcp names none), fall
+        # back to a command that finds the listener itself.
+        echo "       To stop it, run:" >&2
+        echo "" >&2
+        echo "           fuser -k $API_PORT/tcp" >&2
+        echo "" >&2
+        echo "       then re-run. Or set API_PORT to a free port." >&2
+    fi
+    exit 1
+fi
+echo "Port $API_PORT is free."
+
+echo ""
 echo "=== Pre-flight: checking nothing already owns $RPC_URL ==="
 if cast block-number --rpc-url "$RPC_URL" > /dev/null 2>&1; then
     echo "Error: something is already answering on $RPC_URL." >&2
