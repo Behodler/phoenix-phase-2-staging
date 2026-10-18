@@ -3,36 +3,59 @@ pragma solidity ^0.8.20;
 
 import {UniPoolerV2} from "@yield-claim-nft/dispatchers/UniPoolerV2.sol";
 import {IDispatchHook} from "@yield-claim-nft/interfaces/IDispatchHook.sol";
+import {UniPoolerCutoverEscrow} from "@yield-claim-nft/migration/UniPoolerCutoverEscrow.sol";
 
 /**
  * @title UniPoolerCutoverCore
- * @notice Story 100. The single shared implementation of the Balancexit index-4 cutover:
- *         `BalancerPoolerV2` (Balancer V3 phUSD/sUSDS pool) -> `UniPoolerV2` (Uniswap V2
- *         phUSD/sUSDS pair). The anvil dress rehearsal (101), the mainnet cutover script (103) and
- *         its fork test (103) all inherit THIS contract, as `StableStakerCutoverCore` is inherited
- *         by both the StableStaker cutover script and its test, so the three cannot drift.
+ * @notice Story 100, rewired to the escrow flow by story 103 (yield-claim-nft:052). The single
+ *         shared implementation of the Balancexit index-4 cutover: `BalancerPoolerV2` (Balancer V3
+ *         phUSD/sUSDS pool) -> `UniPoolerV2` (Uniswap V2 phUSD/sUSDS pair). The anvil dress
+ *         rehearsal (101), the mainnet cutover script (103) and its fork test (103) all inherit THIS
+ *         contract, as `StableStakerCutoverCore` is inherited by both the StableStaker cutover
+ *         script and its test, so the three cannot drift.
  *
- * @dev SEQUENCE (docs/BalancerWinddownPlan.md §4 Stage 2, as corrected by phStaging2:108 for
- *      yield-claim-nft:051's canonical-pair constructor check). Each step is an internal function;
- *      `_runCutover` runs them strictly in this order:
+ * @dev NO PROTOCOL FUNDS THROUGH ANY EOA (yield-claim-nft:052, human requirement for tax and
+ *      accounting provability). BPT, sUSDS, phUSD and USDS move contract-to-contract only: old
+ *      pooler -> `UniPoolerCutoverEscrow` -> pair / `UniPoolerV2`, or old pooler -> `UniPoolerV2`.
+ *      The OWNER EOA only signs. `_runCutover` enforces it: after EVERY step it requires that the
+ *      owner's BPT, sUSDS, phUSD and USDS balances have not increased since step 0.
+ *
+ *      OWNER BPT IS OUT OF SCOPE (amended 2026-10-10, F-02-052). The owner's former 202.30 BPT was
+ *      exited and burned at block 25,985,119, so the owner holds none. The core never moves owner
+ *      BPT and never reverts on a non-zero owner BPT balance (anyone can donate BPT to the owner, so
+ *      such a revert would be a grief vector). The verify script reports any residual.
+ *
+ *      SEQUENCE (docs/BalancerWinddownPlan.md §4 Stage 2, as corrected by phStaging2:108 for
+ *      yield-claim-nft:051's canonical-pair constructor check and by 052's escrow). Each step is an
+ *      internal function; `_runCutover` runs them strictly in this order:
  *
  *        0. Preconditions, all `require`d, before any state change: the old pooler's authorized-
  *           pooler set is revoked (each listed pooler fails `onlyAuthorizedPooler`, i.e.
  *           `poolerAuthVersion(p) != authVersion` — story 099's `incrementAuthVersion`); index 4,
  *           the hook and the old pooler point at each other; `minAmountsOut` has one non-zero
- *           entry per pool token; tolerances are tight. Every address and config value the core
+ *           entry per pool token; the tolerance is tight. Every address and config value the core
  *           needs beyond the caller's inputs is read live from the old pooler and the hook.
  *        1. Create the canonical sUSDS/phUSD pair through the router's own factory if missing
  *           (reuse it if someone else created it).
- *        2. Make sure the pair is empty: `skim(OWNER)` any unsynced donation, then require
- *           reserves (0,0) AND balances (0,0).
+ *        2. Require reserves (0,0) and RECORD the pair's token balances. No skim here: neither
+ *           `UniPoolerV2` nor the escrow exists yet, and skimming to the owner would route funds
+ *           through an EOA. An unsynced donation is skimmed to `UniPoolerV2` inside
+ *           `escrow.exitAndSeed`; a synced one (non-zero reserves) reverts (DoS only).
  *        3. Deploy `UniPoolerV2` against that pair (not wired).
- *        4. `BalancerPoolerV2.withdrawBPT(OWNER, fullBalance)`.
- *        5. Exit the OWNER's WHOLE BPT balance through the Balancer V3 Router: proportional or
- *           recovery, chosen by the `exitMode` PARAMETER (never by the clock). `minAmountsOut` is
- *           checked against the live proportional share minus `exitToleranceBps`.
- *        6. Seed the pair with ALL the recovered sUSDS and phUSD in one Router02 `addLiquidity`,
- *           `to = UniPoolerV2`. Only tokens recovered from Balancer seed it (balance deltas).
+ *       3b. Deploy `UniPoolerCutoverEscrow(operator = OWNER, UniPoolerV2, old pooler, V3 Router)`.
+ *           After 3, because its constructor reads `UniPoolerV2.pair()`; before 4, which needs it
+ *           as the BPT recipient.
+ *        4. BPT-address guard, then `BalancerPoolerV2.withdrawBPT(escrow, fullBalance)`. The guard
+ *           `require(old.pool() == escrow.bpt())` (yield-claim-nft run 22, L-27) is read LIVE and
+ *           sits inside `_fundEscrow`, the ONLY place the core calls `withdrawBPT`, so it guards a
+ *           resume into an existing escrow (re-run after `escrow.abort()`) exactly as it guards the
+ *           first funding.
+ *        5. Check `minAmountsOut` against the live proportional share of the ESCROW's BPT balance
+ *           (the old pooler's BPT only), then `escrow.exitAndSeed(mode, minAmountsOut, deadline)`:
+ *           the escrow exits its whole BPT balance (proportional or recovery, chosen by the
+ *           `exitMode` PARAMETER, never by the clock), skims any unsynced pair donation to
+ *           `UniPoolerV2`, and seeds the pair with its whole sUSDS and phUSD, LP to `UniPoolerV2`.
+ *           (Replaces the pre-052 steps 5 and 6, which ran through the owner.)
  *        7. `hook.pull()`, then `require(mintDebt() == 0)`.
  *        8. `hook.setDispatcher(UniPoolerV2)`, THEN `UniPoolerV2.setHook(hook)`.
  *        9. Configure `UniPoolerV2`: `setMinter(NFTMinterV2)`; copy PSM, maxTout, batchMinter,
@@ -40,42 +63,36 @@ import {IDispatchHook} from "@yield-claim-nft/interfaces/IDispatchHook.sol";
  *           same poolers. NO Pauser registration (dispatchers have no `pauser()`).
  *       10. `NFTMinterV2.replaceDispatcher(4, UniPoolerV2)`, asserting price/growth/disabled for
  *           the index are unchanged.
- *       11. Move the old pooler's balances, read live after step 10: all sUSDS to `UniPoolerV2`;
- *           parked USDS to `UniPoolerV2` when its donation is live, otherwise to OWNER and then
- *           `sUSDS.deposit(amount, UniPoolerV2)` from OWNER.
+ *       11. Move the old pooler's balances, read live after step 10: all sUSDS
+ *           `rescueERC20(sUSDS, UniPoolerV2)`; parked USDS `rescueERC20(USDS, escrow)` then
+ *           `escrow.wrapUsds()` (sUSDS shares credited to `UniPoolerV2`); the old pooler is checked
+ *           empty, and the escrow by before/after deltas only.
  *       12. Retire the old pooler: `old.setMinter(OWNER)` then `old.pause()`. NO Pauser unregister.
- *      A closing `_assertRetired` re-checks the end state (old pooler drained and paused, owner
- *      holds no BPT, index 4 and the hook on the new pooler). The full verify is 103's.
+ *      A closing `_assertRetired` re-checks the end state (old pooler drained and paused, index 4
+ *      and the hook on the new pooler). The full verify is 103's.
+ *
+ *      DONATIONS TO THE ESCROW never revert the cutover (story 103 revision 2, F-02-052's rule).
+ *      The escrow is a CREATE from OWNER's public nonce, so its address is predictable and anyone
+ *      can pre-fund it. Every escrow check is therefore a delta, the step-5 floors are sized on the
+ *      BPT step 4 moved (not on the escrow's balance), and no step requires the escrow to end empty.
+ *      Residual escrow balances are reported as warnings by the verifier.
+ *
+ *      OPERATIONAL RULE (L-27): never call `BalancerPoolerV2.setPool` on the old pooler while a
+ *      `UniPoolerCutoverEscrow` pointing at it is live. The escrow snapshots the BPT address at
+ *      construction and `abort()` only returns the snapshot tokens, so a repointed `withdrawBPT`
+ *      would strand the other token in the escrow forever. The step-4 guard refuses that.
  *
  *      EXECUTION CONTEXT is the caller's, as in `StableStakerCutoverCore`: every external call is
  *      made from the inheriting contract at its own call depth, so a script wraps `_runCutover` in
  *      `vm.startBroadcast(OWNER)` and a test makes the test contract the OWNER. `p.owner` must be
- *      that sender; step 0 checks it owns the old pooler, the hook and the NFT minter.
+ *      that sender; step 0 checks it owns the old pooler, the hook and the NFT minter. The escrow's
+ *      operator is `p.owner`, so the same sender calls `exitAndSeed` and `wrapUsds`.
  *
  *      BALANCER INTERFACES are declared here on purpose (not imported from yield-claim-nft), so
  *      yield-claim-nft can delete its Balancer interfaces (story 050) without breaking this core.
- *      The Router signatures match the mainnet Balancer V3 Router
- *      `0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd` (selectors 0x51682750 and 0x08c04793 are in
- *      its deployed bytecode); the Router burns the caller's BPT by spending the ROUTER's BPT
- *      allowance (mainnet reverts `ERC20InsufficientAllowance(router, ...)` without it), so step 5
- *      approves the Router for exactly the BPT exited.
+ *      The escrow approves the V3 Router for exactly the BPT it exits (mainnet reverts
+ *      `ERC20InsufficientAllowance(router, ...)` without it) and resets it.
  */
-
-/// @notice Balancer V3 Router exits (mainnet Router 0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd).
-interface IBalancerV3RouterExit {
-    function removeLiquidityProportional(
-        address pool,
-        uint256 exactBptAmountIn,
-        uint256[] memory minAmountsOut,
-        bool wethIsEth,
-        bytes memory userData
-    ) external payable returns (uint256[] memory amountsOut);
-
-    function removeLiquidityRecovery(address pool, uint256 exactBptAmountIn, uint256[] memory minAmountsOut)
-        external
-        payable
-        returns (uint256[] memory amountsOut);
-}
 
 /// @notice Balancer V3 Vault pool views (mainnet Vault 0xbA1333333333a1BA1108E8412f11850A5C319bA9).
 interface IBalancerV3VaultViews {
@@ -162,7 +179,6 @@ interface ICutoverUniV2Pair {
     function token0() external view returns (address);
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
     function balanceOf(address account) external view returns (uint256);
-    function skim(address to) external;
 }
 
 interface ICutoverERC20 {
@@ -170,20 +186,56 @@ interface ICutoverERC20 {
     function approve(address spender, uint256 amount) external returns (bool);
 }
 
-interface ICutoverERC4626 {
-    function deposit(uint256 assets, address receiver) external returns (uint256 shares);
+/// @notice The `UniPoolerCutoverEscrow` surface the core drives (yield-claim-nft:052). Declared
+///         locally; `bpt()` is the BPT the escrow snapshotted from `oldPooler.pool()` at deploy
+///         (`UniPoolerCutoverEscrow.sol:326`), the operand of the L-27 BPT-address guard.
+interface ICutoverEscrow {
+    function operator() external view returns (address);
+    function newPooler() external view returns (address);
+    function oldPooler() external view returns (address);
+    function v3Router() external view returns (address);
+    function bpt() external view returns (address);
+    function usds() external view returns (address);
+    function sUSDS() external view returns (address);
+    function phUSD() external view returns (address);
+    function pair() external view returns (address);
+    function uniRouter() external view returns (address);
+    function exitAndSeed(uint8 mode, uint256[] calldata minAmountsOut, uint256 deadline)
+        external
+        returns (uint256 liquidity);
+    function wrapUsds() external returns (uint256 shares);
 }
 
 abstract contract UniPoolerCutoverCore {
     uint256 internal constant CUTOVER_MAX_BPS = 10_000;
-    /// @notice Ceiling on both tolerances: "tight" means at most 1%.
+    /// @notice Ceiling on the exit tolerance: "tight" means at most 1%.
     uint256 internal constant CUTOVER_MAX_TOLERANCE_BPS = 100;
     /// @notice Ceiling on how far ahead the seed deadline may sit. Long enough for a Ledger-signed
     ///         `--slow` broadcast, short enough that a signed-but-stuck seed cannot land days later.
+    ///         Equal to the escrow's own `MAX_DEADLINE_WINDOW`.
     uint256 internal constant CUTOVER_MAX_SEED_DEADLINE_WINDOW = 1 days;
 
-    /// @notice Which Balancer V3 exit step 5 uses. A parameter, never derived from the clock:
-    ///         PROPORTIONAL while the pool is live (before 30 Oct), RECOVERY once it is paused.
+    /// @notice Step ids passed to `_afterCutoverStep` (and in the owner-invariant revert message).
+    uint256 internal constant CUTOVER_STEP_PRECONDITIONS = 0;
+    uint256 internal constant CUTOVER_STEP_CREATE_PAIR = 1;
+    uint256 internal constant CUTOVER_STEP_PAIR_EMPTY = 2;
+    uint256 internal constant CUTOVER_STEP_DEPLOY_POOLER = 3;
+    uint256 internal constant CUTOVER_STEP_DEPLOY_ESCROW = 31; // "3b"
+    uint256 internal constant CUTOVER_STEP_FUND_ESCROW = 4;
+    uint256 internal constant CUTOVER_STEP_EXIT_AND_SEED = 5;
+    uint256 internal constant CUTOVER_STEP_PULL_DEBT = 7;
+    uint256 internal constant CUTOVER_STEP_REPOINT_HOOK = 8;
+    uint256 internal constant CUTOVER_STEP_CONFIGURE = 9;
+    uint256 internal constant CUTOVER_STEP_REPLACE_DISPATCHER = 10;
+    uint256 internal constant CUTOVER_STEP_MOVE_BALANCES = 11;
+    uint256 internal constant CUTOVER_STEP_RETIRE_OLD = 12;
+
+    string internal constant CUTOVER_BPT_GUARD_MESSAGE =
+        "UniPoolerCutoverCore: old pooler pool() != escrow.bpt() - setPool repointed the old pooler; withdrawBPT would strand the token in the escrow (L-27)";
+
+    /// @notice Which Balancer V3 exit the escrow uses. A parameter, never derived from the clock:
+    ///         PROPORTIONAL while the pool is live (before 30 Oct), RECOVERY once it is paused and in
+    ///         Recovery Mode. Same ordinals as `UniPoolerCutoverEscrow.ExitMode`.
     enum ExitMode {
         PROPORTIONAL,
         RECOVERY
@@ -191,26 +243,25 @@ abstract contract UniPoolerCutoverCore {
 
     /// @notice Caller inputs. Everything else is read live (see `CutoverLive`).
     struct CutoverParams {
-        address owner; // the sender of every call; owns old pooler, hook and NFT minter
+        address owner; // the sender of every call; owns old pooler, hook and NFT minter; escrow operator
         address oldPooler; // BalancerPoolerV2 at the index
         address mintDebtHook; // BalancerPoolerMintDebtHook
         address nftMinter; // NFTMinterV2
         uint256 dispatcherIndex; // 4
         address uniV2Router; // Router02; its factory() creates/locates the pair
-        address balancerRouter; // Balancer V3 Router (not exposed by BalancerPoolerV2)
+        address balancerRouter; // Balancer V3 Router (not exposed by BalancerPoolerV2); the escrow's v3Router
         address[] poolers; // the poolers to re-authorize on UniPoolerV2 (must be revoked on old)
         ExitMode exitMode;
         uint256[] minAmountsOut; // Balancer pool-token order; every entry > 0
         uint256 exitToleranceBps; // max gap of minAmountsOut below the live proportional share
-        uint256 seedToleranceBps; // addLiquidity amountAMin/amountBMin below the recovered amounts
-        // Router02 addLiquidity deadline (absolute unix time). Must be forward-dated by the caller:
-        // under `forge script --broadcast` the value is fixed into the calldata at simulation
-        // time, so a raw `block.timestamp` would revert `UniswapV2Router: EXPIRED` once the seed
-        // is mined in any later block. Callers use e.g. `block.timestamp + 1 hours`.
+        // Router02 addLiquidity deadline (absolute unix time), forwarded to `escrow.exitAndSeed`.
+        // Must be forward-dated by the caller: under `forge script --broadcast` the value is fixed
+        // into the calldata at simulation time, so a raw `block.timestamp` would revert once the
+        // seed is mined in any later block. Callers use e.g. `block.timestamp + 1 hours`.
         uint256 seedDeadline;
     }
 
-    /// @notice Addresses read live in step 0.
+    /// @notice Addresses read live in step 0, plus those the cutover creates.
     struct CutoverLive {
         address sUSDS;
         address usds;
@@ -220,42 +271,134 @@ abstract contract UniPoolerCutoverCore {
         address factory;
         address pair;
         address newPooler;
+        address escrow;
     }
 
     struct CutoverResult {
         address newPooler;
         address pair;
-        uint256 bptWithdrawn; // from the old pooler in step 4
-        uint256 bptExited; // the owner's whole BPT balance in step 5
-        uint256 sUSDSRecovered;
-        uint256 phUSDRecovered;
-        uint256 liquidity;
-        uint256 sUSDSRescued;
-        uint256 usdsRescued;
-        bool usdsWrapped; // parked USDS wrapped into sUSDS for the new pooler (donation disabled)
-        uint256 usdsWrappedShares;
+        address escrow;
+        uint256 pairDonationSUSDS; // unsynced sUSDS on the empty pair at step 2 (skimmed to newPooler by the escrow)
+        uint256 pairDonationPhUSD; // unsynced phUSD on the empty pair at step 2
+        uint256 ownerBptAtStart; // reported only: owner BPT is out of scope (F-02-052)
+        uint256 bptWithdrawn; // old pooler -> escrow in step 4
+        uint256 bptExited; // the escrow's whole BPT balance, exited in step 5
+        uint256 sUSDSSeeded; // pair sUSDS reserve after the seed (== the escrow's whole sUSDS)
+        uint256 phUSDSeeded; // pair phUSD reserve after the seed (== the escrow's whole phUSD)
+        uint256 liquidity; // LP minted to newPooler by the seed
+        uint256 sUSDSRescued; // old pooler -> newPooler in step 11
+        uint256 usdsRescued; // old pooler -> escrow in step 11, then wrapped
+        uint256 usdsWrappedShares; // sUSDS shares the escrow's wrapUsds credited to newPooler
+    }
+
+    /// @dev The owner's balance of each moved token, taken after step 0 (see `_requireOwnerNotCredited`).
+    struct OwnerBalances {
+        uint256 bpt;
+        uint256 sUSDS;
+        uint256 phUSD;
+        uint256 usds;
     }
 
     // ---------------------------------------------------------------------------- orchestrator
 
-    /// @notice Runs steps 0 -> 12 in order and returns what moved. Reverts loudly on any breach.
+    /// @notice Runs steps 0 -> 12 in order and returns what moved. Reverts loudly on any breach,
+    ///         including any step after which the owner EOA holds more of a moved token than it
+    ///         did at step 0.
     function _runCutover(CutoverParams memory p) internal returns (CutoverResult memory r) {
         CutoverLive memory l = _step0Preconditions(p);
+        OwnerBalances memory o = _ownerBalances(p, l);
+        r.ownerBptAtStart = o.bpt;
+        _afterStep(CUTOVER_STEP_PRECONDITIONS, p, l, o);
+
         l.pair = _step1CreatePair(l);
-        _step2EnsurePairEmpty(p, l);
+        r.pair = l.pair;
+        _afterStep(CUTOVER_STEP_CREATE_PAIR, p, l, o);
+
+        (r.pairDonationSUSDS, r.pairDonationPhUSD) = _step2EnsurePairEmpty(l);
+        _afterStep(CUTOVER_STEP_PAIR_EMPTY, p, l, o);
+
         l.newPooler = _step3DeployPooler(p, l);
         r.newPooler = l.newPooler;
-        r.pair = l.pair;
-        r.bptWithdrawn = _step4WithdrawBPT(p, l);
-        (r.bptExited, r.sUSDSRecovered, r.phUSDRecovered) = _step5ExitBalancer(p, l);
-        r.liquidity = _step6SeedPair(p, l, r.sUSDSRecovered, r.phUSDRecovered);
+        _afterStep(CUTOVER_STEP_DEPLOY_POOLER, p, l, o);
+
+        l.escrow = _step3bDeployEscrow(p, l);
+        r.escrow = l.escrow;
+        _afterStep(CUTOVER_STEP_DEPLOY_ESCROW, p, l, o);
+
+        r.bptWithdrawn = _step4FundEscrow(p, l);
+        _afterStep(CUTOVER_STEP_FUND_ESCROW, p, l, o);
+
+        (r.bptExited, r.sUSDSSeeded, r.phUSDSeeded, r.liquidity) = _step5ExitAndSeed(p, l, r.bptWithdrawn);
+        _afterStep(CUTOVER_STEP_EXIT_AND_SEED, p, l, o);
+
         _step7PullDebt(p);
+        _afterStep(CUTOVER_STEP_PULL_DEBT, p, l, o);
+
         _step8RepointHook(p, l);
+        _afterStep(CUTOVER_STEP_REPOINT_HOOK, p, l, o);
+
         _step9ConfigurePooler(p, l);
+        _afterStep(CUTOVER_STEP_CONFIGURE, p, l, o);
+
         _step10ReplaceDispatcher(p, l);
-        (r.sUSDSRescued, r.usdsRescued, r.usdsWrapped, r.usdsWrappedShares) = _step11MoveBalances(p, l);
+        _afterStep(CUTOVER_STEP_REPLACE_DISPATCHER, p, l, o);
+
+        (r.sUSDSRescued, r.usdsRescued, r.usdsWrappedShares) = _step11MoveBalances(p, l);
+        _afterStep(CUTOVER_STEP_MOVE_BALANCES, p, l, o);
+
         _step12RetireOld(p);
+        _afterStep(CUTOVER_STEP_RETIRE_OLD, p, l, o);
+
         _assertRetired(p, l);
+    }
+
+    /// @notice Observation hook, called after every step with the live addresses so far. Empty in
+    ///         production; tests and the anvil rehearsal override it to record per-step state.
+    function _afterCutoverStep(uint256 step, CutoverParams memory p, CutoverLive memory l) internal virtual {}
+
+    function _afterStep(uint256 step, CutoverParams memory p, CutoverLive memory l, OwnerBalances memory o) private {
+        _requireOwnerNotCredited(step, p, l, o);
+        _afterCutoverStep(step, p, l);
+    }
+
+    function _ownerBalances(CutoverParams memory p, CutoverLive memory l)
+        internal
+        view
+        returns (OwnerBalances memory o)
+    {
+        o.bpt = ICutoverERC20(l.bPool).balanceOf(p.owner);
+        o.sUSDS = ICutoverERC20(l.sUSDS).balanceOf(p.owner);
+        o.phUSD = ICutoverERC20(l.phUSD).balanceOf(p.owner);
+        o.usds = ICutoverERC20(l.usds).balanceOf(p.owner);
+    }
+
+    /// @notice yield-claim-nft:052 invariant: no protocol funds transit the owner EOA. Its BPT,
+    ///         sUSDS, phUSD and USDS balances never rise above their step-0 values. A decrease is
+    ///         not a breach (the core never spends owner funds either, so none is expected).
+    function _requireOwnerNotCredited(
+        uint256 step,
+        CutoverParams memory p,
+        CutoverLive memory l,
+        OwnerBalances memory o
+    ) internal view {
+        OwnerBalances memory n = _ownerBalances(p, l);
+        if (n.bpt > o.bpt || n.sUSDS > o.sUSDS || n.phUSD > o.phUSD || n.usds > o.usds) {
+            revert(
+                string.concat("UniPoolerCutoverCore: owner EOA credited with protocol funds at step ", _stepName(step))
+            );
+        }
+    }
+
+    function _stepName(uint256 step) internal pure returns (string memory) {
+        if (step == CUTOVER_STEP_DEPLOY_ESCROW) return "3b";
+        bytes memory b = new bytes(step >= 10 ? 2 : 1);
+        if (step >= 10) {
+            b[0] = bytes1(uint8(48 + step / 10));
+            b[1] = bytes1(uint8(48 + (step % 10)));
+        } else {
+            b[0] = bytes1(uint8(48 + step));
+        }
+        return string(b);
     }
 
     // ----------------------------------------------------------------------------------- steps
@@ -269,11 +412,9 @@ abstract contract UniPoolerCutoverCore {
         require(old.owner() == p.owner, "UniPoolerCutoverCore: owner does not own old pooler");
         require(hook.owner() == p.owner, "UniPoolerCutoverCore: owner does not own hook");
         require(ICutoverNFTMinter(p.nftMinter).owner() == p.owner, "UniPoolerCutoverCore: owner does not own minter");
+        require(p.balancerRouter != address(0), "UniPoolerCutoverCore: zero balancer router");
 
-        require(
-            p.exitToleranceBps <= CUTOVER_MAX_TOLERANCE_BPS && p.seedToleranceBps <= CUTOVER_MAX_TOLERANCE_BPS,
-            "UniPoolerCutoverCore: tolerance too wide"
-        );
+        require(p.exitToleranceBps <= CUTOVER_MAX_TOLERANCE_BPS, "UniPoolerCutoverCore: tolerance too wide");
 
         // The seed deadline is strictly in the future (never the raw simulation timestamp, which
         // expires as soon as the broadcast seed lands in a later block) and not unboundedly so.
@@ -332,67 +473,112 @@ abstract contract UniPoolerCutoverCore {
         require(pair != address(0), "UniPoolerCutoverCore: no pair");
     }
 
-    /// @notice Step 2. Skim any unsynced donation to OWNER, then require reserves AND balances (0,0).
-    function _step2EnsurePairEmpty(CutoverParams memory p, CutoverLive memory l) internal {
-        ICutoverUniV2Pair pair = ICutoverUniV2Pair(l.pair);
-        (uint112 r0, uint112 r1,) = pair.getReserves();
+    /// @notice Step 2. Require reserves (0,0) and record the pair's token balances. No skim: the
+    ///         escrow skims an unsynced donation to `UniPoolerV2` inside `exitAndSeed`.
+    function _step2EnsurePairEmpty(CutoverLive memory l) internal view returns (uint256 donS, uint256 donP) {
+        (uint112 r0, uint112 r1,) = ICutoverUniV2Pair(l.pair).getReserves();
         require(r0 == 0 && r1 == 0, "UniPoolerCutoverCore: pair reserves not empty");
-        if (ICutoverERC20(l.sUSDS).balanceOf(l.pair) > 0 || ICutoverERC20(l.phUSD).balanceOf(l.pair) > 0) {
-            pair.skim(p.owner);
-        }
-        (r0, r1,) = pair.getReserves();
-        require(r0 == 0 && r1 == 0, "UniPoolerCutoverCore: pair reserves not empty");
-        require(
-            ICutoverERC20(l.sUSDS).balanceOf(l.pair) == 0 && ICutoverERC20(l.phUSD).balanceOf(l.pair) == 0,
-            "UniPoolerCutoverCore: pair balances not empty"
-        );
+        donS = ICutoverERC20(l.sUSDS).balanceOf(l.pair);
+        donP = ICutoverERC20(l.phUSD).balanceOf(l.pair);
     }
 
-    /// @notice Step 3. Deploy UniPoolerV2 against the (now existing, empty) canonical pair.
+    /// @notice Step 3. Deploy UniPoolerV2 against the (now existing, reserve-less) canonical pair.
     function _step3DeployPooler(CutoverParams memory p, CutoverLive memory l) internal returns (address) {
         UniPoolerV2 np = new UniPoolerV2(l.sUSDS, l.phUSD, p.uniV2Router, l.pair, p.owner);
         require(np.pair() == l.pair && np.owner() == p.owner, "UniPoolerCutoverCore: deploy mismatch");
         return address(np);
     }
 
-    /// @notice Step 4. All BPT on the old pooler to OWNER.
-    function _step4WithdrawBPT(CutoverParams memory p, CutoverLive memory l) internal returns (uint256 bal) {
-        bal = ICutoverERC20(l.bPool).balanceOf(p.oldPooler);
-        if (bal > 0) {
-            ICutoverBalancerPooler(p.oldPooler).withdrawBPT(p.owner, bal);
-        }
-        require(ICutoverERC20(l.bPool).balanceOf(p.oldPooler) == 0, "UniPoolerCutoverCore: BPT left on old pooler");
+    /// @notice Step 3b. Deploy the escrow (operator = OWNER) and check every immutable it read.
+    function _step3bDeployEscrow(CutoverParams memory p, CutoverLive memory l) internal returns (address e) {
+        e = address(new UniPoolerCutoverEscrow(p.owner, l.newPooler, p.oldPooler, p.balancerRouter));
+        ICutoverEscrow x = ICutoverEscrow(e);
+        require(
+            x.operator() == p.owner && x.newPooler() == l.newPooler && x.oldPooler() == p.oldPooler
+                && x.v3Router() == p.balancerRouter,
+            "UniPoolerCutoverCore: escrow wiring mismatch"
+        );
+        require(
+            x.bpt() == l.bPool && x.usds() == l.usds && x.sUSDS() == l.sUSDS && x.phUSD() == l.phUSD
+                && x.pair() == l.pair && x.uniRouter() == p.uniV2Router,
+            "UniPoolerCutoverCore: escrow token mismatch"
+        );
     }
 
-    /// @notice Step 5. Exit the OWNER's whole BPT balance. Returns the BPT exited and the sUSDS
-    ///         and phUSD received, measured as OWNER balance deltas.
-    function _step5ExitBalancer(CutoverParams memory p, CutoverLive memory l)
-        internal
-        returns (uint256 bptIn, uint256 sOut, uint256 pOut)
-    {
-        bptIn = ICutoverERC20(l.bPool).balanceOf(p.owner);
-        require(bptIn > 0, "UniPoolerCutoverCore: owner holds no BPT");
-        _checkMinAmountsOut(p, l, bptIn);
+    /// @notice Step 4. The old pooler's whole BPT balance to the escrow, behind the L-27 guard.
+    function _step4FundEscrow(CutoverParams memory p, CutoverLive memory l) internal returns (uint256 bal) {
+        bal = _fundEscrow(p.oldPooler, l.escrow);
+        require(bal > 0, "UniPoolerCutoverCore: old pooler holds no BPT");
+    }
 
-        uint256 sBefore = ICutoverERC20(l.sUSDS).balanceOf(p.owner);
-        uint256 pBefore = ICutoverERC20(l.phUSD).balanceOf(p.owner);
-
-        ICutoverERC20(l.bPool).approve(p.balancerRouter, bptIn);
-        if (p.exitMode == ExitMode.PROPORTIONAL) {
-            IBalancerV3RouterExit(p.balancerRouter)
-                .removeLiquidityProportional(l.bPool, bptIn, p.minAmountsOut, false, "");
-        } else {
-            IBalancerV3RouterExit(p.balancerRouter).removeLiquidityRecovery(l.bPool, bptIn, p.minAmountsOut);
+    /// @notice The ONLY `withdrawBPT` call site. Reads `old.pool()` live (never cached across steps)
+    ///         and requires it to equal the escrow's snapshotted `bpt()` BEFORE moving anything, so a
+    ///         `setPool` repoint can never send a token the escrow cannot return. Use it for a resume
+    ///         into an existing escrow too (after `escrow.abort()`, or from broadcast receipts).
+    /// @return bal The BPT moved (the old pooler's whole balance; 0 if it held none).
+    function _fundEscrow(address oldPooler, address escrow) internal returns (uint256 bal) {
+        address livePool = ICutoverBalancerPooler(oldPooler).pool();
+        require(livePool == ICutoverEscrow(escrow).bpt(), CUTOVER_BPT_GUARD_MESSAGE);
+        bal = ICutoverERC20(livePool).balanceOf(oldPooler);
+        if (bal > 0) {
+            uint256 escrowBefore = ICutoverERC20(livePool).balanceOf(escrow);
+            ICutoverBalancerPooler(oldPooler).withdrawBPT(escrow, bal);
+            require(
+                ICutoverERC20(livePool).balanceOf(escrow) - escrowBefore == bal,
+                "UniPoolerCutoverCore: escrow did not receive the BPT"
+            );
         }
+        require(ICutoverERC20(livePool).balanceOf(oldPooler) == 0, "UniPoolerCutoverCore: BPT left on old pooler");
+    }
 
-        require(ICutoverERC20(l.bPool).balanceOf(p.owner) == 0, "UniPoolerCutoverCore: owner BPT not fully exited");
-        sOut = ICutoverERC20(l.sUSDS).balanceOf(p.owner) - sBefore;
-        pOut = ICutoverERC20(l.phUSD).balanceOf(p.owner) - pBefore;
-        require(sOut > 0 && pOut > 0, "UniPoolerCutoverCore: exit returned nothing");
+    /// @notice Step 5. Check the floors against the live proportional share of the BPT step 4 moved
+    ///         (the old pooler's BPT only), then `escrow.exitAndSeed`, which exits the escrow's whole
+    ///         BPT balance. Returns the BPT exited, the seeded reserves and the LP minted.
+    /// @dev    DONATION-PROOF (story 103 revision 2). The escrow is a CREATE from OWNER's public nonce,
+    ///         so its address is predictable and anyone can pre-fund it. The floors are therefore sized
+    ///         on `bptWithdrawn`, never on `balanceOf(escrow)`: a BPT donation only adds to what is
+    ///         exited (share(bptIn) >= share(bptWithdrawn) >= floors), so it can neither push the
+    ///         floors out of tolerance nor revert the run. sUSDS/phUSD donations are swept into the
+    ///         seed by `exitAndSeed` itself (it seeds with its whole balances).
+    function _step5ExitAndSeed(CutoverParams memory p, CutoverLive memory l, uint256 bptWithdrawn)
+        internal
+        returns (uint256 bptIn, uint256 sSeeded, uint256 pSeeded, uint256 liquidity)
+    {
+        bptIn = ICutoverERC20(l.bPool).balanceOf(l.escrow);
+        require(bptWithdrawn > 0 && bptIn >= bptWithdrawn, "UniPoolerCutoverCore: escrow holds no BPT");
+        _checkMinAmountsOut(p, l, bptWithdrawn);
+
+        uint256 lpBefore = ICutoverUniV2Pair(l.pair).balanceOf(l.newPooler);
+        liquidity = ICutoverEscrow(l.escrow).exitAndSeed(uint8(p.exitMode), p.minAmountsOut, p.seedDeadline);
+        require(liquidity > 0, "UniPoolerCutoverCore: no LP minted");
+        require(
+            ICutoverUniV2Pair(l.pair).balanceOf(l.newPooler) - lpBefore == liquidity,
+            "UniPoolerCutoverCore: LP not on pooler"
+        );
+
+        (uint112 r0, uint112 r1,) = ICutoverUniV2Pair(l.pair).getReserves();
+        bool s0 = ICutoverUniV2Pair(l.pair).token0() == l.sUSDS;
+        sSeeded = s0 ? r0 : r1;
+        pSeeded = s0 ? r1 : r0;
+        require(sSeeded > 0 && pSeeded > 0, "UniPoolerCutoverCore: empty seed");
+        // The exit honoured the floors: everything the escrow received went into the pair.
+        (uint256 minS, uint256 minP) = _minsByToken(p, l);
+        require(sSeeded >= minS && pSeeded >= minP, "UniPoolerCutoverCore: seed below exit floors");
+        // No escrow-balance re-check here: `exitAndSeed` itself reverts unless it ends holding 0 BPT,
+        // 0 sUSDS and 0 phUSD (`_requireNoBalance`), and the delta checks above prove where it went.
+    }
+
+    /// @dev `minAmountsOut` re-keyed by token: (sUSDS floor, phUSD floor).
+    function _minsByToken(CutoverParams memory p, CutoverLive memory l) internal view returns (uint256, uint256) {
+        (address[] memory tokens,,,) = IBalancerV3VaultViews(l.bVault).getPoolTokenInfo(l.bPool);
+        return
+            tokens[0] == l.sUSDS ? (p.minAmountsOut[0], p.minAmountsOut[1]) : (p.minAmountsOut[1], p.minAmountsOut[0]);
     }
 
     /// @dev Every `minAmountsOut[i]` must sit in [share_i * (1 - tol), share_i], where
-    ///      share_i = balancesRaw_i * bptIn / totalSupply is the live proportional share.
+    ///      share_i = balancesRaw_i * bptIn / totalSupply is the live proportional share of the BPT
+    ///      step 4 moved into the escrow (the old pooler's BPT only; owner BPT and any third-party
+    ///      donation to the escrow are out of scope).
     function _checkMinAmountsOut(CutoverParams memory p, CutoverLive memory l, uint256 bptIn) internal view {
         (,, uint256[] memory raw,) = IBalancerV3VaultViews(l.bVault).getPoolTokenInfo(l.bPool);
         uint256 supply = _totalSupply(l.bPool);
@@ -411,31 +597,6 @@ abstract contract UniPoolerCutoverCore {
         (bool ok, bytes memory data) = token.staticcall(abi.encodeWithSignature("totalSupply()"));
         require(ok && data.length >= 32, "UniPoolerCutoverCore: totalSupply");
         s = abi.decode(data, (uint256));
-    }
-
-    /// @notice Step 6. Seed the empty pair with ALL the recovered tokens in one Router02 call.
-    function _step6SeedPair(CutoverParams memory p, CutoverLive memory l, uint256 sAmt, uint256 pAmt)
-        internal
-        returns (uint256 liquidity)
-    {
-        uint256 sMin = (sAmt * (CUTOVER_MAX_BPS - p.seedToleranceBps)) / CUTOVER_MAX_BPS;
-        uint256 pMin = (pAmt * (CUTOVER_MAX_BPS - p.seedToleranceBps)) / CUTOVER_MAX_BPS;
-        require(sMin > 0 && pMin > 0, "UniPoolerCutoverCore: zero seed minimum");
-
-        ICutoverERC20(l.sUSDS).approve(p.uniV2Router, sAmt);
-        ICutoverERC20(l.phUSD).approve(p.uniV2Router, pAmt);
-        uint256 a;
-        uint256 b;
-        (a, b, liquidity) = ICutoverUniV2Router(p.uniV2Router)
-            .addLiquidity(l.sUSDS, l.phUSD, sAmt, pAmt, sMin, pMin, l.newPooler, p.seedDeadline);
-        // Into an empty pair the router uses the desired amounts exactly: nothing is left behind.
-        require(a == sAmt && b == pAmt, "UniPoolerCutoverCore: seed not exact");
-        require(liquidity > 0, "UniPoolerCutoverCore: no LP minted");
-        require(ICutoverUniV2Pair(l.pair).balanceOf(l.newPooler) == liquidity, "UniPoolerCutoverCore: LP not on pooler");
-
-        (uint112 r0, uint112 r1,) = ICutoverUniV2Pair(l.pair).getReserves();
-        bool s0 = ICutoverUniV2Pair(l.pair).token0() == l.sUSDS;
-        require((s0 ? r0 : r1) == sAmt && (s0 ? r1 : r0) == pAmt, "UniPoolerCutoverCore: reserves != seeded amounts");
     }
 
     /// @notice Step 7. Settle every interim mint's debt, before the hook is repointed.
@@ -499,34 +660,48 @@ abstract contract UniPoolerCutoverCore {
     }
 
     /// @notice Step 11. Move the old pooler's sUSDS and parked USDS, read live after step 10.
+    ///         sUSDS goes straight to the new pooler; USDS goes to the escrow, which wraps it into
+    ///         sUSDS credited to the new pooler. Contract-to-contract only; the old pooler is
+    ///         verified empty.
+    /// @dev    DONATION-PROOF (story 103 revision 2): every escrow check is a before/after DELTA, never
+    ///         an absolute balance, because the escrow's address is predictable and anyone can pre-fund
+    ///         it with USDS. `wrapUsds` wraps the escrow's whole USDS balance, so pre-donated dust is
+    ///         simply wrapped along with the rescue and credited to the new pooler. If nothing is
+    ///         rescued, no wrap runs and any donated USDS stays on the escrow, reported by verify.
     function _step11MoveBalances(CutoverParams memory p, CutoverLive memory l)
         internal
-        returns (uint256 sUSDSRescued, uint256 usdsRescued, bool wrapped, uint256 wrappedShares)
+        returns (uint256 sUSDSRescued, uint256 usdsRescued, uint256 wrappedShares)
     {
         ICutoverBalancerPooler old = ICutoverBalancerPooler(p.oldPooler);
 
         sUSDSRescued = ICutoverERC20(l.sUSDS).balanceOf(p.oldPooler);
-        if (sUSDSRescued > 0) old.rescueERC20(l.sUSDS, l.newPooler, sUSDSRescued);
+        if (sUSDSRescued > 0) {
+            uint256 npBefore = ICutoverERC20(l.sUSDS).balanceOf(l.newPooler);
+            old.rescueERC20(l.sUSDS, l.newPooler, sUSDSRescued);
+            require(
+                ICutoverERC20(l.sUSDS).balanceOf(l.newPooler) - npBefore == sUSDSRescued,
+                "UniPoolerCutoverCore: sUSDS rescue short"
+            );
+        }
 
         usdsRescued = ICutoverERC20(l.usds).balanceOf(p.oldPooler);
         if (usdsRescued > 0) {
-            UniPoolerV2 np = UniPoolerV2(l.newPooler);
-            bool donationLive = np.batchDonationSize() > 0 && np.batchMinter() != address(0) && np.psm() != address(0);
-            if (donationLive) {
-                // The next index-4 dispatch sweeps and retries it.
-                old.rescueERC20(l.usds, l.newPooler, usdsRescued);
-            } else {
-                // The new pooler would never sweep it: wrap it into sUSDS for the new pooler.
-                uint256 ownerBefore = ICutoverERC20(l.usds).balanceOf(p.owner);
-                old.rescueERC20(l.usds, p.owner, usdsRescued);
-                require(
-                    ICutoverERC20(l.usds).balanceOf(p.owner) - ownerBefore == usdsRescued,
-                    "UniPoolerCutoverCore: USDS rescue short"
-                );
-                ICutoverERC20(l.usds).approve(l.sUSDS, usdsRescued);
-                wrappedShares = ICutoverERC4626(l.sUSDS).deposit(usdsRescued, l.newPooler);
-                wrapped = true;
-            }
+            uint256 escrowUsdsBefore = ICutoverERC20(l.usds).balanceOf(l.escrow);
+            old.rescueERC20(l.usds, l.escrow, usdsRescued);
+            uint256 escrowUsdsAfterRescue = ICutoverERC20(l.usds).balanceOf(l.escrow);
+            require(escrowUsdsAfterRescue - escrowUsdsBefore == usdsRescued, "UniPoolerCutoverCore: USDS rescue short");
+            uint256 npBefore = ICutoverERC20(l.sUSDS).balanceOf(l.newPooler);
+            wrappedShares = ICutoverEscrow(l.escrow).wrapUsds();
+            require(
+                wrappedShares > 0 && ICutoverERC20(l.sUSDS).balanceOf(l.newPooler) - npBefore == wrappedShares,
+                "UniPoolerCutoverCore: wrapped sUSDS not on new pooler"
+            );
+            // wrapUsds consumes the escrow's whole USDS balance (it reverts otherwise), so the delta
+            // this step moved out is at least the rescue: the parked USDS really was wrapped.
+            require(
+                escrowUsdsAfterRescue - ICutoverERC20(l.usds).balanceOf(l.escrow) >= usdsRescued,
+                "UniPoolerCutoverCore: rescued USDS not wrapped"
+            );
         }
 
         require(
@@ -544,14 +719,15 @@ abstract contract UniPoolerCutoverCore {
     }
 
     /// @notice Closing end-state check. The full verify (test mint, quotePool preview) is 103's.
+    ///         Owner BPT is deliberately NOT checked (out of scope; a donation must not brick this).
+    ///         Nor is the escrow's balance (story 103 revision 2): its address is predictable, so a
+    ///         third party can always leave dust on it. What step 4/5/11 moved through it is proven by
+    ///         delta checks; the old pooler being empty is the hard requirement.
     function _assertRetired(CutoverParams memory p, CutoverLive memory l) internal view {
         (address d,,,) = ICutoverNFTMinter(p.nftMinter).configs(p.dispatcherIndex);
         require(d == l.newPooler, "UniPoolerCutoverCore: index not on new pooler");
         require(ICutoverMintDebtHook(p.mintDebtHook).dispatcher() == l.newPooler, "UniPoolerCutoverCore: hook");
-        require(
-            ICutoverERC20(l.bPool).balanceOf(p.oldPooler) == 0 && ICutoverERC20(l.bPool).balanceOf(p.owner) == 0,
-            "UniPoolerCutoverCore: BPT remains"
-        );
+        require(ICutoverERC20(l.bPool).balanceOf(p.oldPooler) == 0, "UniPoolerCutoverCore: BPT remains");
         require(
             ICutoverERC20(l.sUSDS).balanceOf(p.oldPooler) == 0 && ICutoverERC20(l.usds).balanceOf(p.oldPooler) == 0,
             "UniPoolerCutoverCore: old pooler holds funds"
