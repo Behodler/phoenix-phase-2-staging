@@ -24,7 +24,8 @@ import {ICutoverUniV2Pair} from "./helpers/UniPoolerCutoverCore.sol";
  *           - the new pooler holds the LP (at least the seeded `cutover.liquidity`);
  *           - the new pooler's config equals the old pooler's (live) and all four poolers are authorized;
  *           - the old pooler is paused, its minter is OWNER, and it holds 0 sUSDS, 0 BPT and 0 USDS;
- *           - the escrow holds 0 BPT, sUSDS, phUSD and USDS;
+ *           - the escrow's BPT, sUSDS, phUSD and USDS are REPORTED (a warning if non-zero) - never required,
+ *             because its address is predictable and anyone can donate to it (story 103 revision 2);
  *           - owner BPT is REPORTED (logged; a warning if non-zero) - never required (F-02-052);
  *           - a `quotePool`-floored `pool()` succeeds (simulated as OWNER inside a reverted snapshot).
  *
@@ -76,7 +77,7 @@ contract VerifyUniPoolerCutover is UniPoolerCutoverMainnetBase {
         console.log("OK: UniPooler holds the LP:", lp);
 
         _checkDrained(escrow);
-        console.log("OK: old pooler paused, minter OWNER, 0 sUSDS / 0 BPT / 0 USDS; escrow empty.");
+        console.log("OK: old pooler paused, minter OWNER, 0 sUSDS / 0 BPT / 0 USDS (escrow residuals reported above).");
 
         _reportOwnerBpt();
         _simulateQuotedPool(np);

@@ -466,6 +466,80 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         _assertPost(r, s);
     }
 
+    // ------------------------------------------- donations to the predictable escrow (103 rev. 2)
+
+    /// @dev The escrow is a CREATE from the owner's nonce: UniPoolerV2 takes nonce N in step 3 and the
+    ///      escrow N + 1 in step 3b. Anyone can compute it before the broadcast.
+    function _predictEscrow() internal view returns (address) {
+        return vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+    }
+
+    /// @dev Pre-funding the predicted escrow with all four tokens (BPT well beyond the exit tolerance)
+    ///      must not revert the cutover. Floors stay sized on the old pooler's BPT; the donations are
+    ///      swept along: BPT exited, sUSDS/phUSD seeded, USDS wrapped with the parked USDS.
+    function test_escrowPreDonation_allFourTokens_cutoverCompletes() public {
+        usds.transfer(address(old), 55e18); // parked USDS, so step 11's rescue + wrap path runs
+        Pre memory s = _pre();
+        address predicted = _predictEscrow();
+        uint256 bptDonation = s.bptIn / 10; // 10%: far outside TOL_BPS, so share(escrow balance) != floors
+        vm.prank(thirdPartyLp);
+        bpt.transfer(predicted, bptDonation);
+        susds.deposit(2e18, predicted);
+        phusd.mint(predicted, 3e18);
+        usds.transfer(predicted, 4e18);
+        uint256 donatedS = susds.balanceOf(predicted);
+
+        CutoverResult memory r = _runCutover(_params(ExitMode.PROPORTIONAL));
+
+        assertEq(r.escrow, predicted, "escrow deployed at the predicted address");
+        assertEq(r.bptWithdrawn, s.bptIn, "old pooler's whole BPT to the escrow");
+        assertEq(r.bptExited, s.bptIn + bptDonation, "the donated BPT is exited along with it");
+        assertEq(r.usdsRescued, 55e18, "parked USDS rescued");
+        // Seeded with the exit proceeds plus the sUSDS/phUSD donations.
+        (uint256 minS, uint256 minP) = _minsByToken(_params(ExitMode.PROPORTIONAL), _liveForMins());
+        assertGe(r.sUSDSSeeded, minS + donatedS, "sUSDS donation seeded");
+        assertGe(r.phUSDSeeded, minP + 3e18, "phUSD donation seeded");
+        // The USDS dust was wrapped with the rescue and credited to the new pooler.
+        assertEq(usds.balanceOf(r.escrow), 0, "escrow USDS swept by wrapUsds");
+        assertEq(susds.balanceOf(r.newPooler), r.sUSDSRescued + r.usdsWrappedShares, "rescued + wrapped");
+        assertGe(r.usdsWrappedShares, susds.convertToShares(59e18) - 1, "wrapped parked + donated USDS");
+        // The escrow ends empty here, only because exitAndSeed and wrapUsds sweep whole balances.
+        assertEq(bpt.balanceOf(r.escrow) + susds.balanceOf(r.escrow) + phusd.balanceOf(r.escrow), 0);
+        // Old pooler empty and retired; the owner never credited.
+        assertEq(bpt.balanceOf(address(old)) + susds.balanceOf(address(old)) + usds.balanceOf(address(old)), 0);
+        assertTrue(old.paused());
+        assertEq(bpt.balanceOf(address(this)), s.ownerBPT, "owner BPT untouched");
+        assertEq(usds.balanceOf(address(this)), s.ownerUSDS - 6e18, "owner USDS: only this test's own donations");
+        assertEq(stepCount, 13, "every step observed");
+    }
+
+    /// @dev USDS dust on the escrow with NO parked USDS on the old pooler: step 11 rescues nothing and runs
+    ///      no wrap, so the dust stays on the escrow. Before revision 2 this reverted ("USDS left on escrow",
+    ///      then `_assertRetired`); now it completes and the residual is left for verify to report.
+    function test_escrowPreDonation_usdsDust_noParkedUsds_cutoverCompletes() public {
+        assertEq(usds.balanceOf(address(old)), 0, "nothing parked");
+        Pre memory s = _pre();
+        address predicted = _predictEscrow();
+        usds.transfer(predicted, 1);
+
+        CutoverResult memory r = _runCutover(_params(ExitMode.PROPORTIONAL));
+
+        assertEq(r.escrow, predicted, "escrow deployed at the predicted address");
+        assertEq(r.usdsRescued, 0);
+        assertEq(r.usdsWrappedShares, 0);
+        assertEq(usds.balanceOf(r.escrow), 1, "donated dust stays on the escrow (reported, never required)");
+        assertEq(r.bptExited, s.bptIn);
+        assertTrue(old.paused());
+        assertEq(stepCount, 13);
+    }
+
+    /// @dev `CutoverLive` with just the fields `_minsByToken` reads.
+    function _liveForMins() internal view returns (CutoverLive memory l) {
+        l.sUSDS = address(susds);
+        l.bVault = address(bVault);
+        l.bPool = address(bpt);
+    }
+
     /// @dev The core's own invariant: an owner credit at any step reverts the whole cutover.
     function test_revert_ownerCreditedDuringCutover() public {
         creditOwnerAtStepPlusOne = CUTOVER_STEP_EXIT_AND_SEED + 1;

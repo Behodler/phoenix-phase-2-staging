@@ -152,7 +152,10 @@ contract VerifyUniPoolerCutoverGuardsTest is Test {
         );
         assertTrue(_has(s, "progress.unipooler-cutover.1.POISONED.<ts>.bak"), "poisoned file rename");
         assertTrue(
-            _has(s, "NEVER CALL `BalancerPoolerV2.setPool` ON THE OLD POOLER (0x7f6874332c4629429d70D15f685A8230323F11F1)"),
+            _has(
+                s,
+                "NEVER CALL `BalancerPoolerV2.setPool` ON THE OLD POOLER (0x7f6874332c4629429d70D15f685A8230323F11F1)"
+            ),
             "L-27 operational rule"
         );
         assertTrue(_has(s, "server/deployments/progress.unipooler-cutover.1.json"), "progress file path");
@@ -168,5 +171,34 @@ contract VerifyUniPoolerCutoverGuardsTest is Test {
         assertLt(guard, call, "guard before withdrawBPT");
         assertTrue(_has(c, "function bpt() external view returns (address);"), "local escrow interface declares bpt()");
         assertEq(_count(c, ".skim("), 0, "no skim in the core (the escrow skims to the new pooler)");
+    }
+
+    /// @dev Story 103 revision 2: the escrow's address is predictable (a CREATE from OWNER's public nonce), so no
+    ///      check may require an ABSOLUTE escrow balance - a donation would revert the cutover's local pass or fail
+    ///      :verify forever. The core compares deltas; verify only reports escrow residuals; the old pooler being
+    ///      empty stays a hard require in both.
+    function test_noAbsoluteEscrowBalanceRequirement_escrowResidualIsAWarning() public view {
+        string memory c = vm.readFile(CORE);
+        assertEq(_count(c, "balanceOf(l.escrow) == "), 0, "core: no absolute escrow-balance equality");
+        assertEq(
+            _count(c, "balanceOf(l.escrow) - "), 0, "core: no escrow balance used as a delta minuend unsnapshotted"
+        );
+        assertTrue(_has(c, "escrowUsdsAfterRescue - escrowUsdsBefore == usdsRescued"), "core: step-11 USDS delta check");
+        assertTrue(_has(c, "_checkMinAmountsOut(p, l, bptWithdrawn);"), "core: floors sized on the BPT step 4 moved");
+        assertTrue(
+            _has(
+                c, "require(ICutoverERC20(l.bPool).balanceOf(p.oldPooler) == 0, \"UniPoolerCutoverCore: BPT remains\");"
+            ),
+            "core: old pooler BPT still a hard require"
+        );
+
+        string memory s = vm.readFile(SCRIPT);
+        uint256 fn = _at(s, "function _checkDrained(address escrow)");
+        uint256 end = _at(s, "function _reportEscrowResidual(");
+        assertLt(fn, end, "_checkDrained precedes its reporter");
+        assertEq(_count(s, ").balanceOf(escrow) == 0"), 0, "verify: no required-empty escrow");
+        assertTrue(_has(s, "\"verify: old pooler holds BPT\""), "verify: old pooler BPT still required");
+        assertTrue(_has(s, "\"verify: old pooler holds sUSDS\""), "verify: old pooler sUSDS still required");
+        assertTrue(_has(s, "WARNING: escrow holds "), "verify: escrow residual is a warning");
     }
 }

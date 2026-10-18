@@ -34,7 +34,7 @@ import {
  *         SEQUENCE (see the core's NatSpec for each require): 0 preconditions (all four poolers REVOKED on the old
  *         pooler - story 099's `incrementAuthVersion`, broadcast 2026-10-01 - and the pair absent or reserve-less);
  *         1 createPair; 2 reserves (0,0), unsynced balances recorded; 3 deploy UniPoolerV2; 3b deploy the escrow; 4
- *         BPT-address guard + withdrawBPT(escrow); 5 minAmountsOut vs the escrow's live share + escrow.exitAndSeed; 7
+ *         BPT-address guard + withdrawBPT(escrow); 5 minAmountsOut vs the moved BPT's live share + escrow.exitAndSeed; 7
  *         hook.pull + mintDebt == 0; 8 hook -> UniPoolerV2 -> hook; 9 minter + live config copy + the four poolers
  *         re-authorized on UniPoolerV2; 10 replaceDispatcher(4); 11 sUSDS rescue + USDS via escrow.wrapUsds; 12
  *         old.setMinter(OWNER) + old.pause(). No Pauser register/unregister (dispatchers have no `pauser()`).
@@ -241,17 +241,38 @@ abstract contract UniPoolerCutoverMainnetBase is Script, StdCheats, UniPoolerCut
         require(_minterOf(OLD_POOLER) == OWNER, "verify: old pooler minter != OWNER");
     }
 
-    /// @dev Old pooler and escrow hold nothing of the four moved tokens.
-    function _checkDrained(address escrow) internal view {
+    /// @dev The old pooler holds nothing of the moved tokens: a HARD requirement. The escrow's residual
+    ///      balances are only REPORTED (story 103 revision 2): its address is a CREATE from OWNER's public
+    ///      nonce, so anyone can donate to it before or after the cutover, and `wrapUsds`/`exitAndSeed` are
+    ///      operator-only, so a required-empty escrow would let a third party fail verify permanently (the
+    ///      same donation-grief class F-02-052 designed out for owner BPT). What the cutover moved through
+    ///      the escrow is proven by the core's delta checks.
+    /// @return residual The number of the four tokens the escrow still holds a non-zero balance of.
+    function _checkDrained(address escrow) internal view returns (uint256 residual) {
         require(ICutoverERC20(BPT).balanceOf(OLD_POOLER) == 0, "verify: old pooler holds BPT");
         require(ICutoverERC20(SUSDS).balanceOf(OLD_POOLER) == 0, "verify: old pooler holds sUSDS");
         require(ICutoverERC20(USDS).balanceOf(OLD_POOLER) == 0, "verify: old pooler holds USDS (parked USDS not moved)");
         if (escrow != address(0)) {
-            require(ICutoverERC20(BPT).balanceOf(escrow) == 0, "verify: escrow holds BPT");
-            require(ICutoverERC20(SUSDS).balanceOf(escrow) == 0, "verify: escrow holds sUSDS");
-            require(ICutoverERC20(PHUSD).balanceOf(escrow) == 0, "verify: escrow holds phUSD");
-            require(ICutoverERC20(USDS).balanceOf(escrow) == 0, "verify: escrow holds USDS");
+            residual += _reportEscrowResidual(escrow, BPT, "BPT");
+            residual += _reportEscrowResidual(escrow, SUSDS, "sUSDS");
+            residual += _reportEscrowResidual(escrow, PHUSD, "phUSD");
+            residual += _reportEscrowResidual(escrow, USDS, "USDS");
+            if (residual == 0) console.log("OK: escrow holds 0 BPT / sUSDS / phUSD / USDS.");
         }
+    }
+
+    function _reportEscrowResidual(address escrow, address token, string memory name) private view returns (uint256) {
+        uint256 b = ICutoverERC20(token).balanceOf(escrow);
+        if (b == 0) return 0;
+        console.log(
+            string.concat(
+                "WARNING: escrow holds ",
+                name,
+                " (a third-party donation, or a cutover step that did not land - check the receipts):"
+            ),
+            b
+        );
+        return 1;
     }
 
     /// @dev `ATokenDispatcherV2._minter` has no getter. It is storage slot 1 (after Pausable._paused and

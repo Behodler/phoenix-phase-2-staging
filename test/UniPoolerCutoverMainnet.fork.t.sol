@@ -385,6 +385,53 @@ contract UniPoolerCutoverMainnetForkTest is Test {
         vm.removeFile(path);
     }
 
+    // ---------------------------------------------------- donations to the predictable escrow (103 revision 2)
+
+    /// @dev The escrow is a CREATE from OWNER's public nonce (UniPoolerV2 at nonce N, the escrow at N + 1), so a
+    ///      third party can pre-fund it. USDS/sUSDS/phUSD dust there must not block :preview or :broadcast.
+    function test_fork_escrowPreDonation_doesNotBlockCutover() public {
+        if (!_fork()) return;
+        address predicted = vm.computeCreateAddress(OWNER, vm.getNonce(OWNER) + 1);
+        deal(USDS, predicted, 1e18);
+        deal(SUSDS, predicted, 1e18);
+        deal(PHUSD, predicted, 1e18);
+        uint256 oldBpt = IERC20(BPT).balanceOf(OLD_POOLER);
+        uint256[4] memory start = _ownerBalances();
+        string memory path = _tmp("escrow-predonation");
+        UniPoolerCutoverHarness h = new UniPoolerCutoverHarness(false, path);
+        (uint256 minS, uint256 minP) = _floors();
+        h.setInputs(UniPoolerCutoverCore.ExitMode.PROPORTIONAL, minS, minP);
+        h.run();
+        assertTrue(h.cutoverRanThisRun(), "cutover ran despite the pre-donation");
+        UniPoolerCutoverCore.CutoverResult memory r = h.result();
+        assertEq(r.escrow, predicted, "escrow deployed at the predicted address");
+        assertEq(r.bptWithdrawn, oldBpt);
+        assertEq(IERC20(BPT).balanceOf(OLD_POOLER), 0, "old BPT 0");
+        _assertOwnerNeverCredited(h, start);
+        new VerifyUniPoolerCutoverHarness(path).run();
+        vm.removeFile(path);
+    }
+
+    /// @dev A donation to the live escrow AFTER the cutover (`wrapUsds` is operator-only, so nobody else can clear
+    ///      it) must make :verify WARN, never fail. The old pooler being empty stays a hard requirement.
+    function test_fork_escrowPostCutoverDonation_verifyWarnsNotFails() public {
+        if (!_fork()) return;
+        string memory path = _tmp("escrow-postdonation");
+        UniPoolerCutoverHarness h = new UniPoolerCutoverHarness(false, path);
+        UniPoolerCutoverCore.CutoverResult memory r = _runCutover(h, UniPoolerCutoverCore.ExitMode.PROPORTIONAL);
+        deal(USDS, r.escrow, 5e18);
+        deal(SUSDS, r.escrow, 6e18);
+        deal(PHUSD, r.escrow, 7e18);
+        new VerifyUniPoolerCutoverHarness(path).run(); // logs WARNING lines; must not revert
+
+        // ...but residue on the OLD pooler still fails verify.
+        deal(USDS, OLD_POOLER, 1);
+        VerifyUniPoolerCutoverHarness v = new VerifyUniPoolerCutoverHarness(path);
+        vm.expectRevert(bytes("verify: old pooler holds USDS (parked USDS not moved)"));
+        v.run();
+        vm.removeFile(path);
+    }
+
     // ------------------------------------------------------------------------------------------------- case 2
 
     /// @notice yield-claim-nft:052: on a paused pool `removeLiquidityProportional` reverts and
