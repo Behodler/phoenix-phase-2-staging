@@ -19,7 +19,12 @@ import {BalancerPoolerMintDebtHook} from "@yield-claim-nft/hooks/BalancerPoolerM
 import {IDispatchHook} from "@yield-claim-nft/interfaces/IDispatchHook.sol";
 import {Pauser} from "@pauser/Pauser.sol";
 import {UniswapV2Deployer, IUniswapV2FactoryLike, IUniswapV2RouterLike} from "../script/helpers/UniswapV2Deployer.sol";
-import {UniPoolerCutoverCore} from "../script/helpers/UniPoolerCutoverCore.sol";
+import {UniPoolerCutoverCore, ICutoverEscrow} from "../script/helpers/UniPoolerCutoverCore.sol";
+import {UniPoolerCutoverEscrow} from "@yield-claim-nft/migration/UniPoolerCutoverEscrow.sol";
+
+interface ICutoverUniV2PairSkim {
+    function skim(address to) external;
+}
 
 interface IPairView {
     function token0() external view returns (address);
@@ -29,7 +34,7 @@ interface IPairView {
 }
 
 /**
- * @title UniPoolerCutoverCoreTest  (story 100)
+ * @title UniPoolerCutoverCoreTest  (story 100; escrow flow since story 103 / yield-claim-nft:052)
  * @notice Drives the SAME `UniPoolerCutoverCore` that the anvil rehearsal (101), the mainnet
  *         script and the fork test (103) inherit, against a local stack: the Balancer mocks with
  *         their new exits, a real `BalancerPoolerV2` at NFT index 4 holding BPT and interim sUSDS,
@@ -38,6 +43,12 @@ interface IPairView {
  *
  *         The test contract is the OWNER of everything, so the core's internal calls run from the
  *         owner exactly as they do from a broadcasting script (execution context is the caller's).
+ *
+ *         Story 103: every fund now moves contract-to-contract through `UniPoolerCutoverEscrow`.
+ *         `_afterCutoverStep` is overridden to record the owner's BPT/sUSDS/phUSD/USDS after every
+ *         step, so the "owner balances never increase" invariant is checked here independently of
+ *         the core's own per-step require. The owner keeps a BPT position of its own throughout
+ *         (out of scope, F-02-052): it is never moved and never makes the cutover revert.
  */
 contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
     // Tokens
@@ -130,7 +141,9 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         susds.deposit(4_000e18, address(bVault));
         phusd.mint(address(bVault), 9_000e18);
         _addLiquidityTo(thirdPartyLp, 13_000e18);
-        // BPT the owner already holds (mainnet: 202.30 BPT from an earlier withdrawBPT).
+        // BPT the owner holds of its own. Mainnet's owner holds 0 (its 202.30 tranche was burned at
+        // block 25,985,119, F-02-052); a non-zero owner position here proves the cutover neither
+        // moves it nor reverts on it (anyone can donate BPT to the owner).
         phusd.mint(address(bVault), 300e18);
         _addLiquidityTo(address(this), 300e18);
 
@@ -184,9 +197,10 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
     }
 
     /// @dev Off-chain computation the mainnet script (103) performs: the live proportional share
-    ///      of the owner's whole BPT balance after `withdrawBPT`, minus TOL_BPS, in pool order.
+    ///      of the escrow's BPT after `withdrawBPT(escrow, bal)` - the OLD POOLER's BPT only, never
+    ///      the owner's - minus TOL_BPS, in pool order.
     function _expectedMins() internal view returns (uint256[] memory mins) {
-        uint256 bptIn = bpt.balanceOf(address(this)) + bpt.balanceOf(address(old));
+        uint256 bptIn = bpt.balanceOf(address(old));
         (,, uint256[] memory raw,) = bVault.getPoolTokenInfo(address(bpt));
         mins = new uint256[](raw.length);
         for (uint256 i = 0; i < raw.length; i++) {
@@ -207,7 +221,6 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         p.exitMode = mode;
         p.minAmountsOut = _expectedMins();
         p.exitToleranceBps = TOL_BPS;
-        p.seedToleranceBps = TOL_BPS;
         p.seedDeadline = block.timestamp + SEED_DEADLINE_OFFSET;
     }
 
@@ -221,8 +234,10 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         uint256 oldSUSDS;
         uint256 oldUSDS;
         uint256 bptIn;
+        uint256 ownerBPT;
         uint256 ownerSUSDS;
         uint256 ownerPhUSD;
+        uint256 ownerUSDS;
         uint256 stakerPhUSD;
         uint256 debt;
     }
@@ -231,9 +246,11 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         (, s.price, s.growth,) = minter.configs(INDEX);
         s.oldSUSDS = susds.balanceOf(address(old));
         s.oldUSDS = usds.balanceOf(address(old));
-        s.bptIn = bpt.balanceOf(address(this)) + bpt.balanceOf(address(old));
+        s.bptIn = bpt.balanceOf(address(old));
+        s.ownerBPT = bpt.balanceOf(address(this));
         s.ownerSUSDS = susds.balanceOf(address(this));
         s.ownerPhUSD = phusd.balanceOf(address(this));
+        s.ownerUSDS = usds.balanceOf(address(this));
         s.stakerPhUSD = phusd.balanceOf(staker);
         s.debt = hook.mintDebt();
     }
@@ -256,26 +273,42 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         assertEq(hook.mintDebt(), 0, "mintDebt == 0");
         assertEq(phusd.balanceOf(staker), s.stakerPhUSD + s.debt, "debt pulled to recipient");
 
-        // Pair seeded with exactly the recovered amounts; the new pooler holds the LP.
+        // Pair seeded by the escrow with exactly the exit proceeds; the new pooler holds the LP.
         assertEq(r.pair, factory.getPair(address(susds), address(phusd)), "canonical pair");
         assertEq(np.pair(), r.pair);
         (uint112 r0, uint112 r1,) = IPairView(r.pair).getReserves();
         bool s0 = IPairView(r.pair).token0() == address(susds);
-        assertEq(s0 ? r0 : r1, r.sUSDSRecovered, "sUSDS reserve == seeded");
-        assertEq(s0 ? r1 : r0, r.phUSDRecovered, "phUSD reserve == seeded");
+        assertEq(s0 ? r0 : r1, r.sUSDSSeeded, "sUSDS reserve == seeded");
+        assertEq(s0 ? r1 : r0, r.phUSDSeeded, "phUSD reserve == seeded");
         assertGt(r.liquidity, 0);
         assertEq(IPairView(r.pair).balanceOf(r.newPooler), r.liquidity, "new pooler holds the LP");
-        assertEq(r.bptExited, s.bptIn, "owner's whole BPT exited");
+        assertEq(r.bptWithdrawn, s.bptIn, "old pooler's whole BPT to the escrow");
+        assertEq(r.bptExited, s.bptIn, "escrow exited exactly the old pooler's BPT");
 
-        // Only Balancer-recovered tokens seeded the pair: the owner's own balances are unchanged.
+        // No funds through the owner EOA: all four balances exactly unchanged, owner BPT untouched.
+        assertEq(bpt.balanceOf(address(this)), s.ownerBPT, "owner BPT unchanged (out of scope)");
+        assertEq(r.ownerBptAtStart, s.ownerBPT, "owner BPT reported");
         assertEq(susds.balanceOf(address(this)), s.ownerSUSDS, "owner sUSDS unchanged");
         assertEq(phusd.balanceOf(address(this)), s.ownerPhUSD, "owner phUSD unchanged");
+        assertEq(usds.balanceOf(address(this)), s.ownerUSDS, "owner USDS unchanged");
+        _assertOwnerNeverCredited(s);
+        assertEq(stepCount, 13, "every step observed");
+
+        // The escrow is the operator-gated custody contract and ends empty.
+        UniPoolerCutoverEscrow e = UniPoolerCutoverEscrow(r.escrow);
+        assertEq(e.operator(), address(this), "escrow operator == owner");
+        assertEq(e.newPooler(), r.newPooler, "escrow newPooler");
+        assertEq(e.oldPooler(), address(old), "escrow oldPooler");
+        assertEq(e.bpt(), address(bpt), "escrow bpt");
+        assertEq(bpt.balanceOf(r.escrow), 0, "escrow BPT == 0");
+        assertEq(susds.balanceOf(r.escrow), 0, "escrow sUSDS == 0");
+        assertEq(phusd.balanceOf(r.escrow), 0, "escrow phUSD == 0");
+        assertEq(usds.balanceOf(r.escrow), 0, "escrow USDS == 0");
 
         // Old pooler drained, retired and paused.
         assertEq(susds.balanceOf(address(old)), 0, "old sUSDS == 0");
         assertEq(usds.balanceOf(address(old)), 0, "old USDS == 0");
         assertEq(bpt.balanceOf(address(old)), 0, "old BPT == 0");
-        assertEq(bpt.balanceOf(address(this)), 0, "owner BPT == 0");
         assertTrue(old.paused(), "old paused");
         assertEq(r.sUSDSRescued, s.oldSUSDS);
         assertEq(r.usdsRescued, s.oldUSDS);
@@ -301,6 +334,40 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         assertEq(priceAfterMint, s.price + (s.price * s.growth) / 10_000, "price curve continues");
     }
 
+    // ------------------------------------------------- per-step owner observation
+
+    uint256 internal stepCount;
+    uint256[] internal stepIds;
+    uint256[4][] internal ownerAfterStep; // BPT, sUSDS, phUSD, USDS
+    /// @dev When non-zero, `_afterCutoverStep` credits the owner with sUSDS at this step id + 1
+    ///      (offset so step 0 can be targeted), to prove the core's own invariant fires.
+    uint256 internal creditOwnerAtStepPlusOne;
+
+    function _afterCutoverStep(uint256 step, CutoverParams memory, CutoverLive memory) internal override {
+        stepCount++;
+        stepIds.push(step);
+        ownerAfterStep.push(
+            [
+                bpt.balanceOf(address(this)),
+                susds.balanceOf(address(this)),
+                phusd.balanceOf(address(this)),
+                usds.balanceOf(address(this))
+            ]
+        );
+        if (creditOwnerAtStepPlusOne != 0 && step + 1 == creditOwnerAtStepPlusOne) {
+            susds.deposit(1e18, address(this)); // owner gains 1 sUSDS "during" the cutover
+        }
+    }
+
+    function _assertOwnerNeverCredited(Pre memory s) internal view {
+        for (uint256 i = 0; i < ownerAfterStep.length; i++) {
+            assertLe(ownerAfterStep[i][0], s.ownerBPT, "owner BPT rose at a step");
+            assertLe(ownerAfterStep[i][1], s.ownerSUSDS, "owner sUSDS rose at a step");
+            assertLe(ownerAfterStep[i][2], s.ownerPhUSD, "owner phUSD rose at a step");
+            assertLe(ownerAfterStep[i][3], s.ownerUSDS, "owner USDS rose at a step");
+        }
+    }
+
     // ------------------------------------------------------------- happy paths
 
     function test_cutover_proportional() public {
@@ -321,24 +388,38 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         assertEq(susds.balanceOf(r.newPooler), r.sUSDSRescued, "new pooler sUSDS == rescued");
     }
 
-    /// @dev Parked USDS with the donation disabled on the new pooler: the USDS goes to OWNER, is
-    ///      wrapped, and the sUSDS is deposited for the new pooler (plan Stage 2, interim mints).
-    function test_parkedUSDS_donationDisabled_wrappedIntoNewPooler() public {
-        usds.transfer(address(old), 55e18); // as if parked by DonationSkipped
-        uint256 ownerUSDS = usds.balanceOf(address(this));
-        CutoverResult memory r = _runCutover(_params(ExitMode.PROPORTIONAL));
-        assertEq(r.usdsRescued, 55e18);
-        assertTrue(r.usdsWrapped, "wrapped");
-        assertEq(usds.balanceOf(address(old)), 0);
-        assertEq(usds.balanceOf(r.newPooler), 0, "no raw USDS on new pooler");
-        assertEq(usds.balanceOf(address(this)), ownerUSDS, "owner USDS unchanged");
-        assertEq(susds.balanceOf(r.newPooler), r.sUSDSRescued + r.usdsWrappedShares, "rescued + wrapped");
-        assertGt(r.usdsWrappedShares, 0);
+    function test_stepOrder_observed() public {
+        _runCutover(_params(ExitMode.PROPORTIONAL));
+        uint256[13] memory expected = [uint256(0), 1, 2, 3, 31, 4, 5, 7, 8, 9, 10, 11, 12];
+        assertEq(stepIds.length, expected.length, "step count");
+        for (uint256 i = 0; i < expected.length; i++) {
+            assertEq(stepIds[i], expected[i], "step order");
+        }
     }
 
-    /// @dev Parked USDS with the donation live: the USDS goes straight to the new pooler, whose
-    ///      next dispatch sweeps and retries it.
-    function test_parkedUSDS_donationLive_sentToNewPooler() public {
+    /// @dev Parked USDS with the donation disabled on the new pooler (mainnet: batchDonationSize 0):
+    ///      old pooler -> escrow (`rescueERC20`), then `escrow.wrapUsds()` credits sUSDS to the new
+    ///      pooler. Never through the owner.
+    function test_parkedUSDS_donationDisabled_wrappedViaEscrow() public {
+        usds.transfer(address(old), 55e18); // as if parked by DonationSkipped
+        Pre memory s = _pre();
+        // Never `rescueERC20(USDS, owner, ...)`: the pre-052 path through the EOA.
+        vm.expectCall(
+            address(old), abi.encodeWithSelector(BalancerPoolerV2.rescueERC20.selector, address(usds), address(this)), 0
+        );
+        CutoverResult memory r = _runCutover(_params(ExitMode.PROPORTIONAL));
+        assertEq(r.usdsRescued, 55e18);
+        assertGt(r.usdsWrappedShares, 0);
+        assertEq(usds.balanceOf(address(old)), 0);
+        assertEq(usds.balanceOf(r.escrow), 0, "no USDS left on escrow");
+        assertEq(usds.balanceOf(r.newPooler), 0, "no raw USDS on new pooler");
+        assertEq(susds.balanceOf(r.newPooler), r.sUSDSRescued + r.usdsWrappedShares, "rescued + wrapped");
+        _assertPost(r, s);
+    }
+
+    /// @dev Parked USDS with the donation live: still wrapped via the escrow (one path, always
+    ///      contract-to-contract); the new pooler keeps the copied donation config.
+    function test_parkedUSDS_donationLive_alsoWrappedViaEscrow() public {
         old.setBatchDonationSize(10);
         _mintN(2); // fake PSM has no code -> donation reverts -> USDS parks on the old pooler
         uint256 parked = usds.balanceOf(address(old));
@@ -346,27 +427,108 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         Pre memory s = _pre();
         CutoverResult memory r = _runCutover(_params(ExitMode.PROPORTIONAL));
         assertEq(r.usdsRescued, parked);
-        assertFalse(r.usdsWrapped);
-        assertEq(usds.balanceOf(r.newPooler), parked, "parked USDS on new pooler");
+        assertGt(r.usdsWrappedShares, 0, "wrapped");
+        assertEq(usds.balanceOf(r.newPooler), 0, "no raw USDS on new pooler");
         assertEq(UniPoolerV2(r.newPooler).batchDonationSize(), 10);
         _assertPost(r, s);
     }
 
-    /// @dev An unsynced pre-donation to the pair is skimmed back to OWNER before the empty check.
-    function test_unsyncedDonation_skimmedThenCutoverProceeds() public {
+    /// @dev An unsynced pre-donation to the pair is recorded at step 2 and skimmed to the NEW
+    ///      POOLER by `escrow.exitAndSeed` - never to the owner.
+    function test_unsyncedDonation_skimmedToNewPoolerByEscrow() public {
         address pair = factory.createPair(address(susds), address(phusd));
         susds.deposit(5e18, pair);
         phusd.mint(pair, 7e18);
-        uint256 ownerS = susds.balanceOf(address(this));
-        uint256 ownerP = phusd.balanceOf(address(this));
+        Pre memory s = _pre();
         CutoverResult memory r = _runCutover(_params(ExitMode.PROPORTIONAL));
         assertEq(r.pair, pair, "existing pair reused");
-        assertEq(susds.balanceOf(address(this)), ownerS + 5e18, "sUSDS donation skimmed to owner");
-        assertEq(phusd.balanceOf(address(this)), ownerP + 7e18, "phUSD donation skimmed to owner");
+        assertEq(r.pairDonationSUSDS, 5e18, "sUSDS donation recorded");
+        assertEq(r.pairDonationPhUSD, 7e18, "phUSD donation recorded");
+        assertEq(susds.balanceOf(r.newPooler), 5e18 + r.sUSDSRescued, "sUSDS donation skimmed to new pooler");
+        assertEq(phusd.balanceOf(r.newPooler), 7e18, "phUSD donation skimmed to new pooler");
         (uint112 r0, uint112 r1,) = IPairView(pair).getReserves();
         bool s0 = IPairView(pair).token0() == address(susds);
-        assertEq(s0 ? r0 : r1, r.sUSDSRecovered);
-        assertEq(s0 ? r1 : r0, r.phUSDRecovered);
+        assertEq(s0 ? r0 : r1, r.sUSDSSeeded);
+        assertEq(s0 ? r1 : r0, r.phUSDSeeded);
+        assertEq(susds.balanceOf(address(this)), s.ownerSUSDS, "owner sUSDS unchanged");
+        assertEq(phusd.balanceOf(address(this)), s.ownerPhUSD, "owner phUSD unchanged");
+        _assertOwnerNeverCredited(s);
+    }
+
+    /// @dev Owner BPT is out of scope: a BPT donation to the owner neither moves nor reverts.
+    function test_ownerBptDonation_doesNotRevert_andIsNotMoved() public {
+        vm.prank(thirdPartyLp);
+        bpt.transfer(address(this), 1e18); // anyone can grief-donate BPT to the owner
+        Pre memory s = _pre();
+        CutoverResult memory r = _runCutover(_params(ExitMode.PROPORTIONAL));
+        assertEq(bpt.balanceOf(address(this)), s.ownerBPT, "owner BPT untouched");
+        assertEq(r.ownerBptAtStart, s.ownerBPT);
+        _assertPost(r, s);
+    }
+
+    /// @dev The core's own invariant: an owner credit at any step reverts the whole cutover.
+    function test_revert_ownerCreditedDuringCutover() public {
+        creditOwnerAtStepPlusOne = CUTOVER_STEP_EXIT_AND_SEED + 1;
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        vm.expectRevert(bytes("UniPoolerCutoverCore: owner EOA credited with protocol funds at step 7"));
+        this.runExt(p);
+    }
+
+    // ------------------------------------------- L-27: BPT-address guard (run 22)
+
+    function fundEscrowExt(address escrow) external returns (uint256) {
+        return _fundEscrow(address(old), escrow);
+    }
+
+    /// @dev Runs steps 0..3b exactly as `_runCutover` does and returns the live addresses.
+    function _upToEscrow() internal returns (CutoverLive memory l) {
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        l = _step0Preconditions(p);
+        l.pair = _step1CreatePair(l);
+        _step2EnsurePairEmpty(l);
+        l.newPooler = _step3DeployPooler(p, l);
+        l.escrow = _step3bDeployEscrow(p, l);
+    }
+
+    /// @notice yield-claim-nft run 22, L-27: deploy the escrow, then (as OWNER) repoint the old
+    ///         pooler with `setPool(X)`. The funding step reverts with the guard's message BEFORE
+    ///         any `withdrawBPT`; the old pooler keeps both tokens and the escrow holds neither.
+    function test_L27_setPoolRepoint_guardRevertsBeforeWithdrawBPT() public {
+        CutoverLive memory l = _upToEscrow();
+        MockUSDS x = new MockUSDS();
+        x.transfer(address(old), 1_000e18);
+        uint256 oldBpt = bpt.balanceOf(address(old));
+        uint256 oldX = x.balanceOf(address(old));
+        assertGt(oldBpt, 0);
+
+        old.setPool(address(x)); // the operational rule (never do this with a live escrow) broken
+
+        vm.expectCall(address(old), abi.encodeWithSelector(BalancerPoolerV2.withdrawBPT.selector), 0);
+        vm.expectRevert(bytes(CUTOVER_BPT_GUARD_MESSAGE));
+        this.fundEscrowExt(l.escrow);
+
+        assertEq(bpt.balanceOf(address(old)), oldBpt, "old pooler BPT unchanged");
+        assertEq(x.balanceOf(address(old)), oldX, "old pooler X unchanged");
+        assertEq(bpt.balanceOf(l.escrow), 0, "escrow holds no BPT");
+        assertEq(x.balanceOf(l.escrow), 0, "escrow holds no X");
+    }
+
+    /// @notice The resume path the guard also covers: fund, `abort()` (BPT back to the old
+    ///         pooler), then fund the SAME escrow again through `_fundEscrow`.
+    function test_L27_resumeAfterAbort_refundsThroughGuard() public {
+        CutoverLive memory l = _upToEscrow();
+        uint256 bal = bpt.balanceOf(address(old));
+        assertEq(this.fundEscrowExt(l.escrow), bal);
+        UniPoolerCutoverEscrow(l.escrow).abort();
+        assertEq(bpt.balanceOf(address(old)), bal, "abort returned the BPT");
+        assertEq(this.fundEscrowExt(l.escrow), bal, "re-funded the existing escrow");
+        assertEq(bpt.balanceOf(l.escrow), bal);
+
+        // ...and a repoint between abort and re-fund is still refused.
+        UniPoolerCutoverEscrow(l.escrow).abort();
+        old.setPool(address(usds));
+        vm.expectRevert(bytes(CUTOVER_BPT_GUARD_MESSAGE));
+        this.fundEscrowExt(l.escrow);
     }
 
     /// @dev A front-run createPair with no reserves is harmless: the core reuses the pair.
@@ -436,6 +598,48 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
 
         assertEq(_countSelector(acc, Pauser.register.selector), 0, "no Pauser.register");
         assertEq(_countSelector(acc, Pauser.unregister.selector), 0, "no Pauser.unregister");
+    }
+
+    /// @notice Story 103: the escrow flow's ordering and custody, from the recorded call trace.
+    function test_escrowOrder_andNoOwnerCustody() public {
+        usds.transfer(address(old), 55e18); // parked USDS, so the wrap leg runs too
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        vm.startStateDiffRecording();
+        CutoverResult memory r = _runCutover(p);
+        Vm.AccountAccess[] memory acc = vm.stopAndReturnStateDiff();
+
+        uint256 iWithdraw = _firstCall(acc, address(old), BalancerPoolerV2.withdrawBPT.selector);
+        uint256 iExitAndSeed = _firstCall(acc, r.escrow, UniPoolerCutoverEscrow.exitAndSeed.selector);
+        uint256 iExit = _firstCall(acc, address(bRouter), MockBalancerRouter.removeLiquidityProportional.selector);
+        uint256 iSeed = _firstCall(acc, address(uniRouter), IUniswapV2RouterLike.addLiquidity.selector);
+        uint256 iReplace = _firstCall(acc, address(minter), NFTMinterV2.replaceDispatcher.selector);
+        uint256 iWrap = _firstCall(acc, r.escrow, UniPoolerCutoverEscrow.wrapUsds.selector);
+
+        // The escrow is created after UniPoolerV2 (its constructor reads newPooler.pair()) and
+        // before withdrawBPT (its address is the recipient).
+        uint256 iPoolerCreate = type(uint256).max;
+        uint256 iEscrowCreate = type(uint256).max;
+        for (uint256 i = 0; i < acc.length; i++) {
+            if (acc[i].kind != VmSafe.AccountAccessKind.Create) continue;
+            if (acc[i].account == r.newPooler && iPoolerCreate == type(uint256).max) iPoolerCreate = i;
+            if (acc[i].account == r.escrow && iEscrowCreate == type(uint256).max) iEscrowCreate = i;
+        }
+        assertLt(iPoolerCreate, iEscrowCreate, "UniPoolerV2 before escrow");
+        assertLt(iEscrowCreate, iWithdraw, "escrow before withdrawBPT");
+        assertEq(abi.decode(_slice4(acc[iWithdraw].data), (address)), r.escrow, "withdrawBPT recipient == escrow");
+        assertLt(iWithdraw, iExitAndSeed, "withdrawBPT before exitAndSeed");
+        assertLt(iExitAndSeed, iExit, "the escrow drives the exit");
+        assertEq(acc[iExit].accessor, r.escrow, "exit called by the escrow, not the owner");
+        assertEq(acc[iSeed].accessor, r.escrow, "seed called by the escrow, not the owner");
+        assertLt(iReplace, iWrap, "replaceDispatcher before USDS wrap");
+        assertEq(_countSelector(acc, ICutoverUniV2PairSkim.skim.selector), 0, "no skim on an empty pair");
+    }
+
+    function _slice4(bytes memory data) internal pure returns (bytes memory out) {
+        out = new bytes(data.length - 4);
+        for (uint256 i = 4; i < data.length; i++) {
+            out[i - 4] = data[i];
+        }
     }
 
     function test_noPauserCalls_expectCall() public {
@@ -592,9 +796,17 @@ contract UniPoolerCutoverCoreTest is Test, UniPoolerCutoverCore {
         p.exitToleranceBps = 101;
         vm.expectRevert(bytes("UniPoolerCutoverCore: tolerance too wide"));
         this.runExt(p);
-        p = _params(ExitMode.PROPORTIONAL);
-        p.seedToleranceBps = 101;
-        vm.expectRevert(bytes("UniPoolerCutoverCore: tolerance too wide"));
+    }
+
+    /// @dev Floors sized on old pooler + owner BPT (the pre-F-02-052 premise) overstate the share.
+    function test_revert_minAmountsSizedOnOwnerBptToo() public {
+        CutoverParams memory p = _params(ExitMode.PROPORTIONAL);
+        uint256 bptIn = bpt.balanceOf(address(old)) + bpt.balanceOf(address(this));
+        (,, uint256[] memory raw,) = bVault.getPoolTokenInfo(address(bpt));
+        for (uint256 i = 0; i < raw.length; i++) {
+            p.minAmountsOut[i] = (raw[i] * bptIn) / bpt.totalSupply();
+        }
+        vm.expectRevert(bytes("UniPoolerCutoverCore: minAmountOut above share"));
         this.runExt(p);
     }
 
