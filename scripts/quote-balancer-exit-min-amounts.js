@@ -16,7 +16,7 @@
  *
  * which is exactly the share the cutover core re-checks on chain (`_checkMinAmountsOut`, each floor in
  * [share * (1 - 0.5%), share]). The quote is read with `cast call` (an `eth_call`), the same off-chain-quote →
- * env-var pattern as scripts/compute-min-bpt-poolerv2.js. It is valid for the proportional exit and for the
+ * env-var pattern as scripts/quote-unipooler-pool.js. It is valid for the proportional exit and for the
  * recovery exit (both pay the proportional share of raw balances). Re-quote immediately before broadcasting: a
  * swap on the live pool moves the share, and a floor above the moved share reverts the simulation.
  *

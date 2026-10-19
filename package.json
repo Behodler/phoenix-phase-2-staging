@@ -29,12 +29,8 @@
     "update:hooks": "npm run generate:hooks && npm run version:hooks patch && npm run publish:hooks",
     "//mint-phusd": "NO_STORY — mainnet operational: mint phUSD",
     "mint-phusd": "bash scripts/mint-phusd.sh",
-    "//eclp-pool": "Story 022 — create / verify / initialize Balancer ECLP phUSD/sUSDS pool",
-    "mainnet:verify-eclp-fork": "forge test --fork-url $RPC_MAINNET --match-contract VerifyECLPSymmetry -vvv",
     "//phusd-amm-balances": "NO_STORY — mainnet operational check on AMM balances",
     "mainnet:phusd-amm-balances": "bash scripts/check-phusd-amm-balances.sh",
-    "//sim-eclp-rebalance": "NO_STORY — fork simulation of ECLP rebalance",
-    "sim:eclp-rebalance": "forge test --fork-url $RPC_MAINNET --match-test testSimulateRebalance -vvv",
     "//test-integration-usde": "Story 036 — integration test for ERC4626 market + USDe fork",
     "test:integration-erc4626-market-usde": "forge test --fork-url $RPC_MAINNET --match-contract ERC4626MarketYieldStrategy_USDeFork -vvv",
     "//phlimbo-v1-to-v2": "Story 049 — PhlimboEA V1 → PhlimboV2 silent staker migration (snapshot stakers, then migrate)",
@@ -76,7 +72,10 @@
     "unipooler-cutover:broadcast": "node scripts/backup-mainnet-addresses.js && export CUTOVER_GAS_PRICE_WEI=${CUTOVER_GAS_PRICE_WEI:-300000000} && forge script script/DeployMainnetUniPoolerCutover.s.sol:DeployMainnetUniPoolerCutover --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" --legacy --with-gas-price $CUTOVER_GAS_PRICE_WEI --gas-estimate-multiplier 200 -vvv && node scripts/patch-mainnet-addresses-unipooler-cutover.js && npm run unipooler-cutover:verify && npm run unipooler-cutover:preview",
     "unipooler-cutover:verify": "forge script script/VerifyUniPoolerCutover.s.sol:VerifyUniPoolerCutover --rpc-url $RPC_MAINNET -vvv",
     "//check-sepolia-placeholders": "Story 104 (Balancexit Stage 3) — pure check (writes nothing) that a Sepolia extraction with no Balancer deployments emits zero-address placeholders for BalancerPooler/BalancerPool/BalancerVault/BalancerRouter and passes the generate:ts-sepolia key-set check, and that anvil extraction is unchanged. Optional arg: a Sepolia progress file, e.g. the progress.11155111.json a deploy:sepolia-preview run writes.",
-    "check:sepolia-placeholders": "node scripts/check-sepolia-zero-placeholders.js"
+    "check:sepolia-placeholders": "node scripts/check-sepolia-zero-placeholders.js",
+    "//UniPoolerPool": "Story 105 (sprint Balancexit, docs/BalancerWinddownPlan.md section 4 Stage 4 step 6) - ONE owner transaction, UniPoolerV2.pool(sUSDSIn, minPhusdOut, minLP) on the live index-4 UniPooler (read from mainnet-addresses.ts and require()d to be NFTMinter configs(4).dispatcher; refuses the zero placeholder, i.e. before the Stage 4 cutover is patched). Zaps accumulated sUSDS into the phUSD/sUSDS UniV2 pair; the LP stays on the pooler. SUSDS_IN_WEI, MIN_PHUSD_OUT_WEI and MIN_LP_WEI are REQUIRED and non-zero: quote them off-chain with  eval \"$(node scripts/quote-unipooler-pool.js all 50)\"  (cast call quotePool(sUSDSIn) minus a 1..100 bps tolerance; pass a wei amount instead of 'all' to pool part of the balance) in the SAME shell before :preview and :broadcast so both use identical floors; the script re-quotes live and require()s each floor within 1% below the quote. OWNER must be an authorized pooler (the cutover re-authorizes it). :preview = fork simulation as OWNER (PREVIEW_MODE=true, nothing signed); :broadcast = Ledger m/44'/60'/46'/0/0 (gas price UNIPOOLER_POOL_GAS_PRICE_WEI, default 0.3 gwei). Changes no addresses, so there is no backup/patcher tail. Kill switch: UniPoolerV2.incrementAuthVersion().",
+    "unipooler:pool:preview": "PREVIEW_MODE=true forge script script/UniPoolerPool.s.sol:UniPoolerPool --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --slow -vvv",
+    "unipooler:pool:broadcast": "export UNIPOOLER_POOL_GAS_PRICE_WEI=${UNIPOOLER_POOL_GAS_PRICE_WEI:-300000000} && forge script script/UniPoolerPool.s.sol:UniPoolerPool --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" --legacy --with-gas-price $UNIPOOLER_POOL_GAS_PRICE_WEI --gas-estimate-multiplier 200 -vvv"
   },
   "keywords": [
     "phoenix",
