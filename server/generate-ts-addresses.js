@@ -32,6 +32,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { readInterfaceKeysFromFile, diffKeySet } = require('./contract-addresses-interface');
 
 // Chain ID to input file mapping
 const CHAIN_FILE_MAP = {
@@ -56,39 +57,22 @@ const INTERFACE_SOURCE_CHAIN_ID = 31337;
 /**
  * Reads the key set of `export interface ContractAddresses { ... }` from addresses.ts.
  * Exits non-zero if the file or the interface block cannot be found.
+ * (Parsing lives in contract-addresses-interface.js, shared with extract-addresses.js — story 104.)
  */
 function readInterfaceKeys() {
-    const interfacePath = path.join(__dirname, 'deployments', 'addresses.ts');
-    if (!fs.existsSync(interfacePath)) {
-        console.error(`Error: interface file not found: ${interfacePath}`);
+    try {
+        return readInterfaceKeysFromFile();
+    } catch (error) {
+        console.error(`Error: ${error.message}`);
         process.exit(1);
     }
-    const source = fs.readFileSync(interfacePath, 'utf-8');
-    const block = source.match(/export interface ContractAddresses\s*\{([\s\S]*?)\n\}/);
-    if (!block) {
-        console.error(`Error: no 'export interface ContractAddresses { ... }' block in ${interfacePath}`);
-        process.exit(1);
-    }
-    const keys = [];
-    for (const line of block[1].split('\n')) {
-        const m = line.match(/^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*string\s*;/);
-        if (m) keys.push(m[1]);
-    }
-    if (keys.length === 0) {
-        console.error(`Error: ContractAddresses in ${interfacePath} has no keys`);
-        process.exit(1);
-    }
-    return keys;
 }
 
 /**
  * Fails loudly (exit 2) unless `contractNames` is exactly the interface key set.
  */
 function assertKeySetMatchesInterface(chainId, inputFile, contractNames, interfaceKeys) {
-    const have = new Set(contractNames);
-    const want = new Set(interfaceKeys);
-    const missing = interfaceKeys.filter((k) => !have.has(k));
-    const extra = contractNames.filter((k) => !want.has(k));
+    const { missing, extra } = diffKeySet(contractNames, interfaceKeys);
     if (missing.length === 0 && extra.length === 0) {
         console.log(`Key set OK: ${contractNames.length}/${interfaceKeys.length} keys match ContractAddresses`);
         return;
