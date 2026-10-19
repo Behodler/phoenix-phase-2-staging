@@ -17,8 +17,6 @@ import "../src/mocks/MockSCX.sol";
 import "../src/mocks/MockKendu.sol";
 import "../src/mocks/MockFlax.sol";
 import "../src/mocks/MockWBTC.sol";
-import "../src/mocks/MockBalancerPool.sol";
-import "../src/mocks/MockBalancerVault.sol";
 import "../src/mocks/MockERC4626Wrapper.sol";
 import "../src/mocks/MockSkyPSM.sol";
 import "../src/mocks/MockMarketAMMAdapter.sol";
@@ -42,10 +40,11 @@ import {MintPageView} from "../src/views/MintPageView.sol";
 // interface; alias it the same way the rest of the file expects (INFTMinterView).
 import {INFTMinterV2 as INFTMinterView} from "@yield-claim-nft/interfaces/INFTMinterV2.sol";
 import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
-import "../src/mocks/MockBalancerRouter.sol";
 import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
 import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
-import {BalancerPoolerV2} from "@yield-claim-nft/dispatchers/BalancerPoolerV2.sol";
+// Story 104 (Balancexit Stage 3): index 4 is UniPoolerV2, deployed DIRECTLY against a fresh
+// mock-token phUSD/sUSDS Uniswap V2 pair. No Balancer mock, no BalancerPoolerV2, no cutover.
+import {UniPoolerV2} from "@yield-claim-nft/dispatchers/UniPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/dispatchers/GatherV2.sol";
 // Story 070 put NudgeRatchetDelayRelease at index 7 as a stopgap; story 073 retires it and puts
 // the streamer-aware NudgeRatchet back in the same slot (same ctor, same index, same hook).
@@ -97,6 +96,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         types; retained after V2's retirement because it keeps the two commit read-backs with
  *         the setter.
  */
+/// @notice The three pair reads the story-104 index-4 read-backs need. Declared locally so this
+///         script does not import the cutover core (and, through it, the escrow) just for a view.
+interface ISepoliaUniV2PairLike {
+    function token0() external view returns (address);
+    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
+    function balanceOf(address account) external view returns (uint256);
+}
+
 interface IPhlimboAPYLike {
     function setDesiredAPY(uint256 bps) external;
     function desiredAPYBps() external view returns (uint256);
@@ -148,14 +155,33 @@ interface IPhlimboAPYLike {
  *        - the 6-hour local stream window: Sepolia cannot fast-forward and a long-lived testnet
  *          must not run dry within hours, so streams use the mainnet-like `SEPOLIA_STREAM_DURATION`
  *          of 7 days.
+ *        - BalancerPoolerV2 -> UniPoolerV2 CUTOVER REHEARSAL (story 101, Phase 11.7 in
+ *          DeployMocks) — story 104, Balancexit Stage 3. No `UniPoolerCutoverCore`, no
+ *          `UniPoolerCutoverEscrow`, no holding-pattern revoke, no BPT exit. Index 4 is
+ *          `UniPoolerV2` from the start, against a fresh mock-token phUSD/sUSDS Uniswap V2 pair
+ *          (the factory's canonical pair, created before the pooler, seeded from minter-minted
+ *          phUSD in Phase 9.8), wired into the end state the rehearsal leaves behind: minter,
+ *          `BalancerPoolerMintDebtHook` in both directions (set BEFORE `registerDispatcher`, see
+ *          yield-claim-nft:051), PSM / maxTout / batchMinter / batchDonationSize / nudgeStreamer,
+ *          deployer as the sole authorized pooler. Tracked as "UniPoolerV2" and "PhusdSusdsPair".
+ *        - the Balancer mocks (`MockBalancerPool`, `MockBalancerVault`, `MockBalancerRouter`) and
+ *          `BalancerPoolerV2` itself — story 104. Nothing on this chain is Balancer-backed. The
+ *          `ContractAddresses` interface still carries `BalancerPooler`, `BalancerPool`,
+ *          `BalancerVault` and `BalancerRouter` through the wind-down, so `extract:sepolia` emits
+ *          them as ZERO-ADDRESS PLACEHOLDERS (extract-addresses.js ZERO_PLACEHOLDER_CHAIN_IDS), the
+ *          convention mainnet-addresses.ts uses for undeployed keys. `BalancerPoolerMintDebtHook`
+ *          is KEPT: the hook contract is live and unchanged on mainnet; only its dispatcher moved.
  *
  *      WHAT WAS DELIBERATELY KEPT — the index-6 "bugged pooler" placeholder. On mainnet dispatcher
- *      index 6 is permanently held by the disabled story-047 BalancerPoolerV2.
+ *      index 6 is permanently held by the disabled story-047 BalancerPoolerV2. Story 104: with the
+ *      Balancer mocks gone the placeholder is a second, never-wired `UniPoolerV2` on the same pair
+ *      (its hook is never set, so `_dispatch` reverts `UniPoolerV2__HookNotSet` even if it were
+ *      ever re-enabled); its type is irrelevant, only the index it consumes matters.
  *      `NFTMinterV2.registerDispatcher` is append-only and tokenId == dispatcher index, so without
  *      the placeholder NudgeRatchet would land at 6, `require(ratchetIndex == 7)` would revert,
  *      MintPageView (hard-codes 7) would break and RatchetNFTStaker / RatchetBatchNFTMinter would
  *      pin the wrong id. It is a rehearsal only in name: it is what makes dispatcher indices and
- *      ERC-1155 ids mirror mainnet (Uniboost EYE/SCX/FLX 1/2/3, BalancerPooler 4, GatherWBTC 5,
+ *      ERC-1155 ids mirror mainnet (Uniboost EYE/SCX/FLX 1/2/3, UniPooler 4, GatherWBTC 5,
  *      placeholder 6 disabled, NudgeRatchet 7).
  *
  *      OWNERSHIP EXCEPTION. Every contract is owned by the single deployer EOA. The repo
@@ -179,8 +205,8 @@ contract DeployMocksSepolia is Script {
     // - MOCK_NUDGE_SIZE is lowered from mainnet's 40 for dev ergonomics
     uint256 constant MOCK_NUDGE_SPLIT = 30;
     uint256 constant MOCK_NUDGE_SIZE = 25;
-    // Story 045.5 Phase 7 — BalancerPoolerV2 batch-donation phase
-    // Percent of sUSDS share balance diverted to the donation phase on each pool() call.
+    // Story 045.5 Phase 7 — index-4 batch-donation phase (UniPoolerV2 since story 104)
+    // Percent of each dispatched USDS amount diverted to the PSM donation.
     // Mirrors MOCK_NUDGE_SPLIT for mental-model parity; LP path still receives 70%.
     uint256 constant MOCK_BATCH_DONATION_SIZE = 30;
 
@@ -193,6 +219,12 @@ contract DeployMocksSepolia is Script {
     // pools (EYE/WETH9 target, USDC/WETH9 routing). Faucet-sized; override with SEPOLIA_WETH_SEED
     // (wei). DeployMocks wraps 300 ETH and seeds 100 WETH per pool.
     uint256 constant SEPOLIA_DEFAULT_WETH_SEED = 0.1 ether;
+    // Story 104: the phUSD/sUSDS UniV2 pair seed (Phase 9.8). 1:1, sized well inside the ~10k
+    // phUSD Phases 9/9.55 mint to the deployer and the 10k sUSDS Phase 1 deposits for it.
+    uint256 constant SEPOLIA_PAIR_SUSDS_SEED = 2_000e18;
+    uint256 constant SEPOLIA_PAIR_PHUSD_SEED = 2_000e18;
+    // UniPoolerV2 lives at NFTMinterV2 index 4, the slot BalancerPoolerV2 holds on mainnet.
+    uint256 constant UNI_POOLER_INDEX = 4;
 
     // Deployment addresses
     MockPhUSD public phUSD;
@@ -237,12 +269,9 @@ contract DeployMocksSepolia is Script {
     MockKendu public mockKendu;
     MockFlax public mockFlax;
     MockWBTC public mockWBTC;
-    MockBalancerPool public mockBalancerPool;
-    MockBalancerVault public mockBalancerVault;
     BurnRecorder public burnRecorder;
 
     // V2 NFTMinter infrastructure
-    MockBalancerRouter public mockBalancerRouter;
     NFTMinterV2 public nftMinterV2;
     // Story 070: the three BurnerV2 dispatchers (indices 1/2/3) were replaced with Uniboost
     // dispatchers, each backed by a real UniV2 pool + a UniboostMintDebtHook + an
@@ -277,13 +306,19 @@ contract DeployMocksSepolia is Script {
     address public routePoolUSDS; // USDC / USDS
     address public routePoolDOLA; // USDC / DOLA
 
-    BalancerPoolerV2 public balancerPoolerV2;
+    // Story 104 (Balancexit Stage 3): the index-4 dispatcher, deployed directly (no cutover
+    // rehearsal) against the canonical mock-token phUSD/sUSDS UniV2 pair. Tracked as
+    // "UniPoolerV2" (-> key `UniPooler`) and "PhusdSusdsPair", the names DeployMocks uses.
+    UniPoolerV2 public uniPoolerV2;
+    address public phusdSusdsPair;
     GatherV2 public gatherWBTCV2;
     // Disabled placeholder occupying dispatcher index 6 to mirror mainnet, where the
     // "bugged" BalancerPoolerV2 (story-047) was appended at index 6 and then permanently
     // disabled by the story-048 cutover. Registering this here pushes NudgeRatchet to
     // index 7, matching the index it will receive on mainnet. Never enabled / never minted.
-    BalancerPoolerV2 public buggedPoolerV2Index6;
+    // Story 104: a never-wired UniPoolerV2 (no Balancer mocks remain to build the old type);
+    // its hook is never set, so it could not dispatch even if re-enabled.
+    UniPoolerV2 public buggedPoolerV2Index6;
 
     // Story 068 — NudgeRatchet dispatcher (6-decimal USDC) + its mint-debt hook.
     // Story 070 — swapped the dispatcher to NudgeRatchetDelayRelease (HOLDS USDC on dispatch,
@@ -299,7 +334,7 @@ contract DeployMocksSepolia is Script {
     NFTStakerPriceScaled public ratchetNFTStaker;
     // Dedicated BatchNFTMinter for the NudgeRatchet NFT (dispatcher index 7), so the UI
     // can batch-mint ratchet NFTs in a single tx. Separate instance from `batchNFTMinter`
-    // (which is pinned to the BalancerPoolerV2 index-4 NFT): a BatchNFTMinter pins a single
+    // (which is pinned to the UniPoolerV2 index-4 NFT): a BatchNFTMinter pins a single
     // dispatcher index. Payment token derives from the dispatcher's prime token (USDC);
     // its nudge REWARD token is USDS so it never collides with the USDC input.
     BatchNFTMinter public ratchetBatchNFTMinter;
@@ -321,7 +356,7 @@ contract DeployMocksSepolia is Script {
     BatchNFTMinterMultiToken public batchNFTMinter;
 
     // Story 073: buffers bursty donations per (batchMinter, token) and streams them linearly.
-    // Six donors route through it: Uniboost x3, BalancerPoolerV2, the index-7 NudgeRatchet and
+    // Six donors route through it: Uniboost x3, UniPoolerV2 (index 4), the index-7 NudgeRatchet and
     // StableYieldAccumulator.
     NudgeStreamer public nudgeStreamer;
 
@@ -331,13 +366,13 @@ contract DeployMocksSepolia is Script {
     Antimatter public antimatter;
     StableStakerV2 public stableStakerV2;
 
-    // Story 045.5 Phase 7 — BalancerPoolerV2 donation-phase mocks
+    // Story 045.5 Phase 7 — index-4 donation-phase mocks
     // waUSDC mock = ERC4626 wrapper over the existing USDC `rewardToken`.
     // (Retained for the V1-era BalancerPooler donation path; the V2 Sky-route
     //  donation no longer uses it — see MockSkyPSM below.)
     MockERC4626Wrapper public mockWaUsdc;
 
-    // Story 056 — BalancerPoolerV2 Sky-PSM donation route mock.
+    // Story 056 — index-4 Sky-PSM donation route mock (UniPoolerV2 since story 104).
     // Mock UsdsPsmWrapper: pulls USDS, delivers USDC from its reserve.
     MockSkyPSM public mockSkyPSM;
 
@@ -591,21 +626,7 @@ contract DeployMocksSepolia is Script {
         // (Phase 3.5 V1 NFTMinter infra removed in story 059 — V1 is decommissioned)
         console.log("\n=== Phase 3.6: Deploying V2 NFTMinter Infrastructure ===");
 
-        // Deploy MockBalancerPool (ERC20 BPT)
-        gasBefore = gasleft();
-        mockBalancerPool = new MockBalancerPool();
-        _trackDeployment("MockBalancerPool", address(mockBalancerPool), gasBefore - gasleft());
-        console.log("MockBalancerPool deployed at:", address(mockBalancerPool));
-
-        // Deploy MockBalancerVault
-        gasBefore = gasleft();
-        mockBalancerVault = new MockBalancerVault(address(mockBalancerPool));
-        _trackDeployment("MockBalancerVault", address(mockBalancerVault), gasBefore - gasleft());
-        console.log("MockBalancerVault deployed at:", address(mockBalancerVault));
-
-        // Wire MockBalancerPool to recognize the vault
-        mockBalancerPool.setVault(address(mockBalancerVault));
-        console.log("Wired MockBalancerPool to recognize MockBalancerVault");
+        // Story 104: no Balancer mocks (pool/vault/router) — index 4 is UniPoolerV2, below.
 
         // Deploy BurnRecorder
         gasBefore = gasleft();
@@ -613,13 +634,7 @@ contract DeployMocksSepolia is Script {
         _trackDeployment("BurnRecorder", address(burnRecorder), gasBefore - gasleft());
         console.log("BurnRecorder deployed at:", address(burnRecorder));
 
-        // 1. Deploy MockBalancerRouter
-        gasBefore = gasleft();
-        mockBalancerRouter = new MockBalancerRouter();
-        _trackDeployment("MockBalancerRouter", address(mockBalancerRouter), gasBefore - gasleft());
-        console.log("MockBalancerRouter deployed at:", address(mockBalancerRouter));
-
-        // 2. Deploy NFTMinterV2
+        // Deploy NFTMinterV2
         gasBefore = gasleft();
         nftMinterV2 = new NFTMinterV2(deployer);
         _trackDeployment("NFTMinterV2", address(nftMinterV2), gasBefore - gasleft());
@@ -650,18 +665,13 @@ contract DeployMocksSepolia is Script {
         _trackDeployment("UniboostFLX", address(uniboostFLX), gasBefore - gasleft());
         console.log("UniboostFLX deployed at:", address(uniboostFLX));
 
-        // BalancerPoolerV2: prime token is USDS (derived from sUSDS via IERC4626.asset())
-        gasBefore = gasleft();
-        balancerPoolerV2 = new BalancerPoolerV2(
-            address(susds), // sUSDS_ (ERC4626 vault)
-            address(mockBalancerPool), // pool_ (BPT token)
-            address(mockBalancerVault), // vault_
-            address(mockBalancerRouter), // router_
-            true, // sUSDSIsFirst_
-            deployer // initialOwner
-        );
-        _trackDeployment("BalancerPoolerV2", address(balancerPoolerV2), gasBefore - gasleft());
-        console.log("BalancerPoolerV2 deployed at:", address(balancerPoolerV2));
+        // Story 104 (Balancexit Stage 3): the index-4 venue, deployed DIRECTLY — no cutover
+        // rehearsal. Same order as the audited Stage 2 script (story 103 / UniPoolerCutoverCore
+        // steps 1, 3, 8): create the canonical pair, deploy UniPoolerV2 against it (its
+        // constructor requires `router.factory().getPair(sUSDS, phUSD) == pair`; zero reserves
+        // are allowed), then install the mint-debt hook. The pair is seeded in Phase 9.8, once
+        // the stable minter has minted the deployer its phUSD side.
+        _deployUniPoolerV2(deployer);
 
         // GatherV2: accumulates WBTC, sends to deployer
         gasBefore = gasleft();
@@ -692,8 +702,15 @@ contract DeployMocksSepolia is Script {
         nftMinterV2.registerDispatcher(address(uniboostFLX), uniboostInitialPrice, uniboostGrowthBps);
         console.log("Registered UniboostFLX dispatcher with NFTMinterV2 (index 3, 10 USDC, 0.1% growth)");
 
-        nftMinterV2.registerDispatcher(address(balancerPoolerV2), v2InitialPrice, 10); // 0.1% growth
-        console.log("Registered BalancerPoolerV2 dispatcher with NFTMinterV2 (index 4, 0.1% growth)");
+        // Story 104: UniPoolerV2 takes index 4 in the SAME registration slot BalancerPoolerV2
+        // held. Its hook is already installed (see `_deployUniPoolerV2`), so no index-4 dispatch
+        // can ever hit `UniPoolerV2__HookNotSet` (yield-claim-nft:051).
+        nftMinterV2.registerDispatcher(address(uniPoolerV2), v2InitialPrice, 10); // 0.1% growth
+        require(
+            nftMinterV2.dispatcherToIndex(address(uniPoolerV2)) == UNI_POOLER_INDEX,
+            "story-104: UniPoolerV2 must occupy dispatcher index 4"
+        );
+        console.log("Registered UniPoolerV2 dispatcher with NFTMinterV2 (index 4, 0.1% growth)");
 
         nftMinterV2.registerDispatcher(address(gatherWBTCV2), v2WBTCInitialPrice, 1000); // 10% growth
         console.log("Registered GatherWBTCV2 dispatcher with NFTMinterV2 (index 5, 10% growth)");
@@ -703,19 +720,16 @@ contract DeployMocksSepolia is Script {
         // BalancerPoolerV2 (registered by story-047, disabled by the story-048 cutover).
         // registerDispatcher is append-only by index, so index 6 can never be reclaimed —
         // meaning NudgeRatchet will land at index 7 on mainnet. We mirror that here by
-        // registering a second BalancerPoolerV2 at index 6 and immediately disabling it,
+        // registering a placeholder dispatcher at index 6 and immediately disabling it,
         // so the local NudgeRatchet also receives index 7 and the dispatcher layout (and
         // therefore MintPageView's hardcoded index 7) is identical across all networks.
         // This dispatcher is disabled and never minted; it exists only to consume index 6.
+        // Story 104: a second UniPoolerV2 on the same pair (the Balancer mocks the old
+        // placeholder type needed are gone). Never wired: no minter, no hook, no pooler — with
+        // the default hook in place its `_dispatch` reverts, so it is inert twice over.
         gasBefore = gasleft();
-        buggedPoolerV2Index6 = new BalancerPoolerV2(
-            address(susds), // sUSDS_ (ERC4626 vault) — same args as the real pooler
-            address(mockBalancerPool), // pool_ (BPT token)
-            address(mockBalancerVault), // vault_
-            address(mockBalancerRouter), // router_
-            true, // sUSDSIsFirst_
-            deployer // initialOwner
-        );
+        buggedPoolerV2Index6 =
+            new UniPoolerV2(address(susds), address(phUSD), address(uniRouter), phusdSusdsPair, deployer);
         _trackDeployment("BuggedPoolerV2Index6", address(buggedPoolerV2Index6), gasBefore - gasleft());
         console.log("BuggedPoolerV2Index6 (disabled placeholder) deployed at:", address(buggedPoolerV2Index6));
 
@@ -754,13 +768,14 @@ contract DeployMocksSepolia is Script {
         uniboostHookFLX = _deployUniboostHook(uniboostFLX, deployer);
         _trackDeployment("UniboostHookFLX", address(uniboostHookFLX), 0);
 
-        balancerPoolerV2.setMinter(address(nftMinterV2));
-        console.log("BalancerPoolerV2.setMinter -> NFTMinterV2");
+        uniPoolerV2.setMinter(address(nftMinterV2));
+        console.log("UniPoolerV2.setMinter -> NFTMinterV2");
 
-        balancerPoolerV2.setAuthorizedPooler(deployer, true);
-        console.log("BalancerPoolerV2.setAuthorizedPooler(deployer, true)");
+        // The deployer is the sole authorized pooler, as it was on BalancerPoolerV2 here.
+        uniPoolerV2.setAuthorizedPooler(deployer, true);
+        console.log("UniPoolerV2.setAuthorizedPooler(deployer, true)");
 
-        // ---- Story 045.5 Phase 7: BalancerPoolerV2 swap-config + waUSDC ----
+        // ---- Story 045.5 Phase 7: index-4 donation config + waUSDC ----
         // (setBatchMinter and setBatchDonationSize land in Phase 3.7 below, after
         // BatchNFTMinter is deployed.)
         // Deploy waUSDC mock (ERC4626 wrapper over the existing USDC reward token).
@@ -771,16 +786,15 @@ contract DeployMocksSepolia is Script {
         console.log("MockWaUSDC deployed at:", address(mockWaUsdc));
 
         // Pre-fund the waUSDC wrapper with underlying USDC so `redeem` payouts
-        // succeed during BalancerPoolerV2 donation-phase unwraps. The mock
+        // succeed during V1-era index-4 donation-phase unwraps. The mock
         // wrapper mints shares without taking deposits, so it has no USDC
         // backing unless we seed it here. See src/mocks/MockERC4626Wrapper.sol
         // ("Tests/dev scripts pre-fund the wrapper directly").
         rewardToken.mint(address(mockWaUsdc), 1_000_000 * 10 ** 6);
         console.log("Pre-funded MockWaUSDC with 1,000,000 USDC for redeem backing");
 
-        // ---- Story 056: BalancerPoolerV2 Sky-PSM donation route ----
-        // The V2 batch donation no longer swaps sUSDS->waUSDC on Balancer (that route
-        // was structurally dead). It now routes raw USDS -> USDC via the Sky PSM
+        // ---- Story 056: index-4 Sky-PSM donation route (UniPoolerV2 since story 104) ----
+        // The batch donation routes raw USDS -> USDC via the Sky PSM
         // (`buyGem`). The contract's `_dispatch` carves a `batchDonationSize`% slice of
         // the dispatched USDS and sends the resulting USDC to `batchMinter`.
         //
@@ -798,15 +812,15 @@ contract DeployMocksSepolia is Script {
         rewardToken.mint(address(mockSkyPSM), 1_000_000 * 10 ** 6);
         console.log("Pre-funded MockSkyPSM with 1,000,000 USDC reserve");
 
-        // Wire the Sky-route config on BalancerPoolerV2 (recipient comes later in
+        // Wire the Sky-route config on UniPoolerV2 (recipient comes later in
         // Phase 3.7). `setPSM` enables the route; `setMaxTout(0.01e18)` mirrors the
         // contract's default 1% buy-fee ceiling so a fee spike parks USDS rather than
         // shipping a worse rate. The mock PSM's tout defaults to 0 (well under the cap).
-        balancerPoolerV2.setPSM(address(mockSkyPSM));
-        console.log("BalancerPoolerV2.setPSM -> MockSkyPSM");
+        uniPoolerV2.setPSM(address(mockSkyPSM));
+        console.log("UniPoolerV2.setPSM -> MockSkyPSM");
 
-        balancerPoolerV2.setMaxTout(0.01e18);
-        console.log("BalancerPoolerV2.setMaxTout -> 0.01e18 (1%)");
+        uniPoolerV2.setMaxTout(0.01e18);
+        console.log("UniPoolerV2.setMaxTout -> 0.01e18 (1%)");
 
         gatherWBTCV2.setMinter(address(nftMinterV2));
         console.log("GatherWBTCV2.setMinter -> NFTMinterV2");
@@ -818,17 +832,11 @@ contract DeployMocksSepolia is Script {
         // ====== PHASE 3.7: NFT Staking Stack ======
         console.log("\n=== Phase 3.7: NFT Staking Stack ===");
 
-        // 1. Deploy BalancerPoolerMintDebtHook (replaces the default no-op DispatchHook)
-        gasBefore = gasleft();
-        balancerPoolerHook = new BalancerPoolerMintDebtHook(deployer, address(balancerPoolerV2), address(phUSD));
-        _trackDeployment("BalancerPoolerMintDebtHook", address(balancerPoolerHook), gasBefore - gasleft());
-        console.log("BalancerPoolerMintDebtHook deployed at:", address(balancerPoolerHook));
+        // 1-2. Story 104: BalancerPoolerMintDebtHook was deployed pointed at UniPoolerV2 and
+        //      installed on it in Phase 3.6 (`_deployUniPoolerV2`), ahead of the index-4
+        //      registration, so UniPoolerV2 never sits registered with its default hook.
 
-        // 2. Install the hook on BalancerPoolerV2 (swaps out the constructor-installed DefaultDispatchHook)
-        balancerPoolerV2.setHook(IDispatchHook(address(balancerPoolerHook)));
-        console.log("BalancerPoolerV2.setHook -> BalancerPoolerMintDebtHook");
-
-        // 3. Deploy NFTStaker (BalancerPoolerV2 NFT id = 4, phUSD as reward, dispatcher index 4)
+        // 3. Deploy NFTStaker (index-4 NFT id = 4, phUSD as reward, dispatcher index 4)
         gasBefore = gasleft();
         nftStaker = new NFTStaker(
             IERC1155(address(nftMinterV2)), 4, IERC20(address(phUSD)), deployer, INFTSupply(address(nftMinterV2)), 4
@@ -858,27 +866,27 @@ contract DeployMocksSepolia is Script {
         //      down); the mandated call ordering lives inside the helper.
         _deployStreamerAndBatchMinter(deployer);
 
-        // ---- Story 045.5 Phase 7: Finalise BalancerPoolerV2 batch-donation wiring ----
+        // ---- Story 045.5 Phase 7: Finalise the UniPoolerV2 batch-donation wiring ----
         // BatchNFTMinter is now deployed — point the donation recipient at it and
         // turn the donation phase on. Order: setBatchMinter (recipient) BEFORE
         // setBatchDonationSize (the activator). Swap config was already wired in
         // Phase 3.6 above.
-        balancerPoolerV2.setBatchMinter(address(batchNFTMinter));
-        console.log("BalancerPoolerV2.setBatchMinter -> BatchNFTMinter");
+        uniPoolerV2.setBatchMinter(address(batchNFTMinter));
+        console.log("UniPoolerV2.setBatchMinter -> BatchNFTMinter");
 
-        balancerPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
-        console.log("BalancerPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
+        uniPoolerV2.setBatchDonationSize(MOCK_BATCH_DONATION_SIZE);
+        console.log("UniPoolerV2.setBatchDonationSize ->", MOCK_BATCH_DONATION_SIZE);
 
         // Story 073: the index-4 donation branch is streamer-gated. Without this the donation
         // reverts inside `_psmDonate` and `_dispatch`'s try/catch swallows it — the mint succeeds
         // but zero USDC ever reaches the batch minter (the exact silent breakage this story fixes).
         // MUST come after registerStream(batchNFTMinter, USDC) inside the helper above.
-        balancerPoolerV2.setNudgeStreamer(address(nudgeStreamer));
-        console.log("BalancerPoolerV2.setNudgeStreamer -> NudgeStreamer");
+        uniPoolerV2.setNudgeStreamer(address(nudgeStreamer));
+        console.log("UniPoolerV2.setNudgeStreamer -> NudgeStreamer");
 
         // ---- Story 070: deferred Uniboost wiring (donation split + staker + Pauser) ----
         // batchNFTMinter now exists, so this is the phase where the uniboost dispatchers learn
-        // their donation recipient. Recipient is `batchNFTMinter` (the BalancerPoolerV2 index-4
+        // their donation recipient. Recipient is `batchNFTMinter` (the UniPoolerV2 index-4
         // LSP batch minter) — NOT ratchetBatchNFTMinter — so 50% of each mint's USDC nudges
         // protocol-pooler (LSP) minting; the remaining 50% is retained for pool().
         //
@@ -960,7 +968,7 @@ contract DeployMocksSepolia is Script {
         // 5. Register the dispatcher on NFTMinterV2 (index auto-assigns to 7, after the
         //    disabled bugged-pooler placeholder at index 6 — see the index-6 mirror above).
         //    Index 7 matches the index NudgeRatchet receives on mainnet, where the disabled
-        //    bugged pooler permanently holds index 6. Mirror the BalancerPoolerV2 price + 0.1% growth.
+        //    bugged pooler permanently holds index 6. Mirror the index-4 price + 0.1% growth.
         nftMinterV2.registerDispatcher(address(nudgeRatchet), v2RatchetInitialPrice, 10); // 0.1% growth (6-decimal USDC price)
         console.log("Registered NudgeRatchet dispatcher with NFTMinterV2 (index 7, 0.1% growth)");
 
@@ -1010,7 +1018,7 @@ contract DeployMocksSepolia is Script {
 
         // 7. Deploy + wire a dedicated BatchNFTMinter for the NudgeRatchet NFT so the UI
         //    can batch-mint ratchet NFTs in a single tx. This is a separate instance from
-        //    the BalancerPoolerV2 batch minter (`batchNFTMinter`, index 4): a BatchNFTMinter
+        //    the UniPoolerV2 batch minter (`batchNFTMinter`, index 4): a BatchNFTMinter
         //    pins exactly one dispatcher index, so the ratchet NFT (index 7) needs its own.
         gasBefore = gasleft();
         ratchetBatchNFTMinter = new BatchNFTMinter(deployer);
@@ -1319,6 +1327,12 @@ contract DeployMocksSepolia is Script {
         console.log("  - Share price now > 1, creating claimable yield");
         console.log("  - YieldStrategyUSDC can claim this yield via ERC4626YieldStrategy");
 
+        // ====== PHASE 9.8: Seed the phUSD/sUSDS UniV2 pair + assert the index-4 end state ======
+        // Story 104. Runs after Phases 9/9.55 because the deployer has no phUSD mint right on this
+        // chain (story 098): its phUSD comes from the stable minter. Seeded before anything can
+        // call `UniPoolerV2.pool()`, which reverts `UniPoolerV2__EmptyPair` on zero reserves.
+        _seedPhusdSusdsPairAndAssertIndex4(deployer);
+
         // ====== PHASE 11: Deploy ViewRouter + the page views ======
         // `DepositView` and `DepositPageView` are both gone with PhlimboV2: they are typed against
         // the V1/V2-shaped `IPhlimbo`, whose 3-tuple `userInfo` silently mis-decodes V3's 4-tuple
@@ -1403,10 +1417,7 @@ contract DeployMocksSepolia is Script {
         _markConfigured("PhlimboV3", 0);
         _markConfigured("StableYieldAccumulator", 0);
         _markConfigured("Pauser", 0);
-        _markConfigured("MockBalancerPool", 0);
-        _markConfigured("MockBalancerVault", 0);
         _markConfigured("BurnRecorder", 0);
-        _markConfigured("MockBalancerRouter", 0);
         _markConfigured("NFTMinterV2", 0);
         // Story 070: Uniboost stack (replaced the three burners at indices 1/2/3) + UniV2 infra.
         _markConfigured("UniswapV2Factory", 0);
@@ -1422,7 +1433,8 @@ contract DeployMocksSepolia is Script {
         _markConfigured("UniboostStakerEYE", 0);
         _markConfigured("UniboostStakerSCX", 0);
         _markConfigured("UniboostStakerFLX", 0);
-        _markConfigured("BalancerPoolerV2", 0);
+        _markConfigured("UniPoolerV2", 0);
+        _markConfigured("PhusdSusdsPair", 0);
         _markConfigured("MockWaUSDC", 0);
         _markConfigured("MockSkyPSM", 0);
         _markConfigured("GatherWBTCV2", 0);
@@ -1470,6 +1482,10 @@ contract DeployMocksSepolia is Script {
         console.log("  - PhlimboV3 ships EMPTY (no anvil seed stakers) and DORMANT (no Kendu promo)");
         console.log("  - Nudge streams: USDC only, 7-day window; phUSD / Kendu whitelisted-but-unregistered");
         console.log("  - WETH-side UniV2 seeds faucet-sized (SEPOLIA_WETH_SEED)");
+        console.log(
+            "  - No UniPoolerV2 cutover rehearsal / no Balancer mocks: UniPoolerV2 at index 4 directly (story 104)"
+        );
+        console.log("  - Legacy Balancer keys emitted as zero-address placeholders by extract:sepolia");
         console.log("  - KEPT: index-6 disabled placeholder, so NudgeRatchet occupies index 7 as on mainnet");
         console.log("");
         console.log("Architecture Summary:");
@@ -1555,6 +1571,107 @@ contract DeployMocksSepolia is Script {
         uniRouter.addLiquidity(tokenA, tokenB, amtA, amtB, 0, 0, deployer, type(uint256).max);
     }
 
+    // =====================================================================
+    // Story 104 (Balancexit Stage 3): UniPoolerV2 at index 4, deployed directly
+    // =====================================================================
+
+    /// @dev Creates the canonical mock-token phUSD/sUSDS UniV2 pair, deploys UniPoolerV2 against
+    ///      it, then deploys `BalancerPoolerMintDebtHook` pointed at UniPoolerV2 and installs it
+    ///      (hook -> pooler via the constructor, pooler -> hook via `setHook`). Called from Phase
+    ///      3.6 BEFORE `registerDispatcher`, so index 4 is never registered with the default hook.
+    ///      The pair is left reserve-less here and seeded in Phase 9.8.
+    function _deployUniPoolerV2(address deployer) internal {
+        require(
+            uniFactory.getPair(address(susds), address(phUSD)) == address(0),
+            "story-104: phUSD/sUSDS pair already exists on a fresh factory"
+        );
+        phusdSusdsPair = uniFactory.createPair(address(susds), address(phUSD));
+        require(
+            uniFactory.getPair(address(susds), address(phUSD)) == phusdSusdsPair,
+            "story-104: phUSD/sUSDS pair is not the factory's canonical pair"
+        );
+        _trackDeployment("PhusdSusdsPair", phusdSusdsPair, 0);
+        console.log("phUSD/sUSDS UniV2 pair created at:", phusdSusdsPair);
+
+        uint256 gasBefore = gasleft();
+        uniPoolerV2 = new UniPoolerV2(address(susds), address(phUSD), address(uniRouter), phusdSusdsPair, deployer);
+        _trackDeployment("UniPoolerV2", address(uniPoolerV2), gasBefore - gasleft());
+        console.log("UniPoolerV2 deployed at:", address(uniPoolerV2));
+        require(uniPoolerV2.pair() == phusdSusdsPair, "story-104: UniPoolerV2 pair");
+        // BatchNFTMinter's USDC whitelist depends on the index-4 prime token being USDS.
+        require(uniPoolerV2.primeToken() == address(usds), "story-104: UniPoolerV2 prime token != USDS");
+
+        gasBefore = gasleft();
+        balancerPoolerHook = new BalancerPoolerMintDebtHook(deployer, address(uniPoolerV2), address(phUSD));
+        _trackDeployment("BalancerPoolerMintDebtHook", address(balancerPoolerHook), gasBefore - gasleft());
+        console.log("BalancerPoolerMintDebtHook deployed at:", address(balancerPoolerHook));
+        uniPoolerV2.setHook(IDispatchHook(address(balancerPoolerHook)));
+        require(
+            balancerPoolerHook.dispatcher() == address(uniPoolerV2)
+                && address(uniPoolerV2.hook()) == address(balancerPoolerHook),
+            "story-104: hook not wired both ways"
+        );
+        console.log("UniPoolerV2.setHook -> BalancerPoolerMintDebtHook (hook.dispatcher == UniPoolerV2)");
+    }
+
+    /// @dev Phase 9.8: seeds the pair 1:1 from the deployer's own sUSDS and minter-minted phUSD,
+    ///      LP to the deployer (a mock-stack seed, like every other pool here), then asserts the
+    ///      whole index-4 end state the story-101 rehearsal leaves DeployMocks in.
+    function _seedPhusdSusdsPairAndAssertIndex4(address deployer) internal {
+        console.log("\n=== Phase 9.8: Seed phUSD/sUSDS UniV2 pair (story 104) ===");
+        require(susds.balanceOf(deployer) >= SEPOLIA_PAIR_SUSDS_SEED, "story-104: deployer lacks the sUSDS seed");
+        require(phUSD.balanceOf(deployer) >= SEPOLIA_PAIR_PHUSD_SEED, "story-104: deployer lacks the phUSD seed");
+        IERC20(address(susds)).approve(address(uniRouter), SEPOLIA_PAIR_SUSDS_SEED);
+        IERC20(address(phUSD)).approve(address(uniRouter), SEPOLIA_PAIR_PHUSD_SEED);
+        // Fresh pair (asserted reserve-less at creation), so the router adds exactly the desired
+        // amounts. Deadline as in `_createAndSeed` (slow public broadcast).
+        uniRouter.addLiquidity(
+            address(susds),
+            address(phUSD),
+            SEPOLIA_PAIR_SUSDS_SEED,
+            SEPOLIA_PAIR_PHUSD_SEED,
+            SEPOLIA_PAIR_SUSDS_SEED,
+            SEPOLIA_PAIR_PHUSD_SEED,
+            deployer,
+            type(uint256).max
+        );
+        (uint112 r0, uint112 r1,) = ISepoliaUniV2PairLike(phusdSusdsPair).getReserves();
+        bool s0 = ISepoliaUniV2PairLike(phusdSusdsPair).token0() == address(susds);
+        require(
+            (s0 ? r0 : r1) == SEPOLIA_PAIR_SUSDS_SEED && (s0 ? r1 : r0) == SEPOLIA_PAIR_PHUSD_SEED,
+            "story-104: pair reserves != seed"
+        );
+        console.log("Seeded phUSD/sUSDS pair - sUSDS:", SEPOLIA_PAIR_SUSDS_SEED);
+        console.log("Seeded phUSD/sUSDS pair - phUSD:", SEPOLIA_PAIR_PHUSD_SEED);
+
+        // The index-4 end state (cf. DeployMocks `_assertUniPoolerCutover`, minus the cutover).
+        (address d,, uint256 growth, bool disabled) = nftMinterV2.configs(UNI_POOLER_INDEX);
+        require(d == address(uniPoolerV2) && growth == 10 && !disabled, "story-104: configs(4) != UniPoolerV2");
+        require(uniPoolerV2.sUSDSIsToken0() == s0, "story-104: UniPoolerV2 token order");
+        require(
+            balancerPoolerHook.dispatcher() == address(uniPoolerV2)
+                && address(uniPoolerV2.hook()) == address(balancerPoolerHook),
+            "story-104: index-4 hook not wired both ways"
+        );
+        require(balancerPoolerHook.recipient() == address(nftStaker), "story-104: hook recipient != NFTStaker");
+        require(
+            uniPoolerV2.psm() == address(mockSkyPSM) && uniPoolerV2.maxTout() == 0.01e18
+                && uniPoolerV2.batchMinter() == address(batchNFTMinter)
+                && uniPoolerV2.batchDonationSize() == MOCK_BATCH_DONATION_SIZE
+                && uniPoolerV2.nudgeStreamer() == address(nudgeStreamer),
+            "story-104: UniPoolerV2 donation config"
+        );
+        require(
+            uniPoolerV2.poolerAuthVersion(deployer) == uniPoolerV2.authVersion(),
+            "story-104: deployer not an authorized pooler on UniPoolerV2"
+        );
+        require(uniPoolerV2.owner() == deployer, "story-104: UniPoolerV2 owner");
+        require(!uniPoolerV2.paused(), "story-104: UniPoolerV2 paused");
+        (address d6,,, bool disabled6) = nftMinterV2.configs(6);
+        require(d6 == address(buggedPoolerV2Index6) && disabled6, "story-104: index-6 placeholder not disabled");
+        console.log("Index-4 end state asserted: UniPoolerV2, hook both ways, donation config, pooler auth");
+    }
+
     /// @dev setMinter + authorized-pooler for a uniboost dispatcher (early index-1/2/3 block).
     ///      The ONLY authorized pooler is the MultiPooler batch forwarder; the deployer is
     ///      deliberately NOT whitelisted, so all pooling must go through MultiPooler.pool().
@@ -1576,7 +1693,7 @@ contract DeployMocksSepolia is Script {
     }
 
     /// @dev Deferred (Phase 3.7) per-dispatcher donation wiring: 50% of mint USDC -> batchNFTMinter
-    ///      (the BalancerPoolerV2 index-4 LSP batch minter), remaining 50% retained for pool().
+    ///      (the UniPoolerV2 index-4 LSP batch minter), remaining 50% retained for pool().
     /// @dev Story 073: the donation branch is now streamer-gated. `Uniboost._dispatch` reverts
     ///      `"Uniboost: nudgeStreamer unset"` whenever `donationAmount > 0` and no streamer is
     ///      wired — i.e. every mint on indices 1/2/3. `setNudgeStreamer` therefore is NOT optional
@@ -1848,8 +1965,9 @@ contract DeployMocksSepolia is Script {
 
         // Derive the pinned dispatcher index rather than hard-coding it, so a registration-order
         // change can't silently mis-wire the batch minter.
-        uint256 batchDispatcherIndex = nftMinterV2.dispatcherToIndex(address(balancerPoolerV2));
-        require(batchDispatcherIndex != 0, "BalancerPoolerV2 not registered with NFTMinterV2");
+        // Story 104: the pinned index-4 dispatcher is UniPoolerV2.
+        uint256 batchDispatcherIndex = nftMinterV2.dispatcherToIndex(address(uniPoolerV2));
+        require(batchDispatcherIndex != 0, "UniPoolerV2 not registered with NFTMinterV2");
 
         // THE SINGLE HIGHEST-RISK LINE IN THIS STORY. `setNudgeTokenWhitelist(token, true)` reverts
         // `BatchMint__RewardTokenIsPaymentToken(token)` when the added token equals the pinned
@@ -1858,8 +1976,7 @@ contract DeployMocksSepolia is Script {
         // — assert it explicitly so a mock rewire fails loudly HERE rather than as a confusing
         // revert three calls later.
         require(
-            balancerPoolerV2.primeToken() == address(usds),
-            "index-4 prime token must be USDS (else USDC is unwhitelistable)"
+            uniPoolerV2.primeToken() == address(usds), "index-4 prime token must be USDS (else USDC is unwhitelistable)"
         );
 
         batchNFTMinter.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
