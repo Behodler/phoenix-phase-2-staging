@@ -27,7 +27,6 @@ Compiled scripts still live outside this directory:
 | `script/DeployMocks.s.sol` | the local Anvil deployment |
 | `script/interactions/Temp.s.sol` | the scratchpad |
 | `script/helpers/UniswapV2Deployer.sol` | imported by `DeployMocks` and `test/UniswapV2Deployer.t.sol` |
-| `script/interactions/BalancerECLPInterfaces.sol` | imported by `test/VerifyECLPSymmetry.t.sol` and `test/SimulateECLPRebalance.t.sol` |
 
 Two tests read archived scripts as *source text* rather than importing them —
 `test/VerifyPromotionReadyGuards.t.sol` and `test/PhusdMinterDeltaGuards.t.sol`

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { readInterfaceKeysFromFile } = require('./contract-addresses-interface');
 
 /**
  * Chain ID to output file mapping
@@ -23,6 +24,29 @@ const CHAIN_NAME_MAP = {
  * Zero address constant for filtering checkpoint entries
  */
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+/**
+ * Story 104 (Balancexit Stage 3): chains whose extraction is COMPLETED against the
+ * `ContractAddresses` interface. After the normal filtering, every interface key the chain did not
+ * deploy is emitted as a zero-address placeholder (`deployed: false`), the same convention the
+ * hand-maintained mainnet-addresses.ts uses for undeployed keys.
+ *
+ * Why: DeployMocksSepolia no longer deploys the Balancer mocks, but the interface keeps
+ * `BalancerPooler`, `BalancerPool`, `BalancerVault` and `BalancerRouter` until the wind-down is
+ * complete, and generate:ts-sepolia refuses any key-set mismatch. A zero entry in the progress
+ * file cannot carry this: the loop below skips zero addresses, because the deploy scripts use them
+ * as checkpoint markers ("Seeding", "UsdcSeeding", ...).
+ *
+ * The placeholders are added AFTER that skip, from the interface itself, so checkpoint markers
+ * still never surface and only real interface keys are filled. The fill never adds a key the
+ * interface lacks, so generate:ts' "Not in the interface" check is unaffected.
+ *
+ * 31337 is deliberately NOT listed: anvil's extraction is what DEFINES the interface
+ * (generate:ts-anvil rewrites addresses.ts from local.json), so anvil behaviour is unchanged.
+ * Story 106 opts it in by adding 31337 here once anvil also stops deploying the Balancer mocks.
+ * Mainnet (1) is never listed: mainnet-addresses.ts is hand-maintained and never generated.
+ */
+const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111];
 
 /**
  * NFT contract base names (V2 only). Contracts with a "V2" suffix matching these names
@@ -126,26 +150,18 @@ const RENAMED_CONTRACT_NAMES = {
 };
 
 /**
- * Extract contract addresses from progress file and generate deployment JSON
- * @param {number} chainId - The chain ID to extract addresses for (default: 31337)
+ * Pure extraction: progress data -> the deployment JSON object. No file I/O.
+ * @param {object} progressData - parsed progress.<chainId>.json
+ * @param {number} chainId
+ * @param {object} [opts]
+ * @param {string[]} [opts.interfaceKeys] - ContractAddresses keys; required when `chainId` is in
+ *        ZERO_PLACEHOLDER_CHAIN_IDS (the extraction is completed against them)
+ * @param {boolean} [opts.quiet] - suppress per-entry logging
+ * @returns {{extracted: object, filteredCount: number, placeholders: string[]}}
  */
-function extractAddresses(chainId = 31337) {
-    const progressPath = path.join(__dirname, 'deployments', `progress.${chainId}.json`);
-    const outputFileName = CHAIN_OUTPUT_MAP[chainId] || `chain-${chainId}.json`;
-    const outputPath = path.join(__dirname, 'deployments', outputFileName);
+function buildExtraction(progressData, chainId, opts = {}) {
+    const log = opts.quiet ? () => {} : console.log;
 
-    // Check if progress file exists
-    if (!fs.existsSync(progressPath)) {
-        console.error(`Error: progress.${chainId}.json not found`);
-        const networkName = CHAIN_NAME_MAP[chainId] || `chain ${chainId}`;
-        console.error(`Run deployment first for ${networkName}`);
-        process.exit(1);
-    }
-
-    // Read progress file
-    const progressData = JSON.parse(fs.readFileSync(progressPath, 'utf-8'));
-
-    // Extract contract addresses into clean format
     const extracted = {
         chainId: progressData.chainId,
         networkName: progressData.networkName,
@@ -161,7 +177,7 @@ function extractAddresses(chainId = 31337) {
     for (const [name, data] of Object.entries(progressData.contracts || {})) {
         // Skip entries with zero address (checkpoint markers like "Seeding")
         if (data.address === ZERO_ADDRESS) {
-            console.log(`  Skipping checkpoint entry: ${name} (zero address)`);
+            log(`  Skipping checkpoint entry: ${name} (zero address)`);
             filteredCount++;
             continue;
         }
@@ -173,25 +189,25 @@ function extractAddresses(chainId = 31337) {
 
         // Drop explicitly excluded contracts (NFTMigrator and bare V1 NFT names)
         if (DROPPED_CONTRACT_NAMES.includes(displayName)) {
-            console.log(`  Dropping excluded contract: ${displayName}`);
+            log(`  Dropping excluded contract: ${displayName}`);
             continue;
         }
 
         // Drop the raw UniV2 stack that backs Uniboost — not UI-consumable (see constant above)
         if (UNISWAP_V2_BACKING_NAMES.includes(displayName)) {
-            console.log(`  Dropping UniV2 backing contract: ${displayName}`);
+            log(`  Dropping UniV2 backing contract: ${displayName}`);
             continue;
         }
 
         // Drop UniswapHelper's local venue mocks — reached only through the helper (see constant above)
         if (UNISWAP_HELPER_VENUE_NAMES.includes(displayName)) {
-            console.log(`  Dropping UniswapHelper venue mock: ${displayName}`);
+            log(`  Dropping UniswapHelper venue mock: ${displayName}`);
             continue;
         }
 
         // Drop bare-name V1 NFT contracts (e.g. "NFTMinter" without V2 suffix)
         if (NFT_BASE_NAMES.includes(displayName)) {
-            console.log(`  Dropping V1 NFT contract: ${displayName}`);
+            log(`  Dropping V1 NFT contract: ${displayName}`);
             continue;
         }
 
@@ -215,6 +231,52 @@ function extractAddresses(chainId = 31337) {
         extracted.contracts[displayName] = contractData;
     }
 
+    // Story 104: complete the extraction against the interface (see ZERO_PLACEHOLDER_CHAIN_IDS).
+    const placeholders = [];
+    if (ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId)) {
+        if (!Array.isArray(opts.interfaceKeys) || opts.interfaceKeys.length === 0) {
+            throw new Error(`chainId ${chainId} emits zero placeholders but no ContractAddresses keys were supplied`);
+        }
+        for (const key of opts.interfaceKeys) {
+            if (Object.prototype.hasOwnProperty.call(extracted.contracts, key)) continue;
+            extracted.contracts[key] = {
+                address: ZERO_ADDRESS,
+                deployed: false,
+                configured: false,
+                deployGas: 0,
+                configGas: 0
+            };
+            placeholders.push(key);
+            log(`  Zero-address placeholder: ${key} (interface key not deployed on chain ${chainId})`);
+        }
+    }
+
+    return { extracted, filteredCount, placeholders };
+}
+
+/**
+ * Extract contract addresses from progress file and generate deployment JSON
+ * @param {number} chainId - The chain ID to extract addresses for (default: 31337)
+ */
+function extractAddresses(chainId = 31337) {
+    const progressPath = path.join(__dirname, 'deployments', `progress.${chainId}.json`);
+    const outputFileName = CHAIN_OUTPUT_MAP[chainId] || `chain-${chainId}.json`;
+    const outputPath = path.join(__dirname, 'deployments', outputFileName);
+
+    // Check if progress file exists
+    if (!fs.existsSync(progressPath)) {
+        console.error(`Error: progress.${chainId}.json not found`);
+        const networkName = CHAIN_NAME_MAP[chainId] || `chain ${chainId}`;
+        console.error(`Run deployment first for ${networkName}`);
+        process.exit(1);
+    }
+
+    // Read progress file
+    const progressData = JSON.parse(fs.readFileSync(progressPath, 'utf-8'));
+
+    const interfaceKeys = ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId) ? readInterfaceKeysFromFile() : undefined;
+    const { extracted, filteredCount, placeholders } = buildExtraction(progressData, chainId, { interfaceKeys });
+
     // Write extracted addresses
     fs.writeFileSync(outputPath, JSON.stringify(extracted, null, 2));
 
@@ -227,6 +289,9 @@ function extractAddresses(chainId = 31337) {
     console.log(`Output:       ${outputPath}`);
     if (filteredCount > 0) {
         console.log(`Filtered:     ${filteredCount} checkpoint entries (zero address)`);
+    }
+    if (placeholders.length > 0) {
+        console.log(`Placeholders: ${placeholders.length} zero-address interface keys (${placeholders.join(', ')})`);
     }
 
     const flatCount = Object.keys(extracted.contracts).length;
@@ -265,11 +330,21 @@ function parseArgs() {
     return chainId;
 }
 
-// Run extraction
-try {
-    const chainId = parseArgs();
-    extractAddresses(chainId);
-} catch (error) {
-    console.error('Error extracting addresses:', error.message);
-    process.exit(1);
+module.exports = {
+    ZERO_ADDRESS,
+    ZERO_PLACEHOLDER_CHAIN_IDS,
+    NFT_BASE_NAMES,
+    RENAMED_CONTRACT_NAMES,
+    buildExtraction,
+};
+
+// Run extraction (CLI only; requiring this module for its exports runs nothing)
+if (require.main === module) {
+    try {
+        const chainId = parseArgs();
+        extractAddresses(chainId);
+    } catch (error) {
+        console.error('Error extracting addresses:', error.message);
+        process.exit(1);
+    }
 }
