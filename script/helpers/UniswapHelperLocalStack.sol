@@ -23,7 +23,7 @@ interface IMintableStable {
 ///         `test/UniswapHelperAnvil.t.sol`, so the forge test exercises exactly the anvil wiring.
 /// @dev    A library of internal functions, inlined into the caller, like `UniswapV2Deployer`: every
 ///         `new` and every call is made by the calling contract, i.e. the broadcasting deployer in
-///         the script. `deploy` needs `WETH_RESERVE` native ETH on the caller to wrap.
+///         the script. `deploy` needs `WETH_RESERVE` (or the supplied `wethReserve`) native ETH on the caller to wrap.
 library UniswapHelperLocalStack {
     /// @dev Default V3 fee tier: the mainnet WETH/USDC 0.05% pool.
     uint24 internal constant V3_FEE = 500;
@@ -34,7 +34,6 @@ library UniswapHelperLocalStack {
 
     /// @dev Venue reserves. USDC is 6dp, everything else 18dp.
     uint256 internal constant WETH_RESERVE = 100 ether; // = 200k USDC at the default rate
-    uint256 internal constant V3_USDC_RESERVE = 200_000e6;
     uint256 internal constant CURVE_USDC_RESERVE = 1_000_000e6;
     uint256 internal constant CURVE_STABLE_RESERVE = 1_000_000e18; // DOLA / USDe side
     uint256 internal constant PSM_USDS_RESERVE = 1_000_000e18;
@@ -63,6 +62,16 @@ library UniswapHelperLocalStack {
     /// @notice Deploys the four venue mocks and `UniswapHelper`, sets the V3 rates and funds every
     ///         venue (both sides of each pair, plus the PSM's USDS reserve).
     function deploy(Inputs memory t) internal returns (Venues memory v) {
+        return deploy(t, WETH_RESERVE);
+    }
+
+    /// @notice `deploy` with the V3 router's WETH reserve supplied by the caller (DeployUniswapHelperSepolia:
+    ///         a faucet-sized `SEPOLIA_WETH_SEED` instead of 100 ETH). The router's USDC side is sized to the
+    ///         same value at RATE_WETH_TO_USDC, so `wethReserve = WETH_RESERVE` gives the 200k USDC anvil uses.
+    function deploy(Inputs memory t, uint256 wethReserve) internal returns (Venues memory v) {
+        uint256 v3UsdcReserve = (wethReserve * RATE_WETH_TO_USDC) / 1e18;
+        require(v3UsdcReserve > 0, "UniswapHelperLocalStack: WETH reserve too small");
+
         v.v3Router = new MockUniswapV3SwapRouter();
         v.v3Quoter = new MockUniswapV3QuoterV2(v.v3Router);
         v.curveDola = new MockCurveDolaMetaPool(t.dola, t.usdc);
@@ -72,9 +81,9 @@ library UniswapHelperLocalStack {
         v.v3Router.setRate(t.usdc, t.weth, RATE_USDC_TO_WETH);
 
         // V3: both sides. WETH comes from wrapping the caller's own ETH.
-        IWETH(t.weth).deposit{value: WETH_RESERVE}();
-        require(IERC20(t.weth).transfer(address(v.v3Router), WETH_RESERVE), "story-110: WETH reserve");
-        IMintableStable(t.usdc).mint(address(v.v3Router), V3_USDC_RESERVE);
+        IWETH(t.weth).deposit{value: wethReserve}();
+        require(IERC20(t.weth).transfer(address(v.v3Router), wethReserve), "story-110: WETH reserve");
+        IMintableStable(t.usdc).mint(address(v.v3Router), v3UsdcReserve);
 
         // Curve: both sides of each pool.
         IMintableStable(t.dola).mint(address(v.curveDola), CURVE_STABLE_RESERVE);

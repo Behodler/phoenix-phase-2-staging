@@ -2,405 +2,433 @@
   "chainId": 11155111,
   "networkName": "sepolia",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-09-25T23:06:50.295Z",
+  "extractedAt": "2026-10-20T14:32:11.830Z",
   "contracts": {
     "PhUSD": {
-      "address": "0x93F12bA5537bB6D2C2A6D39CfAee1251568674Da",
+      "address": "0x044B41A11Ecd2F86bd229146A2b9f0205a8a0Ec3",
       "deployed": true,
       "configured": true,
       "deployGas": 890615,
       "configGas": 0
     },
     "USDC": {
-      "address": "0x106C89C553a77c1c0DAAf531eBCB19100916317e",
+      "address": "0xb4BE9A04CD2C43a714BFd1Af01AD7C351AFce61e",
       "deployed": true,
       "configured": true,
       "deployGas": 604591,
       "configGas": 0
     },
     "USDS": {
-      "address": "0x6CC4Af9f860f72A123b1729da18D07c3704d6231",
+      "address": "0xBf764DE8F77362Ea1988F3A93c059Fd2a882C764",
       "deployed": true,
       "configured": true,
       "deployGas": 580951,
       "configGas": 0
     },
     "SUSDS": {
-      "address": "0x79f4DDdB35552E616d91d3eDf7532ECD1D38aeaB",
+      "address": "0x332266d5D7dfEc33248299AC9535E07467887220",
       "deployed": true,
       "configured": true,
       "deployGas": 1142445,
       "configGas": 0
     },
     "USDe": {
-      "address": "0xb1Cb8eC89eF1B27e9cc32e9848B9187Be30Be88c",
+      "address": "0xB4E9a4Eacc6A0C50F2895988929aEe9B46600d46",
       "deployed": true,
       "configured": true,
       "deployGas": 580951,
       "configGas": 0
     },
     "SUSDe": {
-      "address": "0x93d09dfBC738a57A1Ede33b4B35DcAb65FF06982",
+      "address": "0x134B4C6137335947f80133192cc34FFa6E7D5dAd",
       "deployed": true,
       "configured": true,
       "deployGas": 1142246,
       "configGas": 0
     },
     "Dola": {
-      "address": "0xd224558Fae4f0132141d4FBCb1a3DeBC69a24Fd5",
+      "address": "0xb882D9124D722c46B9a7F950C7e8430387E53c69",
       "deployed": true,
       "configured": true,
       "deployGas": 580951,
       "configGas": 0
     },
     "EYE": {
-      "address": "0xabea16Df430D4f53a9213A424889533dEd81f3FD",
+      "address": "0xA1D0d1f08241E40B2a8Ef0b942d330b01494eBb5",
       "deployed": true,
       "configured": true,
       "deployGas": 616414,
       "configGas": 0
     },
     "SCX": {
-      "address": "0x85232C27e5bDE2255a1Dd200462f24143918f352",
+      "address": "0x743c47999665427583687663fBA9c1A59DEE9611",
       "deployed": true,
       "configured": true,
       "deployGas": 616414,
       "configGas": 0
     },
     "Kendu": {
-      "address": "0x88DF78B2D28F5D98e1A7f4aad2e88F67BFe24C03",
+      "address": "0x25C11681214B0d26016396190a74edBe3228A3c8",
       "deployed": true,
       "configured": true,
       "deployGas": 580951,
       "configGas": 0
     },
     "Flax": {
-      "address": "0xaAb9aA45f4B1eDF40f0C91c9629a94Fe2F8D0b46",
+      "address": "0xb119308B2c1f80D8cDCB63091bcF01E04F33E60B",
       "deployed": true,
       "configured": true,
       "deployGas": 616453,
       "configGas": 0
     },
     "WBTC": {
-      "address": "0xDAbaaE64da759B38B155067F9F4469658624241F",
+      "address": "0xdbE2E0680fdfE04e1397eF89F0d53b1cF0729F73",
       "deployed": true,
       "configured": true,
       "deployGas": 580990,
       "configGas": 0
     },
     "Pauser": {
-      "address": "0x99741e681b7e3592d33C8866037B6b75BE9C2409",
+      "address": "0x89F9a7440cAFf6CB6C5C26E9E27B1036002e18f1",
       "deployed": true,
       "configured": true,
       "deployGas": 1046056,
       "configGas": 0
     },
     "AutoDOLA": {
-      "address": "0x63C73d1294812e924C46f34f6C8AedA4981E7bC3",
+      "address": "0xd1D13C6f03c93c6Bb1113f649b1512A686eBc587",
       "deployed": true,
       "configured": true,
       "deployGas": 1220146,
       "configGas": 0
     },
     "YieldStrategyDolaLegacy": {
-      "address": "0xA884676433DFAC79B4b6d8C250B1e4e88efe6660",
+      "address": "0x9AA71E60070e02Aae071c7248F0F0A293eC8cf24",
       "deployed": true,
       "configured": true,
       "deployGas": 2901129,
       "configGas": 0
     },
     "SDOLA": {
-      "address": "0x01E2Da0025E0fA62115B75Ea97066ad5a805422D",
+      "address": "0x048E004B4600Ea61dF2756E08ee03104FFE3Db58",
       "deployed": true,
       "configured": true,
       "deployGas": 1142175,
       "configGas": 0
     },
     "YieldStrategyDola": {
-      "address": "0xb522a7453d31e35B18ACd518A92F20cC4bc2b191",
+      "address": "0x505f14596Dc285F88E5d69D1F9A94B12f8354fB4",
       "deployed": true,
       "configured": true,
       "deployGas": 2899849,
       "configGas": 0
     },
     "AutoUSDC": {
-      "address": "0xa0b5AE88B69d7724bE4eB37f3baa563A124f0803",
+      "address": "0xFe83d36760Ce2Cc82C16bfeA1A609aCB304E0Aef",
       "deployed": true,
       "configured": true,
       "deployGas": 1219749,
       "configGas": 0
     },
     "YieldStrategyUSDC": {
-      "address": "0x9556b844d31F44Fd9dB88B0EBFFc138CFe2c9ae4",
+      "address": "0x4762dE8264dC97302A3bA76a39398D9A852C2674",
       "deployed": true,
       "configured": true,
       "deployGas": 2899937,
       "configGas": 0
     },
     "USDeAMMAdapter": {
-      "address": "0x42a9a503C508089480c62AA524d5f7569F7da7F7",
+      "address": "0xc25374722EC144583A3846F996544901F513a922",
       "deployed": true,
       "configured": true,
       "deployGas": 622714,
       "configGas": 0
     },
     "YieldStrategyUSDe": {
-      "address": "0x092c9808a954173BD836481b40B10179C052fbde",
+      "address": "0x802e4d416633B2844628c4876daB5E05D70eA0eA",
       "deployed": true,
       "configured": true,
       "deployGas": 3111216,
       "configGas": 0
     },
     "PhusdStableMinter": {
-      "address": "0x74030C5C9886A89744C9655E562452779A641d46",
+      "address": "0x45dBC280F7C88769E13a7279616D3cDFc3630EbA",
       "deployed": true,
       "configured": true,
       "deployGas": 1308905,
       "configGas": 0
     },
     "PhlimboV3": {
-      "address": "0x184a060318789FA81A0d9dD15a1220655705f68c",
+      "address": "0x6AeCf8Af97e170627d3Ea0da766Ec8Fc8d19aDA1",
       "deployed": true,
       "configured": true,
       "deployGas": 3083150,
       "configGas": 0
     },
     "StableYieldAccumulator": {
-      "address": "0x97f817C180DDc28Ed08fcf0cd98A50805e7e2131",
+      "address": "0x3c884831e49E3Fef848300D2819905872fb1a70e",
       "deployed": true,
       "configured": true,
       "deployGas": 2287344,
       "configGas": 0
     },
-    "BalancerPool": {
-      "address": "0x1248262B095d821bF13012d9E9a6D57aBc1C1ba9",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 633393,
-      "configGas": 0
-    },
-    "BalancerVault": {
-      "address": "0x5E07e6037b89CE1216be104516C079f0f2c877B2",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 746085,
-      "configGas": 0
-    },
     "BurnRecorder": {
-      "address": "0x50337fEb1fA16EE9A9f15c1e5Cb52E84783041dC",
+      "address": "0xfbf3Cd061674a12652B431FBa220975132c5Ea45",
       "deployed": true,
       "configured": true,
       "deployGas": 368777,
       "configGas": 0
     },
-    "BalancerRouter": {
-      "address": "0x1bddE640973F291D466e76C91a846240103aDF23",
+    "NFTMinter": {
+      "address": "0xea6f1f838D3676fde5D28fB57E2f69844DFf206F",
       "deployed": true,
       "configured": true,
-      "deployGas": 191974,
+      "deployGas": 2734966,
       "configGas": 0
     },
-    "NFTMinter": {
-      "address": "0x69FaD9391eb95761B444B9b651f61453B294990a",
+    "UniswapV2Router": {
+      "address": "0x1e61AD0282e6B34849292dF4419a922577bf2b14",
       "deployed": true,
       "configured": true,
-      "deployGas": 2735379,
+      "deployGas": 0,
       "configGas": 0
     },
     "UniboostEYE": {
-      "address": "0xD49c5F968544D6BE74a374708aBBC10D477fFd95",
+      "address": "0x77f420f122A041Bc6b7a5B6bcb4FC73f741C00D6",
       "deployed": true,
       "configured": true,
-      "deployGas": 2465662,
+      "deployGas": 2465630,
       "configGas": 0
     },
     "UniboostSCX": {
-      "address": "0x739b3C2ae0C7983F6c69CC2652924875d90eA5cC",
+      "address": "0xF28a02932939112d224301462a3A1B56c870b8D3",
       "deployed": true,
       "configured": true,
-      "deployGas": 2464732,
+      "deployGas": 2464670,
       "configGas": 0
     },
     "UniboostFLX": {
-      "address": "0xc25CC1B22A9Dc983B1e990D230DCA2d81584bd23",
+      "address": "0x2cf5D5Ff3cf213019849C54B521d5Cb5FbF9c726",
       "deployed": true,
       "configured": true,
-      "deployGas": 2464683,
+      "deployGas": 2464679,
       "configGas": 0
     },
-    "BalancerPooler": {
-      "address": "0xee4E1Ab8679163bc997D30013E011D147f54adf7",
+    "PhusdSusdsPair": {
+      "address": "0xF80dE933A8dd6059a5E99334A2121e335c853d16",
       "deployed": true,
       "configured": true,
-      "deployGas": 2803149,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "UniPooler": {
+      "address": "0x0747746009531f94989cb1Fa40239aec44db2AC1",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 2882220,
+      "configGas": 0
+    },
+    "BalancerPoolerMintDebtHook": {
+      "address": "0xd517770c9901d6Fd93c1eD5c040e105b890b23A9",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 669862,
       "configGas": 0
     },
     "GatherWBTC": {
-      "address": "0x914580652e2757a2b04362A6d4763717B2bB0F92",
+      "address": "0x3c4f40bbd5937AF11D3D668Cb868c442789D16fb",
       "deployed": true,
       "configured": true,
       "deployGas": 1257360,
       "configGas": 0
     },
     "MultiPooler": {
-      "address": "0xAa178b9C5914530e9d030E3919e762ffBe85Bf54",
+      "address": "0xe5B2868b14969593a51Ecf088ef9f890f5761d4c",
       "deployed": true,
       "configured": true,
       "deployGas": 363770,
       "configGas": 0
     },
     "UniboostHookEYE": {
-      "address": "0x2310ca60bfb374DCC42f60644116f81Dd6632c4c",
+      "address": "0x6557b110C3fD36DE52AE0e9eD3a4E4e7D53BBe4f",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "UniboostHookSCX": {
-      "address": "0x6AA4a56095856033DFec1AE4f8ba6D1e3c1Fa66D",
+      "address": "0x8315C0c4eA087Cf99d9B08736348b77DB7d2bBC9",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "UniboostHookFLX": {
-      "address": "0x50fC11160b1e07376A75749243a5b804659595D6",
+      "address": "0xF15e9103028e2711311ad6a4881B20A9aDdC9CFE",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "WaUSDC": {
-      "address": "0x78C770f239ce34Aef975b5C8f47250FBcef17Ee2",
+      "address": "0xCC3239510d732C08491178c660710E4C2F25A3d8",
       "deployed": true,
       "configured": true,
       "deployGas": 700866,
       "configGas": 0
     },
     "SkyPSM": {
-      "address": "0xbd45Cda2b53BB7E1cb4961422f5e4e0DB5E44208",
+      "address": "0xa973eDeB218c8Ec9455ABB44C7590d70e7568f54",
       "deployed": true,
       "configured": true,
-      "deployGas": 341380,
-      "configGas": 0
-    },
-    "BalancerPoolerMintDebtHook": {
-      "address": "0xa6CBAd6e5310De140D87d856cB67D27e84089073",
-      "deployed": true,
-      "configured": true,
-      "deployGas": 669980,
+      "deployGas": 503512,
       "configGas": 0
     },
     "NFTStaker": {
-      "address": "0x55BE811cD3ff16D6bB7f0315E699265A28713338",
+      "address": "0x916Ce79D8aBC505A9133bC43E691616aC80A6ba7",
       "deployed": true,
       "configured": true,
-      "deployGas": 2394299,
+      "deployGas": 2393708,
       "configGas": 0
     },
     "NudgeStreamer": {
-      "address": "0xd0b92CbEFcB0606a250BfEdcA86c486c64bF211b",
+      "address": "0xE643FF8BB39CdD3D5251CB91b08c1EbF8fb0FFe6",
       "deployed": true,
       "configured": true,
       "deployGas": 749921,
       "configGas": 0
     },
     "BatchNFTMinter": {
-      "address": "0x0A1328Ae360791d90544354f4545DC95391815dB",
+      "address": "0x8Adbef094bEEAcC09e0da4c52027de34c07e7933",
       "deployed": true,
       "configured": true,
       "deployGas": 1545167,
       "configGas": 0
     },
     "UniboostStakerEYE": {
-      "address": "0x3E7468cf470ED96f99d6b216dB425DDA3c7982e3",
+      "address": "0x7f84Cb6b7C24B7D28C4d3940Fc7c4719DE0d64Cf",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "UniboostStakerSCX": {
-      "address": "0x5B96DD369d16626293A12e23728B464AC40FD1c5",
+      "address": "0x65d7418305Be09e4f517cf6665068d6aA562EbCc",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "UniboostStakerFLX": {
-      "address": "0xb7cd41fD8b83187EAE7f25e52eE3057D9D5DBACB",
+      "address": "0x9eD5a8b82ecA5a2664d780ec3609f30dF75e8Ee6",
       "deployed": true,
       "configured": true,
       "deployGas": 0,
       "configGas": 0
     },
     "EyeBatchNFTMinter": {
-      "address": "0x052b3Ea6d8300c66e7a5a57A327Ee1945bb84610",
+      "address": "0xF9AbCD84A1C5fc176625119C10A677D43101c1C2",
       "deployed": true,
       "configured": false,
       "deployGas": 1042501,
       "configGas": 0
     },
     "ScxBatchNFTMinter": {
-      "address": "0x664e4069e1A9D1e51632A95234DC9B682cd78123",
+      "address": "0x10a3D73cC6493eD8f832567c673082b59e2f58D2",
       "deployed": true,
       "configured": false,
       "deployGas": 1042501,
       "configGas": 0
     },
     "FlxBatchNFTMinter": {
-      "address": "0x98679D4AF8fAB694CC79857E0EFfcacFb3A8eB28",
+      "address": "0xD36047ef9c500019FDA9d41d078DCb5ef8348c11",
       "deployed": true,
       "configured": false,
       "deployGas": 1042501,
       "configGas": 0
     },
     "NudgeRatchet": {
-      "address": "0x25e1bc509B988F9464d9009310a0a5E94AB54ba7",
+      "address": "0x1C8291b2B1d9c1B5C963e1d3650Dec0E87058C10",
       "deployed": true,
       "configured": true,
       "deployGas": 1545994,
       "configGas": 0
     },
     "NudgeRatchetMintDebtHook": {
-      "address": "0xeD222ebab4fED21Fd47c1a09618D706E99B910ea",
+      "address": "0x7efADdb967136636dEb2AB7FF96ffdB5c103A8af",
       "deployed": true,
       "configured": true,
       "deployGas": 697431,
       "configGas": 0
     },
     "RatchetNFTStaker": {
-      "address": "0x8b6F7B243cfc4185Dd9db90C120E17D2BB7b6910",
+      "address": "0x1cF98d0e33DDbCad059c544FA92b8b64757875c6",
       "deployed": true,
       "configured": true,
-      "deployGas": 2417896,
+      "deployGas": 2417886,
       "configGas": 0
     },
     "RatchetBatchNFTMinter": {
-      "address": "0x3fDBD9bA002624Ecc8B0EdF4136bD5EFE81C1942",
+      "address": "0x988506cE8f4B8f537Ff5F179d7BbF45993E0d487",
       "deployed": true,
       "configured": true,
       "deployGas": 1064614,
       "configGas": 0
     },
     "Antimatter": {
-      "address": "0xf9801f60945bBe5e01376D5F8445f380A0F701F1",
+      "address": "0xbb706B36b5829F49C5B99b5A107eF7DA89EdC88d",
       "deployed": true,
       "configured": true,
-      "deployGas": 2000945,
+      "deployGas": 2000928,
       "configGas": 0
     },
     "StableStakerV2": {
-      "address": "0x3996F77f54f4Aa8d26146054c526A4e62967b1C0",
+      "address": "0xe1cD2238340c4c8bFc5F7d8837A8ca7c567BDa65",
       "deployed": true,
       "configured": true,
-      "deployGas": 4058677,
+      "deployGas": 4058636,
       "configGas": 0
     },
     "ViewRouter": {
-      "address": "0x8F16599BF6BC5fdE3581bD49DCB94586b98F8ED7",
+      "address": "0x636708D7FD2f6Ff3686Fca511b3814E106303b27",
       "deployed": true,
       "configured": true,
-      "deployGas": 516177,
+      "deployGas": 516730,
+      "configGas": 0
+    },
+    "UniswapHelper": {
+      "address": "0xCA7a62943Fc95f47fde1c35A5FecD37a7483a93B",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "BalancerPool": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "BalancerVault": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "BalancerRouter": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "BalancerPooler": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
       "configGas": 0
     }
   }

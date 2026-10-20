@@ -229,8 +229,9 @@ The `package.json` should provide scripts for each network:
 {
   "scripts": {
     "deploy:sepolia-preview": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --private-key $DEPLOYER_SEPOLIA_pk -vvv",
-    "deploy:sepolia": "rm -f server/deployments/progress.11155111.json && forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
-    "deploy:sepolia:resume": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --slow --resume --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
+    "deploy:sepolia": "rm -f server/deployments/progress.11155111.json && forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run uniswap-helper:sepolia",
+    "deploy:sepolia:resume": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --resume --private-key $DEPLOYER_SEPOLIA_pk && npm run uniswap-helper:sepolia",
+    "uniswap-helper:sepolia": "forge script script/DeployUniswapHelperSepolia.s.sol:DeployUniswapHelperSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
     "extract:sepolia": "node server/extract-addresses.js 11155111",
     "generate:ts-sepolia": "node server/generate-ts-addresses.js 11155111"
   }
@@ -465,7 +466,7 @@ ANVIL_CHAIN_ID=31337
 
 # Sepolia Configuration (names as used by the npm scripts; set in .envrc)
 RPC_SEPOLIA=https://sepolia.infura.io/v3/YOUR_INFURA_KEY
-SEPOLIA_WETH_SEED=  # optional, wei; total ETH wrapped for the two WETH UniV2 pools (default 0.1 ether)
+SEPOLIA_WETH_SEED=  # optional, wei (default 0.1 ether; .envrc sets 0.4 ether): total ETH wrapped for the two WETH UniV2 pools, AND, separately, the UniswapHelper V3 mock router WETH reserve
 
 # Mainnet Configuration (PRODUCTION - USE WITH EXTREME CAUTION)
 MAINNET_RPC_URL=https://mainnet.infura.io/v3/YOUR_INFURA_KEY
@@ -787,8 +788,11 @@ any script that touches real assets.
    Sepolia ETH the story-098 completion notes measured.
 2. **Test**: `forge build --sizes`, `forge fmt --check`, `forge test`
 3. **Preview**: `npm run deploy:sepolia-preview` (simulation, no broadcast)
-4. **Deploy**: `npm run deploy:sepolia` — broadcasts `--slow` (roughly an hour), then runs
-   `extract:sepolia` and `generate:ts-sepolia`
+4. **Deploy**: `npm run deploy:sepolia` — broadcasts `--slow` (roughly an hour), then chains into
+   `uniswap-helper:sepolia` (`script/DeployUniswapHelperSepolia.s.sol`: UniswapHelper + its venue
+   mocks, appended to `progress.11155111.json`), which runs `extract:sepolia` and `generate:ts-sepolia`.
+   Against an existing stack, run `npm run uniswap-helper:sepolia` standalone (`:sepolia-preview`
+   simulates without touching the progress file); it is a no-op once UniswapHelper is recorded.
 5. **Resume**: after a partial broadcast, `npm run deploy:sepolia:resume` (forge `--resume`)
 6. **Result**: `server/deployments/sepolia-addresses.ts` exports
    `sepoliaAddresses: ContractAddresses`. `generate:ts-sepolia` never rewrites `addresses.ts`;
