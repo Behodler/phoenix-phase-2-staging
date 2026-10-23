@@ -31,6 +31,8 @@
 // Updated 2026-09-23: StableStaker V1 -> V2 cutover (story 082) — StableStakerV2 + Antimatter FILLED from
 // progress.stable-staker-v2-cutover.1.json; V1 users migrated via a transient CrossVersionMigrator.
 // Story 092: YieldStrategyDola -> the sDOLA strategy; YieldStrategyDolaLegacy -> retired 0x1760 autoDOLA strategy.
+// Updated 2026-10-23: UniPoolerV2 index-4 cutover (story 103) — UniPooler + PhusdSusdsPair FILLED from progress.unipooler-cutover.1.json.
+// Updated 2026-10-23: UniswapHelper deployed (story 111) — UniswapHelper FILLED from progress.uniswap-helper.1.json.
 import { ContractAddresses } from './addresses';
 
 
@@ -143,18 +145,18 @@ export const mainnetAddresses: ContractAddresses = {
   // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
   // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).
   BalancerPooler: "0x7f6874332c4629429d70D15f685A8230323F11F1",
-  // Story 102 (Balancexit Stage 1c): the UniPoolerV2 cutover. `UniPooler` becomes the live
-  // index-4 dispatcher and `PhusdSusdsPair` the phUSD/sUSDS UniV2 pair it zaps into; both are
-  // zero placeholders until the Stage 2 mainnet cutover patcher (story 103) fills them.
+  // Story 103 (Balancexit Stage 2): the UniPoolerV2 index-4 cutover. `UniPooler` is the live
+  // index-4 dispatcher and `PhusdSusdsPair` the phUSD/sUSDS UniV2 pair it zaps into, both
+  // patched from progress.unipooler-cutover.1.json by patch-mainnet-addresses-unipooler-cutover.js.
   // `BalancerPooler` above keeps naming the retired pooler through the wind-down.
   // `UniswapV2Router` is the canonical live UniswapV2 Router02.
-  UniPooler: "0x0000000000000000000000000000000000000000",
-  PhusdSusdsPair: "0x0000000000000000000000000000000000000000",
+  UniPooler: "0x56997ea45091CBc01DB8a09E60DEDB8b3706a3D2",
+  PhusdSusdsPair: "0x0b96b8ab66d40ba3C7501aa8C28Cdc37688F6F7f",
   UniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-  // Story 110: one-tx phUSD swaps + phUSD/sUSDS liquidity periphery (UniswapHelper). Zero
-  // placeholder keeps this file's key-set equal to the ContractAddresses interface; story 111's
-  // patcher fills it after the human's mainnet broadcast.
-  UniswapHelper: "0x0000000000000000000000000000000000000000",
+  // Story 111: one-tx phUSD swaps + phUSD/sUSDS liquidity periphery (UniswapHelper), deployed by
+  // DeployUniswapHelperMainnet and patched from progress.uniswap-helper.1.json. Its swaps and
+  // liquidity calls revert until the phUSD/sUSDS pair exists (story 103's Stage 4 cutover).
+  UniswapHelper: "0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts
