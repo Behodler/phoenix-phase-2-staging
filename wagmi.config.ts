@@ -50,11 +50,11 @@ export default defineConfig({
         // NFT Minter infrastructure
         'BurnRecorder.sol/BurnRecorder.json',
         'NFTMinterV2.sol/NFTMinterV2.json',
-        // BalancerPoolerV2 stays through the Balancer wind-down: DeployMocks still deploys it
-        // as the retired index-4 pooler (key `BalancerPooler`).
-        'BalancerPoolerV2.sol/BalancerPoolerV2.json',
+        // Story 106: BalancerPoolerV2 is DROPPED. DeployMocks no longer deploys it (the cutover
+        // rehearsal retired post-cutover), and an ABI ships only if DeployMocks deploys its type.
+        // Its `BalancerPooler` address key stays (zero on anvil/Sepolia) until story 107.
         // Story 102 (Balancexit Stage 1c): the live index-4 dispatcher after the cutover
-        // (key `UniPooler`), deployed by DeployMocks' cutover rehearsal.
+        // (key `UniPooler`), deployed directly by DeployMocks since story 106.
         'UniPoolerV2.sol/UniPoolerV2.json',
         // Story 110: one-tx phUSD swaps (DOLA/USDC/USDe/USDS/sUSDS/ETH) and phUSD/sUSDS liquidity
         // (key `UniswapHelper`). DeployMocks Phase 11.8 deploys it against local venue mocks.
