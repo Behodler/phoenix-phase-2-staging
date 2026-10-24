@@ -43,7 +43,7 @@ import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
 import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
 import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
 // Story 104 (Balancexit Stage 3): index 4 is UniPoolerV2, deployed DIRECTLY against a fresh
-// mock-token phUSD/sUSDS Uniswap V2 pair. No Balancer mock, no BalancerPoolerV2, no cutover.
+// mock-token phUSD/sUSDS Uniswap V2 pair. No Balancer mock, no Balancer pooler, no cutover.
 import {UniPoolerV2} from "@yield-claim-nft/dispatchers/UniPoolerV2.sol";
 import {GatherV2} from "@yield-claim-nft/dispatchers/GatherV2.sol";
 // Story 070 put NudgeRatchetDelayRelease at index 7 as a stopgap; story 073 retires it and puts
@@ -155,7 +155,7 @@ interface IPhlimboAPYLike {
  *        - the 6-hour local stream window: Sepolia cannot fast-forward and a long-lived testnet
  *          must not run dry within hours, so streams use the mainnet-like `SEPOLIA_STREAM_DURATION`
  *          of 7 days.
- *        - BalancerPoolerV2 -> UniPoolerV2 CUTOVER REHEARSAL (story 101, Phase 11.7 in
+ *        - Balancer pooler -> UniPoolerV2 CUTOVER REHEARSAL (story 101, Phase 11.7 in
  *          DeployMocks) — story 104, Balancexit Stage 3. No `UniPoolerCutoverCore`, no
  *          `UniPoolerCutoverEscrow`, no holding-pattern revoke, no BPT exit. Index 4 is
  *          `UniPoolerV2` from the start, against a fresh mock-token phUSD/sUSDS Uniswap V2 pair
@@ -164,8 +164,8 @@ interface IPhlimboAPYLike {
  *          `BalancerPoolerMintDebtHook` in both directions (set BEFORE `registerDispatcher`, see
  *          yield-claim-nft:051), PSM / maxTout / batchMinter / batchDonationSize / nudgeStreamer,
  *          deployer as the sole authorized pooler. Tracked as "UniPoolerV2" and "PhusdSusdsPair".
- *        - the Balancer mocks (`MockBalancerPool`, `MockBalancerVault`, `MockBalancerRouter`) and
- *          `BalancerPoolerV2` itself — story 104. Nothing on this chain is Balancer-backed. The
+ *        - the Balancer mocks (pool, vault and router mocks) and
+ *          the Balancer pooler itself — story 104. Nothing on this chain is Balancer-backed. The
  *          `ContractAddresses` interface still carries `BalancerPooler`, `BalancerPool`,
  *          `BalancerVault` and `BalancerRouter` through the wind-down, so `extract:sepolia` emits
  *          them as ZERO-ADDRESS PLACEHOLDERS (extract-addresses.js ZERO_PLACEHOLDER_CHAIN_IDS), the
@@ -173,7 +173,7 @@ interface IPhlimboAPYLike {
  *          is KEPT: the hook contract is live and unchanged on mainnet; only its dispatcher moved.
  *
  *      WHAT WAS DELIBERATELY KEPT — the index-6 "bugged pooler" placeholder. On mainnet dispatcher
- *      index 6 is permanently held by the disabled story-047 BalancerPoolerV2. Story 104: with the
+ *      index 6 is permanently held by the disabled story-047 Balancer pooler. Story 104: with the
  *      Balancer mocks gone the placeholder is a second, never-wired `UniPoolerV2` on the same pair
  *      (its hook is never set, so `_dispatch` reverts `UniPoolerV2__HookNotSet` even if it were
  *      ever re-enabled); its type is irrelevant, only the index it consumes matters.
@@ -223,7 +223,7 @@ contract DeployMocksSepolia is Script {
     // phUSD Phases 9/9.55 mint to the deployer and the 10k sUSDS Phase 1 deposits for it.
     uint256 constant SEPOLIA_PAIR_SUSDS_SEED = 2_000e18;
     uint256 constant SEPOLIA_PAIR_PHUSD_SEED = 2_000e18;
-    // UniPoolerV2 lives at NFTMinterV2 index 4, the slot BalancerPoolerV2 holds on mainnet.
+    // UniPoolerV2 lives at NFTMinterV2 index 4, the slot the Balancer pooler held on mainnet.
     uint256 constant UNI_POOLER_INDEX = 4;
 
     // Deployment addresses
@@ -313,7 +313,7 @@ contract DeployMocksSepolia is Script {
     address public phusdSusdsPair;
     GatherV2 public gatherWBTCV2;
     // Disabled placeholder occupying dispatcher index 6 to mirror mainnet, where the
-    // "bugged" BalancerPoolerV2 (story-047) was appended at index 6 and then permanently
+    // "bugged" Balancer pooler (story-047) was appended at index 6 and then permanently
     // disabled by the story-048 cutover. Registering this here pushes NudgeRatchet to
     // index 7, matching the index it will receive on mainnet. Never enabled / never minted.
     // Story 104: a never-wired UniPoolerV2 (no Balancer mocks remain to build the old type);
@@ -702,7 +702,7 @@ contract DeployMocksSepolia is Script {
         nftMinterV2.registerDispatcher(address(uniboostFLX), uniboostInitialPrice, uniboostGrowthBps);
         console.log("Registered UniboostFLX dispatcher with NFTMinterV2 (index 3, 10 USDC, 0.1% growth)");
 
-        // Story 104: UniPoolerV2 takes index 4 in the SAME registration slot BalancerPoolerV2
+        // Story 104: UniPoolerV2 takes index 4 in the SAME registration slot the Balancer pooler
         // held. Its hook is already installed (see `_deployUniPoolerV2`), so no index-4 dispatch
         // can ever hit `UniPoolerV2__HookNotSet` (yield-claim-nft:051).
         nftMinterV2.registerDispatcher(address(uniPoolerV2), v2InitialPrice, 10); // 0.1% growth
@@ -717,7 +717,7 @@ contract DeployMocksSepolia is Script {
 
         // ---- Index-6 mirror: disabled "bugged pooler" placeholder ----
         // On mainnet, dispatcher index 6 is permanently occupied by the disabled bugged
-        // BalancerPoolerV2 (registered by story-047, disabled by the story-048 cutover).
+        // Balancer pooler (registered by story-047, disabled by the story-048 cutover).
         // registerDispatcher is append-only by index, so index 6 can never be reclaimed —
         // meaning NudgeRatchet will land at index 7 on mainnet. We mirror that here by
         // registering a placeholder dispatcher at index 6 and immediately disabling it,
@@ -771,7 +771,7 @@ contract DeployMocksSepolia is Script {
         uniPoolerV2.setMinter(address(nftMinterV2));
         console.log("UniPoolerV2.setMinter -> NFTMinterV2");
 
-        // The deployer is the sole authorized pooler, as it was on BalancerPoolerV2 here.
+        // The deployer is the sole authorized pooler, as it was on the Balancer pooler here.
         uniPoolerV2.setAuthorizedPooler(deployer, true);
         console.log("UniPoolerV2.setAuthorizedPooler(deployer, true)");
 

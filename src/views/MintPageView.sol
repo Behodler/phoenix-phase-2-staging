@@ -18,7 +18,7 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 ///        Index 1: EYE     - Uniboost (story-070; replaced the EYE Burner)
 ///        Index 2: SCX     - Uniboost (story-070; replaced the SCX Burner)
 ///        Index 3: Flax    - Uniboost (story-070; replaced the Flax Burner)
-///        Index 4: USDS    - BalancerPoolerV2 (restored to index 4 by story-048 cutover)
+///        Index 4: USDS    - UniPoolerV2 (Balancexit cutover; the retired Balancer pooler before it)
 ///        Index 5: WBTC    - Gather
 ///        Index 6: (skipped) - disabled "bugged pooler" slot on mainnet (story-048); a
 ///                             disabled placeholder dispatcher mirrors it on Anvil so that
@@ -158,8 +158,8 @@ contract MintPageView is IPageView {
         // Flax (dispatcher index 3 — Uniboost; mint token USDC via primeToken())
         _fillTokenData(data, 12, 3, user);
 
-        // USDS (dispatcher index 4 — BalancerPoolerV2 restored to index 4 by the
-        //                          story-048 cutover; the bugged index-6 pooler is disabled).
+        // USDS (dispatcher index 4 — UniPoolerV2 since the Balancexit cutover, the retired
+        //                          Balancer pooler before it; the bugged index-6 pooler is disabled).
         _fillTokenData(data, 18, 4, user);
 
         // WBTC (dispatcher index 5)

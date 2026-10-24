@@ -43,7 +43,7 @@ import {BurnRecorder} from "@yield-claim-nft/BurnRecorder.sol";
 import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
 import {ITokenMinterV2} from "@yield-claim-nft/interfaces/ITokenMinterV2.sol";
 // Story 106 (Balancexit, post-cutover): index 4 is UniPoolerV2, deployed DIRECTLY against the
-// canonical mock-token phUSD/sUSDS Uniswap V2 pair. The BalancerPoolerV2 -> UniPoolerV2 cutover
+// canonical mock-token phUSD/sUSDS Uniswap V2 pair. The Balancer pooler -> UniPoolerV2 cutover
 // rehearsal (story 101) and the Balancer mocks were retired once the mainnet cutover had executed,
 // exactly as the phlimbo V1 -> V2 -> V3 rehearsals were.
 import {UniPoolerV2} from "@yield-claim-nft/dispatchers/UniPoolerV2.sol";
@@ -308,7 +308,7 @@ contract DeployMocks is Script {
     address public phusdSusdsPair;
     GatherV2 public gatherWBTCV2;
     // Disabled placeholder occupying dispatcher index 6 to mirror mainnet, where the
-    // "bugged" BalancerPoolerV2 (story-047) was appended at index 6 and then permanently
+    // "bugged" Balancer pooler (story-047) was appended at index 6 and then permanently
     // disabled by the story-048 cutover. Registering this here pushes NudgeRatchet to
     // index 7, matching the index it will receive on mainnet. Never enabled / never minted.
     // Story 106: a never-wired UniPoolerV2 (no Balancer mocks remain to build the old type), as
@@ -734,7 +734,7 @@ contract DeployMocks is Script {
         nftMinterV2.registerDispatcher(address(uniboostFLX), uniboostInitialPrice, uniboostGrowthBps);
         console.log("Registered UniboostFLX dispatcher with NFTMinterV2 (index 3, 10 USDC, 0.1% growth)");
 
-        // Story 106: UniPoolerV2 takes index 4 in the SAME registration slot BalancerPoolerV2
+        // Story 106: UniPoolerV2 takes index 4 in the SAME registration slot the Balancer pooler
         // held. Its hook is already installed (see `_deployUniPoolerV2`), so no index-4 dispatch
         // can ever hit `UniPoolerV2__HookNotSet` (yield-claim-nft:051).
         nftMinterV2.registerDispatcher(address(uniPoolerV2), v2InitialPrice, 10); // 0.1% growth
@@ -749,7 +749,7 @@ contract DeployMocks is Script {
 
         // ---- Index-6 mirror: disabled "bugged pooler" placeholder ----
         // On mainnet, dispatcher index 6 is permanently occupied by the disabled bugged
-        // BalancerPoolerV2 (registered by story-047, disabled by the story-048 cutover).
+        // Balancer pooler (registered by story-047, disabled by the story-048 cutover).
         // registerDispatcher is append-only by index, so index 6 can never be reclaimed —
         // meaning NudgeRatchet will land at index 7 on mainnet. We mirror that here by
         // registering a placeholder dispatcher at index 6 and immediately disabling it,
@@ -803,7 +803,7 @@ contract DeployMocks is Script {
         uniPoolerV2.setMinter(address(nftMinterV2));
         console.log("UniPoolerV2.setMinter -> NFTMinterV2");
 
-        // The deployer is the sole authorized pooler, as it was on BalancerPoolerV2 here.
+        // The deployer is the sole authorized pooler, as it was on the Balancer pooler here.
         uniPoolerV2.setAuthorizedPooler(deployer, true);
         console.log("UniPoolerV2.setAuthorizedPooler(deployer, true)");
 
@@ -1671,7 +1671,7 @@ contract DeployMocks is Script {
             "  - UniPoolerV2 dispatcher (index 4: sUSDS zap into the phUSD/sUSDS UniV2 pair; deployed directly, story 106)"
         );
         console.log(
-            "    No BalancerPoolerV2, no Balancer mocks, no cutover rehearsal (retired post-cutover, story 106)"
+            "    No Balancer pooler, no Balancer mocks, no cutover rehearsal (retired post-cutover, story 106)"
         );
         console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
@@ -1931,16 +1931,16 @@ contract DeployMocks is Script {
     // Story 106 (Balancexit, post-cutover): UniPoolerV2 at index 4, deployed directly
     // =====================================================================
     //
-    // Replaces the story-101 BalancerPoolerV2 -> UniPoolerV2 cutover dress rehearsal. The mainnet
+    // Replaces the story-101 Balancer pooler -> UniPoolerV2 cutover dress rehearsal. The mainnet
     // cutover executed (phStaging2 master `22c6354`, progress.unipooler-cutover.1.json), so a local
-    // chain that deploys BalancerPoolerV2 over Balancer mocks only to migrate off it again is
+    // chain that deploys the Balancer pooler over Balancer mocks only to migrate off it again is
     // rehearsing a migration that can no longer happen. The anvil chain now starts in the
     // post-cutover shape: UniPoolerV2 at index 4 on a seeded phUSD/sUSDS pair, the unchanged
     // `BalancerPoolerMintDebtHook` pointed at it, the protocol-owned LP held by UniPoolerV2.
     // The wiring mirrors DeployMocksSepolia (story 104). `UniPoolerCutoverCore` and the mainnet
     // cutover script / verify / fork test stay (historical, mainnet-relevant; story 107).
 
-    /// @dev UniPoolerV2 lives at NFTMinterV2 index 4, the slot BalancerPoolerV2 held on mainnet.
+    /// @dev UniPoolerV2 lives at NFTMinterV2 index 4, the slot the Balancer pooler held on mainnet.
     uint256 internal constant UNI_POOLER_INDEX = 4;
     /// @dev The pair seed. phUSD-heavy like the mainnet post-cutover pair (~18.1k sUSDS / ~23.1k
     ///      phUSD), sized to the 5,000 USDS / 6,000 phUSD the retired rehearsal drew from the

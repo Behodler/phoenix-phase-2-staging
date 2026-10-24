@@ -53,7 +53,7 @@ contract MockERC4626Wrapper is ERC20 {
     }
 
     /// @dev Mock-only: mint shares to an address (no underlying transfer).
-    ///      (Was called by the retired MockBalancerVault.swap; story 106 deleted that mock.)
+    ///      (Was called by the retired Balancer vault mock's swap; story 106 deleted that mock.)
     function mintShares(address to, uint256 shares) external {
         _mint(to, shares);
     }
