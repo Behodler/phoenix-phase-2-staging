@@ -28,6 +28,7 @@ contract UniPoolerPoolHarness is UniPoolerPool {
 contract UniPoolerPoolGuardsTest is Test {
     string constant PKG = "package.json";
     string constant BOOK = "server/deployments/mainnet-addresses.ts";
+    address constant LIVE_UNIPOOLER = 0x56997ea45091CBc01DB8a09E60DEDB8b3706a3D2;
 
     string constant FORGE =
         "forge script script/UniPoolerPool.s.sol:UniPoolerPool --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6";
@@ -55,7 +56,8 @@ contract UniPoolerPoolGuardsTest is Test {
 
     function test_keys_appendedInOrder_afterTheCutoverKeys() public view {
         string memory pkg = vm.readFile(PKG);
-        uint256 prev = _at(pkg, "\"unipooler-cutover:verify\":");
+        // Story 107 archived the cutover scripts and removed the unipooler-cutover:* keys; their comment key stays.
+        uint256 prev = _at(pkg, "\"//UniPoolerCutover\":");
         uint256 c = _at(pkg, "\"//UniPoolerPool\":");
         uint256 p = _at(pkg, "\"unipooler:pool:preview\":");
         uint256 b = _at(pkg, "\"unipooler:pool:broadcast\":");
@@ -122,9 +124,14 @@ contract UniPoolerPoolGuardsTest is Test {
         h.requireFloorInBand(0, 0);
     }
 
-    function test_bookReader_currentPlaceholderIsZero() public view {
-        // Until the Stage 4 patch, the script's UniPooler resolves to address(0), which _resolvePooler refuses.
-        assertEq(h.bookAddress(vm.readFile(BOOK), "UniPooler"), address(0));
+    function test_bookReader_resolvesLiveUniPooler() public view {
+        // Story 107: the Stage 4 cutover is broadcast and patched in, so UniPooler is the live index-4 dispatcher.
+        assertEq(h.bookAddress(vm.readFile(BOOK), "UniPooler"), LIVE_UNIPOOLER);
         assertTrue(h.bookAddress(vm.readFile(BOOK), "NFTMinter") != address(0), "reader finds a live key");
+    }
+
+    function test_bookReader_zeroPlaceholderReadsAsZero() public view {
+        // _resolvePooler refuses address(0); the reader must still return it for a placeholder entry.
+        assertEq(h.bookAddress("\n  UniPooler: \"0x0000000000000000000000000000000000000000\",\n", "UniPooler"), address(0));
     }
 }
