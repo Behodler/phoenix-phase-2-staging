@@ -41,12 +41,36 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
  * still never surface and only real interface keys are filled. The fill never adds a key the
  * interface lacks, so generate:ts' "Not in the interface" check is unaffected.
  *
- * 31337 is deliberately NOT listed: anvil's extraction is what DEFINES the interface
- * (generate:ts-anvil rewrites addresses.ts from local.json), so anvil behaviour is unchanged.
- * Story 106 opts it in by adding 31337 here once anvil also stops deploying the Balancer mocks.
+ * Story 106: 31337 is listed too, now that DeployMocks no longer deploys the Balancer mocks or
+ * BalancerPoolerV2. Anvil's extraction is what DEFINES the interface (generate:ts-anvil rewrites
+ * addresses.ts from local.json), so anvil cannot fill from the interface the way Sepolia does:
+ * every key would become sticky and a contract dropped from DeployMocks would silently survive as
+ * a zero entry forever. Anvil therefore fills ONLY the explicit ANVIL_ZERO_PLACEHOLDER_KEYS list
+ * below, which is what keeps those keys in the interface through the wind-down.
  * Mainnet (1) is never listed: mainnet-addresses.ts is hand-maintained and never generated.
  */
-const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111];
+const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111, 31337];
+
+/**
+ * Story 106: the ONLY keys chain 31337 emits as zero-address placeholders — the legacy Balancer
+ * keys `ContractAddresses` carries until the wind-down is confirmed. Story 107 removes them from
+ * the interface by deleting them here (and from the address files). `BalancerPoolerMintDebtHook`
+ * is NOT listed: the hook is still deployed on anvil (pointed at UniPoolerV2).
+ */
+const ANVIL_CHAIN_ID = 31337;
+const ANVIL_ZERO_PLACEHOLDER_KEYS = ['BalancerPooler', 'BalancerPool', 'BalancerVault', 'BalancerRouter'];
+
+/**
+ * The keys `chainId` completes its extraction against: anvil's fixed list, otherwise the
+ * interface keys the caller supplied (Sepolia).
+ */
+function placeholderKeysFor(chainId, interfaceKeys) {
+    if (chainId === ANVIL_CHAIN_ID) return ANVIL_ZERO_PLACEHOLDER_KEYS;
+    if (!Array.isArray(interfaceKeys) || interfaceKeys.length === 0) {
+        throw new Error(`chainId ${chainId} emits zero placeholders but no ContractAddresses keys were supplied`);
+    }
+    return interfaceKeys;
+}
 
 /**
  * NFT contract base names (V2 only). Contracts with a "V2" suffix matching these names
@@ -155,7 +179,8 @@ const RENAMED_CONTRACT_NAMES = {
  * @param {number} chainId
  * @param {object} [opts]
  * @param {string[]} [opts.interfaceKeys] - ContractAddresses keys; required when `chainId` is in
- *        ZERO_PLACEHOLDER_CHAIN_IDS (the extraction is completed against them)
+ *        ZERO_PLACEHOLDER_CHAIN_IDS (the extraction is completed against them), except on 31337,
+ *        which always uses ANVIL_ZERO_PLACEHOLDER_KEYS
  * @param {boolean} [opts.quiet] - suppress per-entry logging
  * @returns {{extracted: object, filteredCount: number, placeholders: string[]}}
  */
@@ -234,10 +259,7 @@ function buildExtraction(progressData, chainId, opts = {}) {
     // Story 104: complete the extraction against the interface (see ZERO_PLACEHOLDER_CHAIN_IDS).
     const placeholders = [];
     if (ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId)) {
-        if (!Array.isArray(opts.interfaceKeys) || opts.interfaceKeys.length === 0) {
-            throw new Error(`chainId ${chainId} emits zero placeholders but no ContractAddresses keys were supplied`);
-        }
-        for (const key of opts.interfaceKeys) {
+        for (const key of placeholderKeysFor(chainId, opts.interfaceKeys)) {
             if (Object.prototype.hasOwnProperty.call(extracted.contracts, key)) continue;
             extracted.contracts[key] = {
                 address: ZERO_ADDRESS,
@@ -274,7 +296,9 @@ function extractAddresses(chainId = 31337) {
     // Read progress file
     const progressData = JSON.parse(fs.readFileSync(progressPath, 'utf-8'));
 
-    const interfaceKeys = ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId) ? readInterfaceKeysFromFile() : undefined;
+    const interfaceKeys = ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId) && chainId !== ANVIL_CHAIN_ID
+        ? readInterfaceKeysFromFile()
+        : undefined;
     const { extracted, filteredCount, placeholders } = buildExtraction(progressData, chainId, { interfaceKeys });
 
     // Write extracted addresses
@@ -333,6 +357,7 @@ function parseArgs() {
 module.exports = {
     ZERO_ADDRESS,
     ZERO_PLACEHOLDER_CHAIN_IDS,
+    ANVIL_ZERO_PLACEHOLDER_KEYS,
     NFT_BASE_NAMES,
     RENAMED_CONTRACT_NAMES,
     buildExtraction,
