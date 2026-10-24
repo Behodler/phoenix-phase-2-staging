@@ -5,7 +5,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title  MockSkyPSM
 /// @notice Local mock of the Sky USDS↔USDC PSM (`UsdsPsmWrapper`) used by
-///         `BalancerPoolerV2`'s Sky-route batch donation on Anvil. It mirrors the
+///         the index-4 dispatcher's Sky-route batch donation on Anvil (`UniPoolerV2`
+///         since story 106; `BalancerPoolerV2` before the Balancexit cutover). It mirrors the
 ///         minimal `ISkyPSM` surface the pooler consumes: `buyGem` (USDS→USDC),
 ///         `tout`, `to18ConversionFactor`, `gem`, `usds`.
 /// @dev    Reserve-backed and fixed-rate, matching the real PSM's behaviour: there

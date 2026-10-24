@@ -70,7 +70,7 @@ contract UniswapHelperAnvilTest is Test {
         susds.deposit(10_000e18, address(this));
         susds.addYield(537e18 + 7);
 
-        // Seed the phUSD/sUSDS pair (the DeployMocks Phase 11.7 cutover does this on anvil).
+        // Seed the phUSD/sUSDS pair (DeployMocks Phase 11.7 does this on anvil, story 106).
         usds.mint(address(this), PAIR_SEED);
         uint256 shares = susds.deposit(PAIR_SEED, address(this));
         phUSD.mint(address(this), PAIR_SEED);

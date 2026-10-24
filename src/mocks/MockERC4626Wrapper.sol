@@ -8,9 +8,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * @title MockERC4626Wrapper
  * @notice Minimal ERC4626-shaped wrapper mock used to stand in for the on-chain
  *         "Wrapped Aave Ethereum USDC" (waUSDC) on dev/anvil. Exposes a
- *         configurable share-to-asset rate and only the methods
- *         BalancerPoolerV2 actually uses (`asset()` and
- *         `redeem(shares, receiver, owner)`).
+ *         configurable share-to-asset rate and only the methods the
+ *         retired V1-era BalancerPooler waUSDC donation path used (`asset()` and
+ *         `redeem(shares, receiver, owner)`). Story 106: nothing on the local
+ *         chain calls it any more (the Balancer mocks are gone and index 4 is
+ *         UniPoolerV2, whose donation routes through MockSkyPSM); it is still
+ *         deployed so the `WaUSDC` address key keeps resolving.
  * @dev    Mirrors the upstream pattern at
  *         lib/yield-claim-nft/test/mocks/MockERC4626Wrapper.sol (commit 07d4530).
  *
@@ -50,7 +53,7 @@ contract MockERC4626Wrapper is ERC20 {
     }
 
     /// @dev Mock-only: mint shares to an address (no underlying transfer).
-    ///      Called by MockBalancerVault.swap to deliver tokenOut shares.
+    ///      (Was called by the retired MockBalancerVault.swap; story 106 deleted that mock.)
     function mintShares(address to, uint256 shares) external {
         _mint(to, shares);
     }
@@ -58,8 +61,8 @@ contract MockERC4626Wrapper is ERC20 {
     /**
      * @notice Burns `shares` from `owner` and transfers `(shares * rateBps / 10000)`
      *         of the underlying asset to `receiver`. Does not enforce ERC20
-     *         allowance from `owner` -> `msg.sender` because the production caller
-     *         (BalancerPoolerV2) always invokes with `owner == address(this)`.
+     *         allowance from `owner` -> `msg.sender` because the production caller it
+     *         modelled (the V1-era BalancerPooler) always invoked with `owner == address(this)`.
      */
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
         _burn(owner, shares);
