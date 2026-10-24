@@ -5,6 +5,27 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-10-24
+
+Story-106 (Balancexit, post-cutover). The mainnet BalancerPoolerV2 -> UniPoolerV2 cutover has
+executed, so the anvil cutover rehearsal and the Balancer mocks are retired and DeployMocks no
+longer deploys `BalancerPoolerV2`. **Breaking**: one ABI export is removed. Not published.
+
+### Removed
+- `balancerPoolerV2Abi` (and every hook generated from it). The pooler is retired on mainnet;
+  index 4 is `UniPoolerV2` (`uniPoolerV2Abi`). Consumers still reading the old pooler for
+  wind-down display must pin `0.17.x` or carry the ABI themselves.
+
+### Unchanged
+- `balancerPoolerMintDebtHookAbi` stays: the hook contract is live and unchanged, only its
+  dispatcher moved to UniPoolerV2.
+- `uniPoolerV2Abi` stays.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+No key changes. `BalancerPooler`, `BalancerPool`, `BalancerVault` and `BalancerRouter` are now
+zero-address placeholders on anvil as well as Sepolia; they are removed by story 107 after the
+wind-down. `BalancerPoolerMintDebtHook` is unchanged.
+
 ## [0.17.0] - 2026-10-12
 
 Story-110 (Balancexit side-track). Adds the ABI for `UniswapHelper`, the stateless periphery

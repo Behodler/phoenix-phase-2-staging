@@ -2,7 +2,11 @@
 /**
  * Story 104 (Balancexit Stage 3): proves that a Sepolia extraction WITHOUT Balancer deployments
  * emits zero-address placeholders for the legacy Balancer keys and passes the
- * generate:ts-sepolia key-set check, and that anvil (31337) extraction is unchanged.
+ * generate:ts-sepolia key-set check. Story 106: also proves that anvil (31337), which no longer
+ * deploys the Balancer mocks either, emits zero placeholders for exactly ANVIL_ZERO_PLACEHOLDER_KEYS
+ * and nothing else. Story 107 (wind-down confirmed): the legacy Balancer keys are gone from the
+ * interface, so neither chain emits them, anvil emits no placeholders at all, and
+ * BalancerPoolerMintDebtHook stays a real interface key.
  *
  * Pure: reads the ContractAddresses interface and (optionally) a progress file; writes NOTHING.
  *
@@ -19,6 +23,7 @@ const path = require('path');
 const {
     ZERO_ADDRESS,
     ZERO_PLACEHOLDER_CHAIN_IDS,
+    ANVIL_ZERO_PLACEHOLDER_KEYS,
     NFT_BASE_NAMES,
     RENAMED_CONTRACT_NAMES,
     buildExtraction,
@@ -27,6 +32,7 @@ const { readInterfaceKeysFromFile, diffKeySet } = require('../server/contract-ad
 
 const SEPOLIA = 11155111;
 const ANVIL = 31337;
+// Removed from ContractAddresses by story 107; must never be emitted again.
 const LEGACY_BALANCER_KEYS = ['BalancerPooler', 'BalancerPool', 'BalancerVault', 'BalancerRouter'];
 // Index-4 keys DeployMocksSepolia must now deploy for real (never placeholders).
 const UNIPOOLER_KEYS = ['UniPooler', 'PhusdSusdsPair', 'UniswapV2Router'];
@@ -86,8 +92,7 @@ function checkSepolia(label, progress, { expectUniPoolerDeployed }) {
     const names = Object.keys(extracted.contracts);
 
     for (const key of LEGACY_BALANCER_KEYS) {
-        const c = extracted.contracts[key];
-        check(c && c.address === ZERO_ADDRESS && c.deployed === false, `${key} is a zero-address placeholder`);
+        check(!(key in extracted.contracts), `${key} is not emitted (removed by story 107)`);
     }
     const { missing, extra } = diffKeySet(names, interfaceKeys);
     check(missing.length === 0, `no interface key missing (generate:ts-sepolia key-set check)${missing.length ? ': ' + missing.join(', ') : ''}`);
@@ -107,15 +112,36 @@ function checkSepolia(label, progress, { expectUniPoolerDeployed }) {
 // ---- 1. Synthetic Sepolia fixture ----
 checkSepolia('synthetic', syntheticSepoliaProgress(), { expectUniPoolerDeployed: true });
 
-// ---- 2. Anvil is unchanged: no placeholder fill, missing keys stay missing ----
-console.log(`\n[synthetic] Anvil (${ANVIL}) extraction is unchanged`);
-check(!ZERO_PLACEHOLDER_CHAIN_IDS.includes(ANVIL), '31337 is not a zero-placeholder chain');
+// ---- 1b. The interface (story 107): legacy Balancer keys gone, the mint-debt hook kept ----
+console.log('\n[interface] ContractAddresses');
+for (const key of LEGACY_BALANCER_KEYS) {
+    check(!interfaceKeys.includes(key), `${key} is not an interface key (removed by story 107)`);
+}
+check(interfaceKeys.includes('BalancerPoolerMintDebtHook'), 'BalancerPoolerMintDebtHook is still an interface key');
+check(!NFT_BASE_NAMES.includes('BalancerPooler'), 'BalancerPooler is not an NFT base name (story 107)');
+
+// ---- 2. Anvil (story 106/107): no placeholders at all now that the Balancer keys are gone ----
+console.log(`\n[synthetic] Anvil (${ANVIL}) extraction`);
+check(ZERO_PLACEHOLDER_CHAIN_IDS.includes(ANVIL), '31337 is a zero-placeholder chain (story 106)');
 check(!ZERO_PLACEHOLDER_CHAIN_IDS.includes(1), 'mainnet (1) is not a zero-placeholder chain');
+check(ANVIL_ZERO_PLACEHOLDER_KEYS.length === 0, 'anvil placeholder list is empty (story 107)');
 {
     const anvilProgress = { ...syntheticSepoliaProgress(), chainId: ANVIL, networkName: 'anvil' };
+    // Drop two non-Balancer keys too: anvil must NOT resurrect them (anvil defines the interface).
+    delete anvilProgress.contracts.UniswapHelper;
+    const droppedKey = 'WaUSDC';
+    delete anvilProgress.contracts[trackedNameFor(droppedKey)];
     const { extracted, placeholders } = buildExtraction(anvilProgress, ANVIL, { quiet: true });
-    check(placeholders.length === 0, 'no placeholders on anvil');
-    check(LEGACY_BALANCER_KEYS.every((k) => !(k in extracted.contracts)), 'undeployed keys are absent on anvil, as before');
+    check(placeholders.length === 0, `anvil emits no placeholders (got: ${placeholders.join(', ') || 'none'})`);
+    for (const key of LEGACY_BALANCER_KEYS) {
+        check(!(key in extracted.contracts), `anvil ${key} is not emitted`);
+    }
+    check(
+        extracted.contracts.BalancerPoolerMintDebtHook && extracted.contracts.BalancerPoolerMintDebtHook.address !== ZERO_ADDRESS,
+        'anvil BalancerPoolerMintDebtHook is a real deployment'
+    );
+    check(!(droppedKey in extracted.contracts), `an undeployed non-Balancer key (${droppedKey}) is NOT filled on anvil`);
+    check(!('UniswapHelper' in extracted.contracts), 'an undeployed UniswapHelper is NOT filled on anvil');
 }
 
 // ---- 3. Optional: a real progress file ----

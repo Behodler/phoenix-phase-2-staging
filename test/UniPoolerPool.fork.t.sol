@@ -5,8 +5,6 @@ import {Test} from "@forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UniPoolerV2} from "@yield-claim-nft/dispatchers/UniPoolerV2.sol";
 import {UniPoolerPool} from "../script/UniPoolerPool.s.sol";
-import {UniPoolerCutoverCore} from "../script/helpers/UniPoolerCutoverCore.sol";
-import {UniPoolerCutoverHarness, IForkVaultTokens, IForkOldPooler} from "./UniPoolerCutoverMainnet.fork.t.sol";
 
 /// @dev The pool script with its I/O seams pinned: the address book (a post-cutover `UniPooler` entry), the inputs
 ///      and the mode are injected, never read from the process-wide env or the real mainnet-addresses.ts.
@@ -37,23 +35,23 @@ contract UniPoolerPoolHarnessFork is UniPoolerPool {
 }
 
 /**
- * @title UniPoolerPoolForkTest  (story 105)
- * @notice Mainnet fork (skipped without RPC_MAINNET): run the story-103 cutover, then the story-105 `pool()` script
- *         against the resulting UniPooler with `quotePool`-derived floors (the quote helper's computation, in-test).
- *         The pooler's rescued sUSDS is zapped into the pair and the LP stays on the pooler; a floor above the live
- *         quote, a floor too far below it, and the zero placeholder are each refused before anything is sent.
+ * @title UniPoolerPoolForkTest  (story 105; repointed by story 107)
+ * @notice Mainnet fork (skipped without RPC_MAINNET) at a block AFTER the Stage 4 cutover: the story-105 `pool()`
+ *         script runs against the LIVE index-4 UniPooler with `quotePool`-derived floors (the quote helper's
+ *         computation, in-test). Story 107 archived the cutover script and retired its fork harness, so the pooler's
+ *         sUSDS is topped up with `deal` instead of being produced by an in-fork cutover. The sUSDS is zapped into the
+ *         pair and the LP stays on the pooler; a floor above the live quote, a floor too far below it, and the zero
+ *         placeholder are each refused before anything is sent.
  */
 contract UniPoolerPoolForkTest is Test {
-    uint256 constant FORK_BLOCK = 26_215_000;
-    string constant PROGRESS = "server/deployments/progress.unipooler-cutover.1.forktest-unipooler-pool.json";
+    /// @dev The block the human's wind-down check read (story 107 gate); the cutover landed at 26_254_520.
+    uint256 constant FORK_BLOCK = 26_260_804;
     uint256 constant TOL_BPS = 50; // quote-unipooler-pool.js default
+    uint256 constant SUSDS_TOP_UP = 500 ether;
 
-    address constant OWNER = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
-    address constant OLD_POOLER = 0x7f6874332c4629429d70D15f685A8230323F11F1;
-    address constant VAULT = 0xbA1333333333a1BA1108E8412f11850A5C319bA9;
-    address constant BPT = 0x642BB6860b4776CC10b26B8f361Fd139E7f0db04;
+    address constant LIVE_UNIPOOLER = 0x56997ea45091CBc01DB8a09E60DEDB8b3706a3D2;
+    address constant RETIRED_POOLER = 0x7f6874332c4629429d70D15f685A8230323F11F1;
     address constant SUSDS = 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD;
-    address constant MULTI_POOLER = 0xd1E5774159381915f5579dFd68507E2614f67b51;
 
     UniPoolerPoolHarnessFork pool;
     UniPoolerV2 np;
@@ -66,42 +64,10 @@ contract UniPoolerPoolForkTest is Test {
             return;
         }
         vm.createSelectFork(rpc, FORK_BLOCK);
-        _revokeIfNeeded();
-
-        if (vm.exists(PROGRESS)) vm.removeFile(PROGRESS);
-        UniPoolerCutoverHarness cut = new UniPoolerCutoverHarness(false, PROGRESS);
-        (uint256 minS, uint256 minPh) = _exitFloors();
-        cut.setInputs(UniPoolerCutoverCore.ExitMode.PROPORTIONAL, minS, minPh);
-        cut.run();
-        if (vm.exists(PROGRESS)) vm.removeFile(PROGRESS);
-        np = UniPoolerV2(cut.result().newPooler);
+        np = UniPoolerV2(LIVE_UNIPOOLER);
+        deal(SUSDS, address(np), IERC20(SUSDS).balanceOf(address(np)) + SUSDS_TOP_UP);
         book = string.concat("\n  UniPooler: \"", vm.toString(address(np)), "\",\n");
         pool = new UniPoolerPoolHarnessFork();
-    }
-
-    function _revokeIfNeeded() internal {
-        IForkOldPooler old = IForkOldPooler(OLD_POOLER);
-        address[4] memory ps = [
-            OWNER, MULTI_POOLER, 0x186c77B80Bbfd21b01C7D7FA44bA27031322a77F, 0x630966B668b321Cc6441754f96519a55F72Cd476
-        ];
-        for (uint256 i; i < 4; i++) {
-            if (old.poolerAuthVersion(ps[i]) == old.authVersion()) {
-                vm.prank(OWNER);
-                old.incrementAuthVersion();
-                return;
-            }
-        }
-    }
-
-    function _exitFloors() internal view returns (uint256 minS, uint256 minP) {
-        uint256 bal = IERC20(BPT).balanceOf(OLD_POOLER);
-        (address[] memory tokens,, uint256[] memory raw,) = IForkVaultTokens(VAULT).getPoolTokenInfo(BPT);
-        uint256 supply = IERC20(BPT).totalSupply();
-        for (uint256 i; i < 2; i++) {
-            uint256 f = ((raw[i] * bal) / supply) * (10_000 - 10) / 10_000;
-            if (tokens[i] == SUSDS) minS = f;
-            else minP = f;
-        }
     }
 
     /// @dev scripts/quote-unipooler-pool.js, in-test.
@@ -113,7 +79,7 @@ contract UniPoolerPoolForkTest is Test {
 
     function test_fork_pool_zapsAccumulatedSUSDS_lpStaysOnPooler() public {
         uint256 bal = IERC20(SUSDS).balanceOf(address(np));
-        assertGt(bal, 0, "cutover left sUSDS on the new pooler");
+        assertGt(bal, 0, "pooler holds sUSDS to zap");
         uint256 lpBefore = IERC20(np.pair()).balanceOf(address(np));
         (uint256 minP, uint256 minL) = _quote(bal);
         pool.set(book, bal, minP, minL);
@@ -165,7 +131,7 @@ contract UniPoolerPoolForkTest is Test {
     }
 
     function test_fork_revert_bookNotLiveDispatcher() public {
-        pool.set(string.concat("\n  UniPooler: \"", vm.toString(OLD_POOLER), "\",\n"), 1, 1, 1);
+        pool.set(string.concat("\n  UniPooler: \"", vm.toString(RETIRED_POOLER), "\",\n"), 1, 1, 1);
         vm.expectRevert(bytes("preflight: mainnet-addresses.ts UniPooler is not NFTMinter configs(4).dispatcher"));
         pool.run();
     }

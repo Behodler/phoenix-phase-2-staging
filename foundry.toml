@@ -19,12 +19,10 @@ fs_permissions = [
     # finding L-02 from Low to Medium, and a green verifier run proves nothing without it
     # pinned. Read access only; nothing writes under ./script.
     { access = "read", path = "./script" },
-    # Story 103: READ-ONLY. test/VerifyUniPoolerCutoverGuards.t.sol pins the unipooler-cutover:* npm keys
-    # (order, the backup-mainnet-addresses head, the patcher/verify/preview tail) and the presence of the
-    # cutover's off-chain helpers. Nothing writes to any of these paths.
+    # Story 103 (narrowed by story 107): READ-ONLY. test/UniPoolerPoolGuards.t.sol pins the npm keys in
+    # package.json. Story 107 retired test/VerifyUniPoolerCutoverGuards.t.sol (the cutover scripts are
+    # archived), so its read access to the cutover's off-chain helpers was dropped. Nothing writes here.
     { access = "read", path = "./package.json" },
-    { access = "read", path = "./scripts/patch-mainnet-addresses-unipooler-cutover.js" },
-    { access = "read", path = "./scripts/quote-balancer-exit-min-amounts.js" },
     # Story 105: READ-ONLY. test/UniPoolerPoolGuards.t.sol checks the zap-quote helper is present.
     { access = "read", path = "./scripts/quote-unipooler-pool.js" },
 ]

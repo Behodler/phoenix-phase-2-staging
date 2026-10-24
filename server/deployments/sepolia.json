@@ -2,7 +2,7 @@
   "chainId": 11155111,
   "networkName": "sepolia",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-10-20T14:32:11.830Z",
+  "extractedAt": "2026-10-24T07:38:08.630Z",
   "contracts": {
     "PhUSD": {
       "address": "0x044B41A11Ecd2F86bd229146A2b9f0205a8a0Ec3",
@@ -400,34 +400,6 @@
       "address": "0xCA7a62943Fc95f47fde1c35A5FecD37a7483a93B",
       "deployed": true,
       "configured": true,
-      "deployGas": 0,
-      "configGas": 0
-    },
-    "BalancerPool": {
-      "address": "0x0000000000000000000000000000000000000000",
-      "deployed": false,
-      "configured": false,
-      "deployGas": 0,
-      "configGas": 0
-    },
-    "BalancerVault": {
-      "address": "0x0000000000000000000000000000000000000000",
-      "deployed": false,
-      "configured": false,
-      "deployGas": 0,
-      "configGas": 0
-    },
-    "BalancerRouter": {
-      "address": "0x0000000000000000000000000000000000000000",
-      "deployed": false,
-      "configured": false,
-      "deployGas": 0,
-      "configGas": 0
-    },
-    "BalancerPooler": {
-      "address": "0x0000000000000000000000000000000000000000",
-      "deployed": false,
-      "configured": false,
       "deployGas": 0,
       "configGas": 0
     }

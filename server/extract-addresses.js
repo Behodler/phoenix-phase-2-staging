@@ -31,22 +31,47 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
  * deploy is emitted as a zero-address placeholder (`deployed: false`), the same convention the
  * hand-maintained mainnet-addresses.ts uses for undeployed keys.
  *
- * Why: DeployMocksSepolia no longer deploys the Balancer mocks, but the interface keeps
- * `BalancerPooler`, `BalancerPool`, `BalancerVault` and `BalancerRouter` until the wind-down is
- * complete, and generate:ts-sepolia refuses any key-set mismatch. A zero entry in the progress
- * file cannot carry this: the loop below skips zero addresses, because the deploy scripts use them
+ * Why: generate:ts-sepolia refuses any key-set mismatch, and Sepolia does not deploy every
+ * interface key (e.g. `UniswapHelper` outside its add-on). Story 104 introduced this for the
+ * legacy Balancer keys, which story 107 has since removed from the interface. A zero entry in
+ * the progress file cannot carry this: the loop below skips zero addresses, because the deploy scripts use them
  * as checkpoint markers ("Seeding", "UsdcSeeding", ...).
  *
  * The placeholders are added AFTER that skip, from the interface itself, so checkpoint markers
  * still never surface and only real interface keys are filled. The fill never adds a key the
  * interface lacks, so generate:ts' "Not in the interface" check is unaffected.
  *
- * 31337 is deliberately NOT listed: anvil's extraction is what DEFINES the interface
- * (generate:ts-anvil rewrites addresses.ts from local.json), so anvil behaviour is unchanged.
- * Story 106 opts it in by adding 31337 here once anvil also stops deploying the Balancer mocks.
+ * Story 106: 31337 is listed too. Anvil's extraction is what DEFINES the interface (generate:ts-anvil rewrites
+ * addresses.ts from local.json), so anvil cannot fill from the interface the way Sepolia does:
+ * every key would become sticky and a contract dropped from DeployMocks would silently survive as
+ * a zero entry forever. Anvil therefore fills ONLY the explicit ANVIL_ZERO_PLACEHOLDER_KEYS list
+ * below, which is what keeps those keys in the interface through the wind-down.
  * Mainnet (1) is never listed: mainnet-addresses.ts is hand-maintained and never generated.
  */
-const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111];
+const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111, 31337];
+
+/**
+ * The ONLY keys chain 31337 emits as zero-address placeholders. Story 106 listed the legacy
+ * Balancer keys here (`BalancerPooler`, `BalancerPool`, `BalancerVault`, `BalancerRouter`) to keep
+ * them in `ContractAddresses` through the wind-down; story 107 (wind-down confirmed) emptied the
+ * list, so anvil no longer emits them and the next generate:ts-anvil drops them from the interface.
+ * `BalancerPoolerMintDebtHook` was never listed: the hook is still deployed on anvil (pointed at
+ * UniPoolerV2). Add a key here only to keep a no-longer-deployed key in the interface on purpose.
+ */
+const ANVIL_CHAIN_ID = 31337;
+const ANVIL_ZERO_PLACEHOLDER_KEYS = Object.freeze([]);
+
+/**
+ * The keys `chainId` completes its extraction against: anvil's fixed list, otherwise the
+ * interface keys the caller supplied (Sepolia).
+ */
+function placeholderKeysFor(chainId, interfaceKeys) {
+    if (chainId === ANVIL_CHAIN_ID) return ANVIL_ZERO_PLACEHOLDER_KEYS;
+    if (!Array.isArray(interfaceKeys) || interfaceKeys.length === 0) {
+        throw new Error(`chainId ${chainId} emits zero placeholders but no ContractAddresses keys were supplied`);
+    }
+    return interfaceKeys;
+}
 
 /**
  * NFT contract base names (V2 only). Contracts with a "V2" suffix matching these names
@@ -55,16 +80,17 @@ const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111];
  *
  * Story 102 (Balancexit Stage 1c): "UniPooler" is added so the tracked "UniPoolerV2"
  * (DeployMocks' cutover rehearsal) surfaces as the key `UniPooler`, the live index-4
- * dispatcher. "BalancerPooler" stays: it names the retired pooler during the wind-down.
+ * dispatcher. Story 107: "BalancerPooler" removed — the wind-down is confirmed and the key is
+ * gone from ContractAddresses; nothing deploys a BalancerPoolerV2 any more.
  */
-const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "BalancerPooler", "UniPooler", "GatherWBTC"];
+const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "UniPooler", "GatherWBTC"];
 
 /**
  * Contracts to drop from extraction entirely (V1 NFTs are handled via NFT_BASE_NAMES;
  * NFTMigrator is explicitly dropped here as a belt-and-suspenders guard).
  *
- * BuggedPoolerV2Index6 is a deploy-only placeholder: a disabled BalancerPoolerV2
- * registered at dispatcher index 6 purely to mirror mainnet's index layout (so the
+ * BuggedPoolerV2Index6 is a deploy-only placeholder: a disabled pooler (an unwired
+ * UniPoolerV2 since story 106; the retired Balancer pooler before it) registered at dispatcher index 6 purely to mirror mainnet's index layout (so the
  * local NudgeRatchet lands at index 7). It is never enabled and never minted, so it
  * must not be surfaced as a consumable address in the ContractAddresses interface.
  */
@@ -155,7 +181,8 @@ const RENAMED_CONTRACT_NAMES = {
  * @param {number} chainId
  * @param {object} [opts]
  * @param {string[]} [opts.interfaceKeys] - ContractAddresses keys; required when `chainId` is in
- *        ZERO_PLACEHOLDER_CHAIN_IDS (the extraction is completed against them)
+ *        ZERO_PLACEHOLDER_CHAIN_IDS (the extraction is completed against them), except on 31337,
+ *        which always uses ANVIL_ZERO_PLACEHOLDER_KEYS
  * @param {boolean} [opts.quiet] - suppress per-entry logging
  * @returns {{extracted: object, filteredCount: number, placeholders: string[]}}
  */
@@ -234,10 +261,7 @@ function buildExtraction(progressData, chainId, opts = {}) {
     // Story 104: complete the extraction against the interface (see ZERO_PLACEHOLDER_CHAIN_IDS).
     const placeholders = [];
     if (ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId)) {
-        if (!Array.isArray(opts.interfaceKeys) || opts.interfaceKeys.length === 0) {
-            throw new Error(`chainId ${chainId} emits zero placeholders but no ContractAddresses keys were supplied`);
-        }
-        for (const key of opts.interfaceKeys) {
+        for (const key of placeholderKeysFor(chainId, opts.interfaceKeys)) {
             if (Object.prototype.hasOwnProperty.call(extracted.contracts, key)) continue;
             extracted.contracts[key] = {
                 address: ZERO_ADDRESS,
@@ -274,7 +298,9 @@ function extractAddresses(chainId = 31337) {
     // Read progress file
     const progressData = JSON.parse(fs.readFileSync(progressPath, 'utf-8'));
 
-    const interfaceKeys = ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId) ? readInterfaceKeysFromFile() : undefined;
+    const interfaceKeys = ZERO_PLACEHOLDER_CHAIN_IDS.includes(chainId) && chainId !== ANVIL_CHAIN_ID
+        ? readInterfaceKeysFromFile()
+        : undefined;
     const { extracted, filteredCount, placeholders } = buildExtraction(progressData, chainId, { interfaceKeys });
 
     // Write extracted addresses
@@ -333,6 +359,7 @@ function parseArgs() {
 module.exports = {
     ZERO_ADDRESS,
     ZERO_PLACEHOLDER_CHAIN_IDS,
+    ANVIL_ZERO_PLACEHOLDER_KEYS,
     NFT_BASE_NAMES,
     RENAMED_CONTRACT_NAMES,
     buildExtraction,

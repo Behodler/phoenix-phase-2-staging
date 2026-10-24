@@ -106,8 +106,8 @@ contract MintPageViewTest is Test {
         dispatcherRatchet = new MockDispatcher(address(usdc));
 
         // Register dispatchers in order: index 1=EYE, 2=SCX, 3=Flax, 4=USDS, 5=WBTC. Index 4 is
-        // UniPoolerV2 after the Balancexit cutover (story 101 rehearses it on anvil; BalancerPoolerV2
-        // before it); either way it is USDS-primed. See testGetData_Index4SurvivesDispatcherReplacement.
+        // UniPoolerV2 after the Balancexit cutover (executed on mainnet; anvil deploys it directly
+        // since story 106; the Balancer pooler before it); either way it is USDS-primed. See testGetData_Index4SurvivesDispatcherReplacement.
         nftMinter.registerDispatcher(address(dispatcherEYE), 1 ether, 100); // 1%
         nftMinter.registerDispatcher(address(dispatcherSCX), 2 ether, 200); // 2%
         nftMinter.registerDispatcher(address(dispatcherFlax), 0.5 ether, 50); // 0.5%
@@ -319,7 +319,7 @@ contract MintPageViewTest is Test {
         assertEq(data[23], 4, "USDS dispatcher index must be 4 (UniPoolerV2 post-cutover)");
     }
 
-    /// @dev Story 101: the Balancexit cutover swaps index 4 from BalancerPoolerV2 to UniPoolerV2
+    /// @dev Story 101: the Balancexit cutover swaps index 4 from the Balancer pooler to UniPoolerV2
     ///      via `NFTMinterV2.replaceDispatcher(4, new)`, keeping price and growth. The USDS slot
     ///      (fields 18-23) must follow the NEW dispatcher at the same index: same index, same
     ///      curve, mint token read live from the new dispatcher's `primeToken()` (USDS).

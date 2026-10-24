@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Check phUSD ERC20 balances on Balancer V3, Uniswap V4 and the phUSD/sUSDS Uniswap V2 pair on mainnet
+# Check phUSD ERC20 balances on Uniswap V4 and the phUSD/sUSDS Uniswap V2 pair on mainnet
+# (Story 107: the Balancer V3 Vault line was removed after the Balancer wind-down was confirmed.)
 
 PHUSD="0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605"
-BALANCER_V3_VAULT="0xbA1333333333a1BA1108E8412f11850A5C319bA9"
 UNISWAP_V4_POOL_MANAGER="0x000000000004444c5dc75cB358380D2e3dE08A90"
 ZERO_ADDRESS="0x0000000000000000000000000000000000000000"
 
@@ -31,13 +31,10 @@ fi
 echo "Querying phUSD balances on mainnet AMMs..."
 echo ""
 
-balancer_raw=$(cast call "$PHUSD" "balanceOf(address)(uint256)" "$BALANCER_V3_VAULT" --rpc-url "$RPC_MAINNET" | awk '{print $1}')
 uniswap_raw=$(cast call "$PHUSD" "balanceOf(address)(uint256)" "$UNISWAP_V4_POOL_MANAGER" --rpc-url "$RPC_MAINNET" | awk '{print $1}')
 
-balancer_formatted=$(cast from-wei "$balancer_raw")
 uniswap_formatted=$(cast from-wei "$uniswap_raw")
 
-echo "Balancer V3 Vault:          $balancer_formatted phUSD"
 echo "Uniswap V4 PoolManager:     $uniswap_formatted phUSD"
 
 v2_pair_raw=0
@@ -51,6 +48,6 @@ fi
 
 echo ""
 echo "---"
-total_raw=$(echo "$balancer_raw + $uniswap_raw + $v2_pair_raw" | bc)
+total_raw=$(echo "$uniswap_raw + $v2_pair_raw" | bc)
 total_formatted=$(cast from-wei "$total_raw")
 echo "Total phUSD across AMMs:    $total_formatted phUSD"

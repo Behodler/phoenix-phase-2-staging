@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-10-17T23:57:33.318Z
+// Generated interface from local.json on 2026-10-24T07:45:09.919Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -27,16 +27,15 @@ export interface ContractAddresses {
   PhusdStableMinter: string;
   PhlimboV3: string;
   StableYieldAccumulator: string;
-  BalancerPool: string;
-  BalancerVault: string;
   BurnRecorder: string;
-  BalancerRouter: string;
   NFTMinter: string;
   UniswapV2Router: string;
   UniboostEYE: string;
   UniboostSCX: string;
   UniboostFLX: string;
-  BalancerPooler: string;
+  PhusdSusdsPair: string;
+  UniPooler: string;
+  BalancerPoolerMintDebtHook: string;
   GatherWBTC: string;
   MultiPooler: string;
   UniboostHookEYE: string;
@@ -44,7 +43,6 @@ export interface ContractAddresses {
   UniboostHookFLX: string;
   WaUSDC: string;
   SkyPSM: string;
-  BalancerPoolerMintDebtHook: string;
   NFTStaker: string;
   NudgeStreamer: string;
   BatchNFTMinter: string;
@@ -61,7 +59,5 @@ export interface ContractAddresses {
   Antimatter: string;
   StableStakerV2: string;
   ViewRouter: string;
-  UniPooler: string;
-  PhusdSusdsPair: string;
   UniswapHelper: string;
 }
