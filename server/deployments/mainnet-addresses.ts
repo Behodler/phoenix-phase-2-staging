@@ -33,6 +33,11 @@
 // Story 092: YieldStrategyDola -> the sDOLA strategy; YieldStrategyDolaLegacy -> retired 0x1760 autoDOLA strategy.
 // Updated 2026-10-23: UniPoolerV2 index-4 cutover (story 103) — UniPooler + PhusdSusdsPair FILLED from progress.unipooler-cutover.1.json.
 // Updated 2026-10-23: UniswapHelper deployed (story 111) — UniswapHelper FILLED from progress.uniswap-helper.1.json.
+// Updated 2026-10-24: Balancer wind-down confirmed (story 107) — BalancerPooler, BalancerPool, BalancerVault and
+// BalancerRouter REMOVED from ContractAddresses and from this file. BalancerPoolerMintDebtHook stays (live hook).
+// Last values: BalancerPool 0x642BB6860b4776CC10b26B8f361Fd139E7f0db04, BalancerVault
+// 0xbA1333333333a1BA1108E8412f11850A5C319bA9, BalancerRouter 0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd,
+// BalancerPooler (retired BalancerPoolerV2, drained and paused) 0x7f6874332c4629429d70D15f685A8230323F11F1.
 import { ContractAddresses } from './addresses';
 
 
@@ -98,11 +103,6 @@ export const mainnetAddresses: ContractAddresses = {
   SUSDe: "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497",
   SUSDS: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD",
 
-  // Balancer V3 infrastructure
-  BalancerPool: "0x642BB6860b4776CC10b26B8f361Fd139E7f0db04",
-  BalancerVault: "0xbA1333333333a1BA1108E8412f11850A5C319bA9",
-  BalancerRouter: "0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd",
-
   // NFT infrastructure — common
   BurnRecorder: "0x2A2c4186C906d3b347c86882ad4Bd1f2bE05579F",
 
@@ -141,14 +141,10 @@ export const mainnetAddresses: ContractAddresses = {
   EyeBatchNFTMinter: "0xbbe6c8d4b31e1507376b7c34b4a82c48158f2811",
   ScxBatchNFTMinter: "0x2a1a8fd7ba06a6d1b91385a3c56d2f2cd261e4d4",
   FlxBatchNFTMinter: "0x4695fd1067fb402dcd4551d5c87b84021bed0629",
-  // Story 056 (2026-06-04): index-4 dispatcher cut over to the Sky-PSM BalancerPoolerV2.
-  // Verified on-chain 2026-06-11: NFTMinter.configs(4).dispatcher == this address; it holds
-  // the pending sUSDS leg (418.63 sUSDS). The prior pooler 0x26f8…b38a is retired (0 balance).
-  BalancerPooler: "0x7f6874332c4629429d70D15f685A8230323F11F1",
   // Story 103 (Balancexit Stage 2): the UniPoolerV2 index-4 cutover. `UniPooler` is the live
   // index-4 dispatcher and `PhusdSusdsPair` the phUSD/sUSDS UniV2 pair it zaps into, both
   // patched from progress.unipooler-cutover.1.json by patch-mainnet-addresses-unipooler-cutover.js.
-  // `BalancerPooler` above keeps naming the retired pooler through the wind-down.
+  // The retired Balancer pooler's `BalancerPooler` key was removed by story 107 (see header).
   // `UniswapV2Router` is the canonical live UniswapV2 Router02.
   UniPooler: "0x56997ea45091CBc01DB8a09E60DEDB8b3706a3D2",
   PhusdSusdsPair: "0x0b96b8ab66d40ba3C7501aa8C28Cdc37688F6F7f",

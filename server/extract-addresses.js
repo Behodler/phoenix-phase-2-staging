@@ -31,18 +31,17 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
  * deploy is emitted as a zero-address placeholder (`deployed: false`), the same convention the
  * hand-maintained mainnet-addresses.ts uses for undeployed keys.
  *
- * Why: DeployMocksSepolia no longer deploys the Balancer mocks, but the interface keeps
- * `BalancerPooler`, `BalancerPool`, `BalancerVault` and `BalancerRouter` until the wind-down is
- * complete, and generate:ts-sepolia refuses any key-set mismatch. A zero entry in the progress
- * file cannot carry this: the loop below skips zero addresses, because the deploy scripts use them
+ * Why: generate:ts-sepolia refuses any key-set mismatch, and Sepolia does not deploy every
+ * interface key (e.g. `UniswapHelper` outside its add-on). Story 104 introduced this for the
+ * legacy Balancer keys, which story 107 has since removed from the interface. A zero entry in
+ * the progress file cannot carry this: the loop below skips zero addresses, because the deploy scripts use them
  * as checkpoint markers ("Seeding", "UsdcSeeding", ...).
  *
  * The placeholders are added AFTER that skip, from the interface itself, so checkpoint markers
  * still never surface and only real interface keys are filled. The fill never adds a key the
  * interface lacks, so generate:ts' "Not in the interface" check is unaffected.
  *
- * Story 106: 31337 is listed too, now that DeployMocks no longer deploys the Balancer mocks or
- * BalancerPoolerV2. Anvil's extraction is what DEFINES the interface (generate:ts-anvil rewrites
+ * Story 106: 31337 is listed too. Anvil's extraction is what DEFINES the interface (generate:ts-anvil rewrites
  * addresses.ts from local.json), so anvil cannot fill from the interface the way Sepolia does:
  * every key would become sticky and a contract dropped from DeployMocks would silently survive as
  * a zero entry forever. Anvil therefore fills ONLY the explicit ANVIL_ZERO_PLACEHOLDER_KEYS list
@@ -52,13 +51,15 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111, 31337];
 
 /**
- * Story 106: the ONLY keys chain 31337 emits as zero-address placeholders — the legacy Balancer
- * keys `ContractAddresses` carries until the wind-down is confirmed. Story 107 removes them from
- * the interface by deleting them here (and from the address files). `BalancerPoolerMintDebtHook`
- * is NOT listed: the hook is still deployed on anvil (pointed at UniPoolerV2).
+ * The ONLY keys chain 31337 emits as zero-address placeholders. Story 106 listed the legacy
+ * Balancer keys here (`BalancerPooler`, `BalancerPool`, `BalancerVault`, `BalancerRouter`) to keep
+ * them in `ContractAddresses` through the wind-down; story 107 (wind-down confirmed) emptied the
+ * list, so anvil no longer emits them and the next generate:ts-anvil drops them from the interface.
+ * `BalancerPoolerMintDebtHook` was never listed: the hook is still deployed on anvil (pointed at
+ * UniPoolerV2). Add a key here only to keep a no-longer-deployed key in the interface on purpose.
  */
 const ANVIL_CHAIN_ID = 31337;
-const ANVIL_ZERO_PLACEHOLDER_KEYS = ['BalancerPooler', 'BalancerPool', 'BalancerVault', 'BalancerRouter'];
+const ANVIL_ZERO_PLACEHOLDER_KEYS = Object.freeze([]);
 
 /**
  * The keys `chainId` completes its extraction against: anvil's fixed list, otherwise the
@@ -79,16 +80,17 @@ function placeholderKeysFor(chainId, interfaceKeys) {
  *
  * Story 102 (Balancexit Stage 1c): "UniPooler" is added so the tracked "UniPoolerV2"
  * (DeployMocks' cutover rehearsal) surfaces as the key `UniPooler`, the live index-4
- * dispatcher. "BalancerPooler" stays: it names the retired pooler during the wind-down.
+ * dispatcher. Story 107: "BalancerPooler" removed — the wind-down is confirmed and the key is
+ * gone from ContractAddresses; nothing deploys a BalancerPoolerV2 any more.
  */
-const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "BalancerPooler", "UniPooler", "GatherWBTC"];
+const NFT_BASE_NAMES = ["NFTMinter", "BurnerEYE", "BurnerSCX", "BurnerFlax", "UniPooler", "GatherWBTC"];
 
 /**
  * Contracts to drop from extraction entirely (V1 NFTs are handled via NFT_BASE_NAMES;
  * NFTMigrator is explicitly dropped here as a belt-and-suspenders guard).
  *
- * BuggedPoolerV2Index6 is a deploy-only placeholder: a disabled BalancerPoolerV2
- * registered at dispatcher index 6 purely to mirror mainnet's index layout (so the
+ * BuggedPoolerV2Index6 is a deploy-only placeholder: a disabled pooler (an unwired
+ * UniPoolerV2 since story 106; the retired Balancer pooler before it) registered at dispatcher index 6 purely to mirror mainnet's index layout (so the
  * local NudgeRatchet lands at index 7). It is never enabled and never minted, so it
  * must not be surfaced as a consumable address in the ContractAddresses interface.
  */

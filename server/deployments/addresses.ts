@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-10-24T05:31:56.242Z
+// Generated interface from local.json on 2026-10-24T07:45:09.919Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -60,8 +60,4 @@ export interface ContractAddresses {
   StableStakerV2: string;
   ViewRouter: string;
   UniswapHelper: string;
-  BalancerPooler: string;
-  BalancerPool: string;
-  BalancerVault: string;
-  BalancerRouter: string;
 }
