@@ -963,3 +963,30 @@ When working with this repo:
 ### package.json Script Ordering
 
 When adding a new entry to the `scripts` block in `package.json`, **append it at the end of the list** rather than inserting it alphabetically or grouping it with related scripts. This makes the most recently added scripts visible at a glance and preserves a rough chronological history of script additions. Do not reorder existing scripts when adding a new one.
+
+### Tax Ledger: Every Mainnet Broadcast Key Records Its Transactions (REQUIRED)
+
+Every transaction this repo sends to **mainnet** must be recorded, with its Rand (ZAR) value at the
+time, in the append-only tax ledger at `ledger/transactions.csv` (columns documented in
+`ledger/README.md`). This applies to every new or modified npm key that broadcasts to mainnet. It is
+additive: existing keys are not retrofitted, and Sepolia/anvil keys need nothing.
+
+- **Final step**: end the broadcasting key with `&& node scripts/ledger-record.js <Script.s.sol> 1`,
+  where `<Script.s.sol>` is the forge script file whose `broadcast/<Script.s.sol>/1/run-latest.json`
+  holds the receipts. Place it after any post-broadcast patch/verify steps (the recorder never exits
+  non-zero, so it cannot abort them, but keep it last so it records the confirmed run). A key that
+  broadcasts several forge scripts records each one.
+- **What is captured automatically**: tx hash, block timestamp, SA tax year, gas fee in ETH and ZAR,
+  native ETH value in ZAR, net ERC-20 flows into/out of the sending wallet with ZAR unit prices,
+  and the calling npm key (`npm_lifecycle_event`). Prices come from CoinGecko at block time,
+  except phUSD, which is inferred from the phUSD/sUSDS Uniswap V2 pair's reserve ratio (read once
+  per run, at the block before its first transaction) times sUSDS/ZAR.
+- **Optional note**: callers add clarity with `LEDGER_NOTE="..." npm run <key>`. Mention
+  `LEDGER_NOTE` in the key's `//` comment when the transactions need explaining (e.g. what a token
+  flow represents for tax).
+- **Transactions sent outside forge** (cast, UI, Etherscan, Temp scratchpad runs not wired to the
+  recorder): `npm run ledger:record -- --tx 0x... --note "..."`.
+- **Never edit or delete ledger rows.** Rows that could not be priced (`price_status=missing`) are
+  fixed by `npm run ledger:reprice`, which appends a superseding `repriced` row. Commit
+  `ledger/transactions.csv` along with the broadcast that produced it.
+- **Do not add the recorder to `:preview` keys.** Previews do not broadcast.

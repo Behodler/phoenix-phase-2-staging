@@ -78,7 +78,10 @@
     "unipooler:pool:broadcast": "export UNIPOOLER_POOL_GAS_PRICE_WEI=${UNIPOOLER_POOL_GAS_PRICE_WEI:-300000000} && forge script script/UniPoolerPool.s.sol:UniPoolerPool --rpc-url $RPC_MAINNET --sender 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --broadcast --skip-simulation --slow --ledger --hd-paths \"m/44'/60'/46'/0/0\" --legacy --with-gas-price $UNIPOOLER_POOL_GAS_PRICE_WEI --gas-estimate-multiplier 200 -vvv",
     "//uniswap-helper:sepolia": "Add-on to deploy:sepolia (script/DeployUniswapHelperSepolia.s.sol): deploys UniswapHelper + its venue mocks (Uniswap V3 SwapRouter/QuoterV2, Curve DOLA and USDe pools) against the stack recorded in server/deployments/progress.11155111.json, appends them to that file, then extracts sepolia.json and generates sepolia-addresses.ts. The V3 router's WETH reserve is SEPOLIA_WETH_SEED (wei, default 0.1 ether). deploy:sepolia and deploy:sepolia:resume chain into it, so a fresh deploy brings it along; run it standalone against an existing Sepolia stack. Idempotent: a no-op once the progress file names a UniswapHelper with code. :preview simulates only.",
     "uniswap-helper:sepolia-preview": "PREVIEW_MODE=true forge script script/DeployUniswapHelperSepolia.s.sol:DeployUniswapHelperSepolia --rpc-url $RPC_SEPOLIA -vvv",
-    "uniswap-helper:sepolia": "forge script script/DeployUniswapHelperSepolia.s.sol:DeployUniswapHelperSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia"
+    "uniswap-helper:sepolia": "forge script script/DeployUniswapHelperSepolia.s.sol:DeployUniswapHelperSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
+    "//ledger": "Tax ledger (ZAR) - append-only record of every mainnet transaction in ledger/transactions.csv (see ledger/README.md). Broadcasting mainnet keys call `node scripts/ledger-record.js <Script.s.sol> 1` as their final step; ledger:record is for transactions sent outside forge (npm run ledger:record -- --tx 0x... --note \"...\"); ledger:reprice appends superseding rows for price_status=missing",
+    "ledger:record": "node scripts/ledger-record.js",
+    "ledger:reprice": "node scripts/ledger-record.js --reprice"
   },
   "keywords": [
     "phoenix",
