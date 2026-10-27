@@ -1509,6 +1509,11 @@ contract DeployMocks is Script {
         // 11.7 just did. Before the terminal sweep, which stays the last statement.
         _deployUniswapHelperStack(deployer);
 
+        // ====== PHASE 11.9: Deepen the phUSD/sUSDS seed to mainnet x10 (story 112) ======
+        // Transactions only, no deployments, and AFTER 11.8 so no existing address moves. Before
+        // the terminal sweep, which revokes the deployer mint right the phUSD side is minted under.
+        _deepenPhusdSusdsSeed(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1815,9 +1820,9 @@ contract DeployMocks is Script {
     ///      rather than silently surviving into `local-addresses.ts`.
     ///
     ///      SAFE ONLY AS THE LAST STATEMENT BEFORE `stopBroadcast`. The last deployer-as-minter
-    ///      phUSD mint in the whole run is `_seedNudgeStream`, in Phase 3.7; everything after that
-    ///      mints through `PhusdStableMinter` (its own grant) or through contracts holding their
-    ///      own. `_armLocalKenduPromotion` mints MockKendu, whose `mint` is permissionless. A
+    ///      phUSD mint in the whole run is `_deepenPhusdSusdsSeed`, in Phase 11.9 (story 112), under
+    ///      the grant `_seedNudgeStream` (Phase 3.7) made; everything else mints through
+    ///      `PhusdStableMinter` (its own grant) or through contracts holding their own. `_armLocalKenduPromotion` mints MockKendu, whose `mint` is permissionless. A
     ///      revoke placed before the Phase 3.7 stream seeding would break it.
     function _sweepResidualPrivileges(address deployer) internal {
         console.log("\n=== Terminal: residual-privilege sweep (script-audit run-26, L-04) ===");
@@ -1942,12 +1947,23 @@ contract DeployMocks is Script {
 
     /// @dev UniPoolerV2 lives at NFTMinterV2 index 4, the slot the Balancer pooler held on mainnet.
     uint256 internal constant UNI_POOLER_INDEX = 4;
-    /// @dev The pair seed. phUSD-heavy like the mainnet post-cutover pair (~18.1k sUSDS / ~23.1k
-    ///      phUSD), sized to the 5,000 USDS / 6,000 phUSD the retired rehearsal drew from the
-    ///      deployer at this same point in the script, so the deployer's balances are known to
-    ///      cover it. `UNI_PAIR_USDS_SEED` is USDS deposited into sUSDS; the seed is the shares.
+    /// @dev The INITIAL pair seed (Phase 11.7). Story 112: set at the mainnet post-cutover pair's
+    ///      ratio (~18.1k sUSDS / ~23.1k phUSD, i.e. 1.2762 phUSD per sUSDS) rather than story 106's
+    ///      5,000 / 6,000, so that the Phase 11.9 deepening (which adds at the prevailing ratio)
+    ///      lands on the mainnet ratio too. Still sized to the deployer's Phase 9 / 9.55 phUSD, so
+    ///      Phase 11.7 needs no extra transaction (an extra tx here would shift the deployer nonce
+    ///      and with it every Phase 11.8 address). `UNI_PAIR_USDS_SEED` is USDS deposited into
+    ///      sUSDS; the seed is the shares. 5,000 x 23.1 / 18.1 = 6,381.2 -> 6,381.
     uint256 internal constant UNI_PAIR_USDS_SEED = 5_000e18;
-    uint256 internal constant UNI_PAIR_PHUSD_SEED = 6_000e18;
+    uint256 internal constant UNI_PAIR_PHUSD_SEED = 6_381e18;
+    /// @dev Story 112: the depth the pair is deepened to in Phase 11.9, AFTER Phase 11.8 so no
+    ///      existing address moves. Mainnet reference: the post-cutover phUSD/sUSDS pair held
+    ///      ~18.1k sUSDS / ~23.1k phUSD. Local = that x10 (181,000 sUSDS / 231,000 phUSD), the
+    ///      "clean multiple" the story allows: the deployer's 1.4M USDS covers the sUSDS side, and
+    ///      the phUSD side is minted under the deployer's existing (pre-sweep) mint right. The
+    ///      depth is what the Antimatter cutover rehearsal (story 114) carves a slice of.
+    uint256 internal constant UNI_PAIR_SUSDS_TARGET = 181_000e18;
+    uint256 internal constant UNI_PAIR_PHUSD_TARGET = 231_000e18;
     /// @dev 0.1% floor tolerance on the post-deploy `quotePool` + `pool()` live check, the value the
     ///      retired rehearsal used. Local only.
     uint256 internal constant UNI_POOL_TOLERANCE_BPS = 10;
@@ -2056,6 +2072,80 @@ contract DeployMocks is Script {
         console.log("Index-4 end state asserted: UniPoolerV2, hook both ways, donation config, pooler auth, LP custody");
 
         _assertIndex4MintAndPool(deployer);
+    }
+
+    /// @dev Phase 11.9 (story 112): deepens the phUSD/sUSDS pair to `UNI_PAIR_*_TARGET`, LP minted
+    ///      to UniPoolerV2, so the pair starts "well seeded" for the Antimatter cutover rehearsal
+    ///      (story 114 carves a slice of this protocol-owned LP).
+    ///
+    ///      Runs AFTER Phase 11.8 on purpose: each transaction here bumps the deployer nonce, and
+    ///      Phase 11.8's contracts are CREATEd from the deployer, so sourcing the extra liquidity in
+    ///      Phase 11.7 would have moved every UniswapHelper-stack address. BEFORE the terminal sweep,
+    ///      because the phUSD side is minted under the deployer's mint right, which the sweep
+    ///      revokes (granted in `_seedNudgeStream` / `_deployPhlimboV3`, the L2658 / L2750 paths;
+    ///      no new privilege). Minting the phUSD outright mirrors mainnet, where the pair's phUSD
+    ///      side was minted against the pooler's mint debt rather than deposited collateral. The
+    ///      sUSDS side is the deployer's USDS (1.4M minted at construction + Phase 1) wrapped
+    ///      through MockSUSDS; any shortfall is minted (MockUSDS `mint` is permissionless).
+    ///
+    ///      The pair is no longer fresh (Phase 11.7's test mint and `pool()` moved it), so liquidity
+    ///      is added at the PREVAILING ratio, sized on whichever side is further from its target, so
+    ///      both reserves land at or above their targets.
+    function _deepenPhusdSusdsSeed(address deployer) internal {
+        console.log("\n=== Phase 11.9: Deepen the phUSD/sUSDS seed to mainnet x10 (story 112) ===");
+        IDeployMocksUniV2PairLike pair = IDeployMocksUniV2PairLike(phusdSusdsPair);
+        bool s0 = pair.token0() == address(susds);
+        uint256 rS;
+        uint256 rP;
+        {
+            (uint112 r0, uint112 r1,) = pair.getReserves();
+            (rS, rP) = s0 ? (uint256(r0), uint256(r1)) : (uint256(r1), uint256(r0));
+        }
+        require(rS > 0 && rP > 0, "story-112: phUSD/sUSDS pair not seeded before deepening");
+
+        // sUSDS needed so that BOTH sides reach target at the prevailing rP/rS ratio, + 1 token of
+        // headroom for the router's floor rounding.
+        uint256 addS = UNI_PAIR_SUSDS_TARGET > rS ? UNI_PAIR_SUSDS_TARGET - rS : 0;
+        if (UNI_PAIR_PHUSD_TARGET > rP) {
+            uint256 viaP = ((UNI_PAIR_PHUSD_TARGET - rP) * rS + rP - 1) / rP;
+            if (viaP > addS) addS = viaP;
+        }
+        addS += 1e18;
+        // The exact phUSD the router will pair with `addS` (its `quote`), used as both desired and floor.
+        uint256 addP = (addS * rP) / rS;
+
+        uint256 usdsIn = susds.previewMint(addS);
+        uint256 usdsBal = usds.balanceOf(deployer);
+        if (usdsBal < usdsIn) usds.mint(deployer, usdsIn - usdsBal);
+        usds.approve(address(susds), usdsIn);
+        susds.mint(addS, deployer);
+        phUSD.mint(deployer, addP);
+
+        uint256 lpBefore = pair.balanceOf(address(uniPoolerV2));
+        IERC20(address(susds)).approve(address(uniRouter), addS);
+        IERC20(address(phUSD)).approve(address(uniRouter), addP);
+        (uint256 usedS, uint256 usedP, uint256 liquidity) = uniRouter.addLiquidity(
+            address(susds), address(phUSD), addS, addP, addS, addP, address(uniPoolerV2), block.timestamp + 1 hours
+        );
+        require(usedS == addS && usedP == addP, "story-112: router did not take the sized deepening");
+
+        // The loud post-seed assertion: target depth reached, LP custody with UniPoolerV2.
+        (uint112 a0, uint112 a1,) = pair.getReserves();
+        (uint256 aS, uint256 aP) = s0 ? (uint256(a0), uint256(a1)) : (uint256(a1), uint256(a0));
+        require(
+            aS >= UNI_PAIR_SUSDS_TARGET && aP >= UNI_PAIR_PHUSD_TARGET,
+            "story-112: phUSD/sUSDS reserves below the mainnet-x10 target"
+        );
+        require(
+            liquidity > 0 && pair.balanceOf(address(uniPoolerV2)) == lpBefore + liquidity
+                && pair.balanceOf(address(uniPoolerV2)) > 0,
+            "story-112: UniPoolerV2 does not hold the deepened LP"
+        );
+        console.log("  added sUSDS:", usedS);
+        console.log("  added phUSD:", usedP);
+        console.log("  pair reserves now - sUSDS:", aS);
+        console.log("  pair reserves now - phUSD:", aP);
+        console.log("  LP held by UniPoolerV2:", pair.balanceOf(address(uniPoolerV2)));
     }
 
     /// @dev The live checks the retired rehearsal ran after its cutover: a test mint at index 4
