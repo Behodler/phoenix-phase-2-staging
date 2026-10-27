@@ -96,6 +96,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 // test/UniswapHelperAnvil.t.sol so the forge test exercises exactly the anvil wiring.
 import {UniswapHelperLocalStack} from "./helpers/UniswapHelperLocalStack.sol";
 import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
+// Story 114: the Antimatter/sUSDS cutover contract (story 113), driven by the Phase 11.10 rehearsal.
+import {AntimatterPoolSeeder} from "../src/periphery/AntimatterPoolSeeder.sol";
 
 /**
  * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
@@ -1514,6 +1516,12 @@ contract DeployMocks is Script {
         // the terminal sweep, which revokes the deployer mint right the phUSD side is minted under.
         _deepenPhusdSusdsSeed(deployer);
 
+        // ====== PHASE 11.10: Antimatter/sUSDS cutover dress rehearsal (story 114) ======
+        // APPENDED after 11.9, whose deepened protocol-owned LP it carves, so no existing address
+        // moves. Before the terminal sweep, while the deployer (standing in for the mainnet OWNER)
+        // still owns UniPoolerV2 and Antimatter.
+        _rehearseAntimatterPoolCutover(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1581,6 +1589,9 @@ contract DeployMocks is Script {
         _markConfigured("MockCurveDolaMetaPool", 0);
         _markConfigured("MockCurveStableSwapNG", 0);
         _markConfigured("UniswapHelper", 0);
+        // Story 114: the Antimatter/sUSDS cutover rehearsal (configured inside _rehearseAntimatterPoolCutover).
+        _markConfigured("AntimatterPoolSeeder", 0);
+        _markConfigured("AntimatterSusdsPair", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -2147,6 +2158,172 @@ contract DeployMocks is Script {
         console.log("  pair reserves now - sUSDS:", aS);
         console.log("  pair reserves now - phUSD:", aP);
         console.log("  LP held by UniPoolerV2:", pair.balanceOf(address(uniPoolerV2)));
+    }
+
+    // =====================================================================
+    // Story 114: Antimatter/sUSDS cutover dress rehearsal on anvil
+    // =====================================================================
+
+    /// @dev Share of UniPoolerV2's protocol-owned phUSD/sUSDS LP the rehearsal converts into
+    ///      Antimatter/sUSDS LP: 5,000 bps = half. Half leaves the phUSD/sUSDS pair at roughly the
+    ///      mainnet post-cutover depth x5 (~90k sUSDS / ~115k phUSD), still far deeper than the
+    ///      UniswapHelper swap demo needs, and gives the AM/sUSDS pair an equal, clearly visible
+    ///      depth for the UI. It is an anvil-only choice; the mainnet contract takes any `bps`.
+    uint256 internal constant AM_CUTOVER_BPS = 5_000;
+
+    /// @dev Set by `_rehearseAntimatterPoolCutover`. Tracked as "AntimatterPoolSeeder" and
+    ///      "AntimatterSusdsPair" (ContractAddresses keys of the same names).
+    AntimatterPoolSeeder public antimatterPoolSeeder;
+    address public antimatterSusdsPair;
+
+    /// @dev Before/after supplies and LP balances the post-seed assertions compare.
+    struct AmCutoverSnapshot {
+        uint256 phusdSupply;
+        uint256 amSupply;
+        uint256 poolerLp;
+        uint256 lpAmount;
+        uint256 amMinted;
+        uint256 liquidity;
+    }
+
+    /// @dev Phase 11.10 (story 114): deploys `AntimatterPoolSeeder` and drives it exactly as the
+    ///      mainnet OWNER would: size the slice with `lpForBps`, rescue that LP off UniPoolerV2 (its
+    ///      only LP exit), approve the seeder, grant it the Antimatter minter role (asserted, since
+    ///      `setApprovedMinter` is a silent no-op on an unchanged value), seed, then revoke the role
+    ///      (one-shot posture). Every invariant is a loud `require`, so `deploy:local` fails if the
+    ///      rehearsal is wrong.
+    ///
+    ///      lpRecipient = the deployer, i.e. the OWNER stand-in: on mainnet the owner already holds
+    ///      the rescued phUSD/sUSDS LP between steps 2 and 5, so receiving the AM/sUSDS LP is the
+    ///      same custody. The terminal sweep only revokes the deployer's phUSD MINT right; it never
+    ///      moves balances, so the LP is not stranded.
+    function _rehearseAntimatterPoolCutover(address deployer) internal {
+        console.log("\n=== Phase 11.10: Antimatter/sUSDS cutover dress rehearsal (story 114) ===");
+        require(
+            uniFactory.getPair(address(antimatter), address(susds)) == address(0),
+            "story-114: AM/sUSDS pair already exists before the rehearsal"
+        );
+
+        uint256 gasBefore = gasleft();
+        antimatterPoolSeeder = new AntimatterPoolSeeder(
+            deployer,
+            address(phUSD),
+            address(susds),
+            address(antimatter),
+            address(uniRouter),
+            phusdSusdsPair,
+            address(uniPoolerV2)
+        );
+        _trackDeployment("AntimatterPoolSeeder", address(antimatterPoolSeeder), gasBefore - gasleft());
+        console.log("AntimatterPoolSeeder deployed at:", address(antimatterPoolSeeder));
+        require(antimatterPoolSeeder.owner() == deployer, "story-114: seeder owner != deployer");
+        require(antimatterPoolSeeder.lpSource() == address(uniPoolerV2), "story-114: seeder lpSource != UniPoolerV2");
+
+        AmCutoverSnapshot memory snap;
+        snap.phusdSupply = phUSD.totalSupply();
+        snap.amSupply = antimatter.totalSupply();
+        snap.poolerLp = IERC20(phusdSusdsPair).balanceOf(address(uniPoolerV2));
+
+        // 1. Size the slice.
+        snap.lpAmount = antimatterPoolSeeder.lpForBps(AM_CUTOVER_BPS);
+        require(
+            snap.lpAmount > 0 && snap.lpAmount == snap.poolerLp * AM_CUTOVER_BPS / UNI_BPS,
+            "story-114: lpForBps sizing"
+        );
+        (uint256 minP, uint256 minS) = _amCutoverMins(snap.lpAmount);
+
+        // 2. Rescue the LP off UniPoolerV2 to the owner (deployer). 3. Approve the seeder.
+        uniPoolerV2.rescueERC20(phusdSusdsPair, deployer, snap.lpAmount);
+        IERC20(phusdSusdsPair).approve(address(antimatterPoolSeeder), snap.lpAmount);
+
+        // 4. Grant the Antimatter minter role, asserted (setApprovedMinter is a silent no-op).
+        antimatter.setApprovedMinter(address(antimatterPoolSeeder), true);
+        require(antimatter.isApprovedMinter(address(antimatterPoolSeeder)), "story-114: seeder is not an AM minter");
+
+        // 5. Seed. LP (and any unused sUSDS) to the deployer, the OWNER stand-in.
+        uint256 deployerAmLpBefore = 0; // the pair does not exist yet (asserted above)
+        (snap.amMinted, snap.liquidity) =
+            antimatterPoolSeeder.seed(snap.lpAmount, minP, minS, deployer, block.timestamp + 1 hours);
+
+        // One-shot posture: the seeder never mints again.
+        antimatter.setApprovedMinter(address(antimatterPoolSeeder), false);
+        require(
+            !antimatter.isApprovedMinter(address(antimatterPoolSeeder)), "story-114: seeder AM minter role not revoked"
+        );
+        console.log("  AntimatterPoolSeeder AM minter role granted, used once, REVOKED");
+
+        antimatterSusdsPair = antimatterPoolSeeder.amSusdsPair();
+        require(antimatterSusdsPair != address(0), "story-114: AM/sUSDS pair not created");
+        require(
+            uniFactory.getPair(address(antimatter), address(susds)) == antimatterSusdsPair,
+            "story-114: AM/sUSDS pair is not the factory's canonical pair"
+        );
+        _trackDeployment("AntimatterSusdsPair", antimatterSusdsPair, 0);
+        console.log("Antimatter/sUSDS UniV2 pair created at:", antimatterSusdsPair);
+        require(
+            IERC20(antimatterSusdsPair).balanceOf(deployer) == deployerAmLpBefore + snap.liquidity
+                && snap.liquidity > 0,
+            "story-114: deployer does not hold the AM/sUSDS LP"
+        );
+
+        _assertAntimatterPoolCutover(snap);
+    }
+
+    /// @dev Unwrap floors for `seed`: the pro-rata share of the pair's balances (what `burn` pays),
+    ///      less the 0.1% `UNI_POOL_TOLERANCE_BPS`. Mirrors how the owner would set them on mainnet.
+    function _amCutoverMins(uint256 lpAmount) internal view returns (uint256 minP, uint256 minS) {
+        uint256 supply = IERC20(phusdSusdsPair).totalSupply();
+        uint256 expP = IERC20(address(phUSD)).balanceOf(phusdSusdsPair) * lpAmount / supply;
+        uint256 expS = IERC20(address(susds)).balanceOf(phusdSusdsPair) * lpAmount / supply;
+        minP = expP * (UNI_BPS - UNI_POOL_TOLERANCE_BPS) / UNI_BPS;
+        minS = expS * (UNI_BPS - UNI_POOL_TOLERANCE_BPS) / UNI_BPS;
+        console.log("  expected phUSD out:", expP);
+        console.log("  expected sUSDS out:", expS);
+    }
+
+    /// @dev The post-seed end state: AM/sUSDS pair live with non-zero reserves, phUSD supply down by
+    ///      exactly the AM minted (and AM supply up by the same), the phUSD/sUSDS pair still liquid
+    ///      with UniPoolerV2 holding the remainder, and the seeder holding nothing.
+    function _assertAntimatterPoolCutover(AmCutoverSnapshot memory snap) internal view {
+        require(snap.amMinted > 0, "story-114: seed minted no Antimatter");
+        require(
+            phUSD.totalSupply() + snap.amMinted == snap.phusdSupply,
+            "story-114: phUSD totalSupply did not fall by exactly the AM minted"
+        );
+        require(
+            antimatter.totalSupply() == snap.amSupply + snap.amMinted,
+            "story-114: Antimatter totalSupply did not rise by exactly the AM minted"
+        );
+
+        IDeployMocksUniV2PairLike amPair = IDeployMocksUniV2PairLike(antimatterSusdsPair);
+        (uint112 a0, uint112 a1,) = amPair.getReserves();
+        require(a0 > 0 && a1 > 0, "story-114: AM/sUSDS pair reserves are zero");
+        uint256 rAm = amPair.token0() == address(antimatter) ? uint256(a0) : uint256(a1);
+        require(rAm == snap.amMinted, "story-114: AM/sUSDS pair AM reserve != AM minted (not fully consumed)");
+
+        (uint112 p0, uint112 p1,) = IDeployMocksUniV2PairLike(phusdSusdsPair).getReserves();
+        require(p0 > 0 && p1 > 0, "story-114: phUSD/sUSDS pair drained");
+        require(
+            IERC20(phusdSusdsPair).balanceOf(address(uniPoolerV2)) == snap.poolerLp - snap.lpAmount
+                && snap.poolerLp > snap.lpAmount,
+            "story-114: UniPoolerV2 phUSD/sUSDS LP != pre-cutover minus the slice"
+        );
+
+        address s = address(antimatterPoolSeeder);
+        require(
+            IERC20(address(phUSD)).balanceOf(s) == 0 && IERC20(address(antimatter)).balanceOf(s) == 0
+                && IERC20(address(susds)).balanceOf(s) == 0 && IERC20(phusdSusdsPair).balanceOf(s) == 0
+                && IERC20(antimatterSusdsPair).balanceOf(s) == 0,
+            "story-114: AntimatterPoolSeeder holds a residual balance"
+        );
+
+        console.log("  LP slice unwrapped:", snap.lpAmount);
+        console.log("  AM minted == phUSD burned:", snap.amMinted);
+        console.log("  AM/sUSDS reserve0:", uint256(a0));
+        console.log("  AM/sUSDS reserve1:", uint256(a1));
+        console.log("  AM/sUSDS LP to deployer (OWNER stand-in):", snap.liquidity);
+        console.log("  phUSD/sUSDS LP left on UniPoolerV2:", snap.poolerLp - snap.lpAmount);
+        console.log("Antimatter/sUSDS cutover asserted: pair live, supply-neutral burn, seeder empty");
     }
 
     /// @dev The live checks the retired rehearsal ran after its cutover: a test mint at index 4
