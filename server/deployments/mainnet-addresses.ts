@@ -38,6 +38,8 @@
 // Last values: BalancerPool 0x642BB6860b4776CC10b26B8f361Fd139E7f0db04, BalancerVault
 // 0xbA1333333333a1BA1108E8412f11850A5C319bA9, BalancerRouter 0x5C6fb490BDFD3246EB0bB062c168DeCAF4bD9FDd,
 // BalancerPooler (retired BalancerPoolerV2, drained and paused) 0x7f6874332c4629429d70D15f685A8230323F11F1.
+// Updated 2026-10-27: AntimatterPoolSeeder + AntimatterSusdsPair added as ZERO placeholders (story 114) so the
+// key-set matches ContractAddresses; fill them after the mainnet Antimatter/sUSDS cutover.
 import { ContractAddresses } from './addresses';
 
 
@@ -153,6 +155,12 @@ export const mainnetAddresses: ContractAddresses = {
   // DeployUniswapHelperMainnet and patched from progress.uniswap-helper.1.json. Its swaps and
   // liquidity calls revert until the phUSD/sUSDS pair exists (story 103's Stage 4 cutover).
   UniswapHelper: "0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3",
+  // Story 114: the Antimatter/sUSDS cutover. `AntimatterPoolSeeder` converts a slice of the
+  // protocol-owned phUSD/sUSDS LP into Antimatter/sUSDS LP, and `AntimatterSusdsPair` is the
+  // UniV2 pair its first seed creates. Neither exists on mainnet yet: ZERO until the mainnet
+  // cutover broadcast, then patch by hand (transient, expected).
+  AntimatterPoolSeeder: "0x0000000000000000000000000000000000000000",
+  AntimatterSusdsPair: "0x0000000000000000000000000000000000000000",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts

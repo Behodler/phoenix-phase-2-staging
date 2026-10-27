@@ -61,6 +61,8 @@ export const sepoliaAddresses: ContractAddresses = {
   UniPooler: "0x0747746009531f94989cb1Fa40239aec44db2AC1",
   PhusdSusdsPair: "0xF80dE933A8dd6059a5E99334A2121e335c853d16",
   UniswapHelper: "0xCA7a62943Fc95f47fde1c35A5FecD37a7483a93B",
+  AntimatterPoolSeeder: "0x0000000000000000000000000000000000000000",
+  AntimatterSusdsPair: "0x0000000000000000000000000000000000000000",
 };
 
 export type SepoliaContractName = keyof ContractAddresses;

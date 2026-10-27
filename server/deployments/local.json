@@ -2,13 +2,13 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-10-24T07:45:09.836Z",
+  "extractedAt": "2026-10-27T02:09:31.003Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
       "deployed": true,
       "configured": true,
-      "deployGas": 885829,
+      "deployGas": 867184,
       "configGas": 0
     },
     "USDC": {
@@ -29,7 +29,7 @@
       "address": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
       "deployed": true,
       "configured": true,
-      "deployGas": 1142456,
+      "deployGas": 1142467,
       "configGas": 0
     },
     "USDe": {
@@ -398,6 +398,20 @@
     },
     "UniswapHelper": {
       "address": "0xeC1BB74f5799811c0c1Bff94Ef76Fb40abccbE4a",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "AntimatterPoolSeeder": {
+      "address": "0xD1760AA0FCD9e64bA4ea43399Ad789CFd63C7809",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 1435519,
+      "configGas": 0
+    },
+    "AntimatterSusdsPair": {
+      "address": "0xbE9f6E78FF3F4272d38E423C606e5dB952c7065e",
       "deployed": true,
       "configured": true,
       "deployGas": 0,

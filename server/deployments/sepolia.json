@@ -402,6 +402,20 @@
       "configured": true,
       "deployGas": 0,
       "configGas": 0
+    },
+    "AntimatterPoolSeeder": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "AntimatterSusdsPair": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
+      "configGas": 0
     }
   }
 }
