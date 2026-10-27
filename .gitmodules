@@ -34,3 +34,6 @@
 [submodule "lib/antimatter"]
 	path = lib/antimatter
 	url = git@github.com:Behodler/antimatter.git
+[submodule "lib/sya-harvester"]
+	path = lib/sya-harvester
+	url = git@github.com:Behodler/sya-harvester.git

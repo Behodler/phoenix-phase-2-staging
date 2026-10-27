@@ -82,7 +82,12 @@ remappings = [
     # flax-token -> lib/flax-token-v2
     "lib/phUSD-stable-minter/lib/flax-token/=lib/flax-token-v2/",
     "openzeppelin-contracts/=lib/openzeppelin-contracts/",
-    "v4-core/=lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/src/",
+    # Story 115: `v4-core/` used to point at `lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/src/`,
+    # a path that does not exist at SYA pin 6eab35c (SYA vendors no v4-periphery), and nothing in the
+    # build imported it. It now points at the sya-harvester's own v4-core pin (v4.0.0, e50237c), with
+    # the harvester's `v4-core/src/...` import shape, so SYAHarvester, the anvil PoolManager and the
+    # liquidity router all compile from ONE physical v4-core.
+    "v4-core/=lib/sya-harvester/lib/v4-core/",
     "v4-periphery/=lib/stable-yield-accumulator/lib/v4-periphery/",
     "@uniswap/v4-core/=lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/",
     "@flax-token/=lib/flax-token-v2/src/",
@@ -138,6 +143,20 @@ remappings = [
     "lib/antimatter/lib/flax-token-v2/=lib/flax-token-v2/",
     "lib/antimatter/lib/phUSD-stable-minter/=lib/phUSD-stable-minter/",
     "lib/antimatter/lib/pauser/=lib/pauser/",
+    # --- sya-harvester (story 115) ---------------------------------------------
+    # SYAHarvester.sol imports `@openzeppelin/contracts/` (mapped above), `v4-core/src/...` (mapped
+    # above to the harvester's v4-core pin) and
+    # `stable-yield-accumulator/src/interfaces/IStableYieldAccumulator.sol`. That last prefix is the
+    # harvester's spelling of the SAME top-level SYA pin `@stable-yield-accumulator/` reads (both
+    # 6eab35c), so point it at lib/stable-yield-accumulator/ and there is exactly one physical
+    # IStableYieldAccumulator.sol. The harvester's own nested SYA / OZ copies are canonicalised onto
+    # the top-level pins, mirroring the diamond-dependency block above. `solmate/` is v4-core's
+    # nested solmate, which v4-core's test utilities import.
+    "sya-harvester/=lib/sya-harvester/src/",
+    "stable-yield-accumulator/=lib/stable-yield-accumulator/",
+    "solmate/=lib/sya-harvester/lib/v4-core/lib/solmate/",
+    "lib/sya-harvester/lib/stable-yield-accumulator/=lib/stable-yield-accumulator/",
+    "lib/sya-harvester/lib/openzeppelin-contracts/=lib/openzeppelin-contracts/",
     # --- OpenZeppelin canonicalization (single top-level pin) -----------------
     # OZ is pinned at lib/openzeppelin-contracts @ v5.6.1 (tag 5fd1781b). Every
     # submodule vendors its OWN nested copy at a different commit (5.1.0 through
