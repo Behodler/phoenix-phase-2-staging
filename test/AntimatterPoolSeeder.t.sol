@@ -277,6 +277,97 @@ contract AntimatterPoolSeederTest is Test {
         );
     }
 
+    // ============ one-sided (griefed) AM/sUSDS pair ============
+
+    /// @dev The griefing front-run: create the AM/sUSDS pair, donate 1 wei of ONE token, sync().
+    function _griefPair(bool donateSusds) internal returns (address amPair) {
+        amPair = factory.createPair(address(am), address(susds));
+        if (donateSusds) {
+            IERC20(address(susds)).transfer(amPair, 1);
+        } else {
+            am.mint(address(this), 1); // test contract owns Antimatter
+            IERC20(address(am)).transfer(amPair, 1);
+        }
+        IUniswapV2PairReserves(amPair).sync();
+        (uint112 r0, uint112 r1,) = IUniswapV2PairReserves(amPair).getReserves();
+        (uint256 rAm, uint256 rS) = address(am) < address(susds) ? (r0, r1) : (r1, r0);
+        if (donateSusds) {
+            assertEq(rAm, 0, "griefed: no AM reserve");
+            assertEq(rS, 1, "griefed: 1 wei sUSDS reserve");
+        } else {
+            assertEq(rAm, 1, "griefed: 1 wei AM reserve");
+            assertEq(rS, 0, "griefed: no sUSDS reserve");
+        }
+        assertEq(IERC20(amPair).totalSupply(), 0, "griefed: no LP supply");
+        assertEq(seeder.amSusdsPair(), amPair);
+    }
+
+    function _assertGriefedSeed(bool donateSusds) internal {
+        address amPair = _griefPair(donateSusds);
+        uint256 lpAmount = seeder.lpForBps(2_500);
+        (uint256 phusdOut, uint256 susdsOut) = _expectedOut(lpAmount);
+        uint256 phSupply = phUSD.totalSupply();
+        uint256 amSupply = am.totalSupply();
+        uint256 amInPairBefore = am.balanceOf(amPair);
+        uint256 susdsInPairBefore = susds.balanceOf(amPair);
+
+        _rescueAndApprove(lpAmount);
+        // The pair mints on balance - reserve, i.e. exactly what the seeder sends; the dust is ignored.
+        uint256 expectedLiquidity = Math.sqrt(phusdOut * susdsOut) - 1_000;
+        vm.expectEmit(true, false, false, true, address(seeder));
+        emit Seeded(lpAmount, phusdOut, phusdOut, susdsOut, expectedLiquidity, recipient);
+        vm.prank(owner);
+        (uint256 burned, uint256 liquidity) = seeder.seed(lpAmount, phusdOut, susdsOut, recipient, block.timestamp);
+
+        // Tax-neutral: phUSD burned == AM minted, with no AM minted outside the seed.
+        assertEq(burned, phusdOut, "burned == phUSD out");
+        assertEq(phSupply - phUSD.totalSupply(), burned, "phUSD supply drops by exactly AM minted");
+        assertEq(am.totalSupply() - amSupply, burned, "AM supply rises by exactly phUSD burned");
+        // Every unit consumed; donated dust absorbed into the pool.
+        assertEq(am.balanceOf(amPair), amInPairBefore + phusdOut, "all AM in the pair");
+        assertEq(susds.balanceOf(amPair), susdsInPairBefore + susdsOut, "all sUSDS in the pair");
+        assertEq(liquidity, expectedLiquidity, "first-mint liquidity");
+        assertEq(IERC20(amPair).balanceOf(recipient), liquidity, "recipient holds the new LP");
+        assertEq(IERC20(amPair).totalSupply(), liquidity + 1_000, "recipient owns all non-locked LP");
+        assertEq(susds.balanceOf(recipient), 0, "no unused sUSDS");
+        _assertSeederEmpty();
+
+        // The pair is now two-sided: a later seed goes through the router as normal.
+        uint256 lp2 = seeder.lpForBps(1_000);
+        (uint256 phusdOut2,) = _expectedOut(lp2);
+        uint256 phSupply2 = phUSD.totalSupply();
+        uint256 amSupply2 = am.totalSupply();
+        (uint256 burned2, uint256 liquidity2) = _seed(lp2);
+        assertEq(burned2, phusdOut2);
+        assertEq(phSupply2 - phUSD.totalSupply(), burned2, "second seed: phUSD burned == AM minted");
+        assertEq(am.totalSupply() - amSupply2, burned2, "second seed: AM minted == phUSD burned");
+        assertGt(liquidity2, 0);
+        _assertSeederEmpty();
+    }
+
+    function test_seed_oneSidedPair_susdsDust_mintsDirect() public {
+        _assertGriefedSeed(true);
+    }
+
+    function test_seed_oneSidedPair_amDust_mintsDirect() public {
+        _assertGriefedSeed(false);
+    }
+
+    /// @dev Canonical bytecode can never reach a one-sided reserve with LP outstanding; the guard is
+    ///      exercised by mocking the pair's views.
+    function test_seed_oneSidedPairWithSupply_revertsLoudly() public {
+        address amPair = factory.createPair(address(am), address(susds));
+        (uint112 r0, uint112 r1) = address(am) < address(susds) ? (uint112(0), uint112(5)) : (uint112(5), uint112(0));
+        vm.mockCall(amPair, abi.encodeWithSignature("getReserves()"), abi.encode(r0, r1, uint32(0)));
+        vm.mockCall(amPair, abi.encodeWithSignature("totalSupply()"), abi.encode(uint256(42)));
+
+        uint256 lpAmount = seeder.lpForBps(1_000);
+        _rescueAndApprove(lpAmount);
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(AntimatterPoolSeeder.OneSidedPair.selector, 0, 5, 42));
+        seeder.seed(lpAmount, 0, 0, recipient, block.timestamp);
+    }
+
     // ============ out-of-band balances and rescue ============
 
     function test_seed_toleratesDonations_andRescueRecovers() public {
@@ -315,4 +406,5 @@ contract AntimatterPoolSeederTest is Test {
 
 interface IUniswapV2PairReserves {
     function getReserves() external view returns (uint112, uint112, uint32);
+    function sync() external;
 }

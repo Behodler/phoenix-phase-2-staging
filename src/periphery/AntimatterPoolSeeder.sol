@@ -9,6 +9,7 @@ import {IUniswapV2Pair} from "@yield-claim-nft/interfaces/uniswap/IUniswapV2Pair
 import {IPhusdBurnable} from "@yield-claim-nft/interfaces/IPhusdBurnable.sol";
 import {IUniswapV2FactoryCreate} from "./interfaces/IUniswapV2FactoryCreate.sol";
 import {IUniswapV2PairBurn} from "./interfaces/IUniswapV2PairBurn.sol";
+import {IUniswapV2PairMint} from "./interfaces/IUniswapV2PairMint.sol";
 import {IAntimatterMintable} from "./interfaces/IAntimatterMintable.sol";
 
 /// @title  AntimatterPoolSeeder
@@ -38,6 +39,14 @@ import {IAntimatterMintable} from "./interfaces/IAntimatterMintable.sol";
 ///
 ///         Antimatter has no public burn, so stray AM would break the burned == minted invariant: the
 ///         AM side must be consumed in full, or `seed` reverts `AntimatterNotFullyConsumed`.
+///
+///         One-sided AM/sUSDS pair: anyone can create the pair, donate a dust amount of ONE token and
+///         `sync()`, leaving one reserve zero. Router02 cannot add into that state (its quote divides by
+///         the zero reserve, or reverts `INSUFFICIENT_LIQUIDITY`). `seed` therefore bypasses the router
+///         when exactly one reserve is zero and the pair has no LP supply: it transfers ALL the Antimatter
+///         and ALL the sUSDS straight to the pair and calls `pair.mint(lpRecipient)`. The pair mints
+///         `sqrt(amAdded * susdsAdded) - MINIMUM_LIQUIDITY` and absorbs the donated dust into the reserves,
+///         so the donation accrues to the protocol-owned LP and burned == minted still holds.
 contract AntimatterPoolSeeder is Ownable {
     using SafeERC20 for IERC20;
 
@@ -65,6 +74,9 @@ contract AntimatterPoolSeeder is Ownable {
     error InsufficientSUSDS(uint256 susdsOut, uint256 minSUSDS);
     error AntimatterNotFullyConsumed(uint256 amMinted, uint256 susdsRequired, uint256 susdsAvailable);
     error ResidualBalance(address token, uint256 before, uint256 afterwards);
+    /// @dev A one-sided pair that already has LP supply. Unreachable with canonical UniswapV2Pair
+    ///      bytecode (a minted pair can never drain a reserve to zero); guarded loudly regardless.
+    error OneSidedPair(uint256 reserveAm, uint256 reserveSusds, uint256 totalSupply);
 
     // ============ Events ============
 
@@ -161,14 +173,20 @@ contract AntimatterPoolSeeder is Ownable {
         // 3. Antimatter 1:1 by quantity with the phUSD released.
         IAntimatterMintable(antimatter).mint(address(this), phusdOut);
 
-        // 4. Pair it. Create the pair explicitly when absent; otherwise the AM side must fit in full.
+        // 4. Pair it. Create the pair explicitly when absent; a one-sided (griefed) pair is minted into
+        //    directly; otherwise the AM side must fit in full at the existing ratio.
+        bool direct;
         if (amPair == address(0)) {
             amPair = IUniswapV2FactoryCreate(factory).createPair(antimatter, sUSDS);
         } else {
-            _requireFullConsumption(amPair, phusdOut, susdsOut);
+            direct = _requireFullConsumption(amPair, phusdOut, susdsOut);
         }
         uint256 susdsPaired;
-        (susdsPaired, liquidity) = _addLiquidity(phusdOut, susdsOut, lpRecipient, deadline);
+        if (direct) {
+            (susdsPaired, liquidity) = _mintDirect(amPair, phusdOut, susdsOut, lpRecipient);
+        } else {
+            (susdsPaired, liquidity) = _addLiquidity(phusdOut, susdsOut, lpRecipient, deadline);
+        }
         if (susdsOut > susdsPaired) IERC20(sUSDS).safeTransfer(lpRecipient, susdsOut - susdsPaired);
 
         // 5. Burn the phUSD released (allowance-gated; self-allowance granted in the constructor).
@@ -194,10 +212,21 @@ contract AntimatterPoolSeeder is Ownable {
     /// @dev Router02 would otherwise fall back to pairing LESS than all of the Antimatter (and then
     ///      revert on `amountAMin`); this check surfaces that case with the numbers attached.
     ///      Mirrors `UniswapV2Library.quote`.
-    function _requireFullConsumption(address amPair, uint256 amAmount, uint256 susdsAvailable) internal view {
+    /// @return direct True when exactly one reserve is zero (and the pair has no LP supply), so the
+    ///         router cannot be used and `seed` must mint into the pair directly.
+    function _requireFullConsumption(address amPair, uint256 amAmount, uint256 susdsAvailable)
+        internal
+        view
+        returns (bool direct)
+    {
         (uint112 r0, uint112 r1,) = IUniswapV2Pair(amPair).getReserves();
-        if (r0 == 0 && r1 == 0) return; // empty pair: the add sets the ratio
+        if (r0 == 0 && r1 == 0) return false; // empty pair: the router add sets the ratio
         (uint256 rAm, uint256 rSusds) = antimatter < sUSDS ? (uint256(r0), uint256(r1)) : (uint256(r1), uint256(r0));
+        if (rAm == 0 || rSusds == 0) {
+            uint256 supply = IUniswapV2Pair(amPair).totalSupply();
+            if (supply != 0) revert OneSidedPair(rAm, rSusds, supply);
+            return true; // one-sided dust, no LP: the direct mint sets the ratio and absorbs the dust
+        }
         uint256 susdsRequired = amAmount * rSusds / rAm;
         if (susdsRequired > susdsAvailable) {
             revert AntimatterNotFullyConsumed(amAmount, susdsRequired, susdsAvailable);
@@ -216,6 +245,19 @@ contract AntimatterPoolSeeder is Ownable {
         if (amUsed != amAmount) revert AntimatterNotFullyConsumed(amAmount, susdsUsed, susdsDesired);
         IERC20(antimatter).forceApprove(router, 0);
         IERC20(sUSDS).forceApprove(router, 0);
+    }
+
+    /// @dev First mint into a pair with no LP supply but a one-sided reserve. The pair credits
+    ///      `balance - reserve` of each token, i.e. exactly what is sent here, so every unit of AM and
+    ///      sUSDS is consumed; the donated reserve is absorbed into the pool owned by `lpRecipient`.
+    function _mintDirect(address amPair, uint256 amAmount, uint256 susdsAmount, address lpRecipient)
+        internal
+        returns (uint256 susdsUsed, uint256 liquidity)
+    {
+        IERC20(antimatter).safeTransfer(amPair, amAmount);
+        IERC20(sUSDS).safeTransfer(amPair, susdsAmount);
+        liquidity = IUniswapV2PairMint(amPair).mint(lpRecipient);
+        susdsUsed = susdsAmount;
     }
 
     /// @dev Balances this contract holds of every token `seed` touches.
