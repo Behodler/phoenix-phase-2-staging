@@ -1822,8 +1822,9 @@ contract DeployMocks is Script {
     ///      SAFE ONLY AS THE LAST STATEMENT BEFORE `stopBroadcast`. The last deployer-as-minter
     ///      phUSD mint in the whole run is `_deepenPhusdSusdsSeed`, in Phase 11.9 (story 112), under
     ///      the grant `_seedNudgeStream` (Phase 3.7) made; everything else mints through
-    ///      `PhusdStableMinter` (its own grant) or through contracts holding their own. `_armLocalKenduPromotion` mints MockKendu, whose `mint` is permissionless. A
-    ///      revoke placed before the Phase 3.7 stream seeding would break it.
+    ///      `PhusdStableMinter` (its own grant) or through contracts holding their own.
+    ///      `_armLocalKenduPromotion` mints MockKendu, whose `mint` is permissionless. A revoke
+    ///      placed before the Phase 3.7 stream seeding would break it.
     function _sweepResidualPrivileges(address deployer) internal {
         console.log("\n=== Terminal: residual-privilege sweep (script-audit run-26, L-04) ===");
 
