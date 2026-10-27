@@ -167,6 +167,25 @@ const UNISWAP_HELPER_VENUE_NAMES = [
 ];
 
 /**
+ * Story 115: the anvil infrastructure SYAHarvester executes against (Curve Router NG mock, the
+ * mock crvUSD and the two Curve pools of the USDe -> crvUSD -> USDC route, the Uniswap V4
+ * PoolManager and the V4 liquidity router that seeded its ETH/USDC pool). DeployMocks tracks
+ * them so they appear in progress.31337.json, but the UI never calls them: harvesting goes
+ * through the SYAHarvester contract (story 116), which takes the router and PoolManager as
+ * immutables. Surfacing them would also force mainnet/Sepolia placeholders for addresses
+ * nothing reads (on mainnet these are Curve's and Uniswap's own contracts). Matched on the
+ * display name, i.e. after the "Mock" prefix is stripped.
+ */
+const SYA_HARVESTER_INFRA_NAMES = [
+    "CrvUSD",
+    "CurveRouterNG",
+    "CurveUsdeCrvusdPool",
+    "CurveCrvusdUsdcPool",
+    "UniswapV4PoolManager",
+    "UniswapV4LiquidityRouter",
+];
+
+/**
  * Tracked deployment name -> ContractAddresses key, for names whose key differs from the
  * tracked name. Story 102: DeployMocks tracks the canonical router as "UniswapV2Router02";
  * the address book key is `UniswapV2Router`.
@@ -229,6 +248,12 @@ function buildExtraction(progressData, chainId, opts = {}) {
         // Drop UniswapHelper's local venue mocks — reached only through the helper (see constant above)
         if (UNISWAP_HELPER_VENUE_NAMES.includes(displayName)) {
             log(`  Dropping UniswapHelper venue mock: ${displayName}`);
+            continue;
+        }
+
+        // Drop SYAHarvester's local infrastructure — reached only through the harvester (see constant above)
+        if (SYA_HARVESTER_INFRA_NAMES.includes(displayName)) {
+            log(`  Dropping SYAHarvester infrastructure: ${displayName}`);
             continue;
         }
 

@@ -98,6 +98,9 @@ import {UniswapHelperLocalStack} from "./helpers/UniswapHelperLocalStack.sol";
 import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 // Story 114: the Antimatter/sUSDS cutover contract (story 113), driven by the Phase 11.10 rehearsal.
 import {AntimatterPoolSeeder} from "../src/periphery/AntimatterPoolSeeder.sol";
+// Story 115: the anvil infrastructure SYAHarvester needs (Router NG mock, crvUSD + Curve pools,
+// Uniswap V4 PoolManager + seeded ETH/USDC pool), shared with test/SyaHarvesterLocalStack.t.sol.
+import {SyaHarvesterLocalStack} from "./helpers/SyaHarvesterLocalStack.sol";
 
 /**
  * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
@@ -1522,6 +1525,13 @@ contract DeployMocks is Script {
         // still owns UniPoolerV2 and Antimatter.
         _rehearseAntimatterPoolCutover(deployer);
 
+        // ====== PHASE 11.11: SYAHarvester infrastructure (story 115) ======
+        // APPENDED after 11.10, so no existing address moves: Curve Router NG mock, crvUSD and the
+        // two Curve pools of the mainnet USDe route, Uniswap V4 PoolManager with the mainnet-keyed
+        // ETH/USDC pool seeded. Story 116 deploys and configures SYAHarvester on top of it. Before
+        // the terminal sweep, which stays the last statement.
+        _deploySyaHarvesterInfra(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1592,6 +1602,13 @@ contract DeployMocks is Script {
         // Story 114: the Antimatter/sUSDS cutover rehearsal (configured inside _rehearseAntimatterPoolCutover).
         _markConfigured("AntimatterPoolSeeder", 0);
         _markConfigured("AntimatterSusdsPair", 0);
+        // Story 115: SYAHarvester infrastructure (configured inside _deploySyaHarvesterInfra).
+        _markConfigured("MockCrvUSD", 0);
+        _markConfigured("MockCurveUsdeCrvusdPool", 0);
+        _markConfigured("MockCurveCrvusdUsdcPool", 0);
+        _markConfigured("MockCurveRouterNG", 0);
+        _markConfigured("UniswapV4PoolManager", 0);
+        _markConfigured("UniswapV4LiquidityRouter", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -2158,6 +2175,67 @@ contract DeployMocks is Script {
         console.log("  pair reserves now - sUSDS:", aS);
         console.log("  pair reserves now - phUSD:", aP);
         console.log("  LP held by UniPoolerV2:", pair.balanceOf(address(uniPoolerV2)));
+    }
+
+    // =====================================================================
+    // Story 115: SYAHarvester infrastructure on anvil
+    // =====================================================================
+
+    /// @dev Set by `_deploySyaHarvesterInfra`; story 116 reads it to deploy and configure
+    ///      SYAHarvester (router, PoolManager, ETH pool key, route shapes). Every address is also
+    ///      tracked (see the Phase 11.11 `_trackDeployment` calls), but extract-addresses drops them
+    ///      all from ContractAddresses: they are infrastructure, reached only through the harvester.
+    SyaHarvesterLocalStack.Infra internal syaHarvesterInfra;
+
+    /// @dev Phase 11.11 (story 115): deploys the Router NG mock, crvUSD and the USDe/crvUSD and
+    ///      crvUSD/USDC Curve pool mocks, the Uniswap V4 PoolManager and its liquidity router, and
+    ///      seeds the native-ETH/USDC pool (fee 3000, tickSpacing 60, no hooks: the mainnet key) at
+    ///      2000 USDC/ETH. The DOLA route reuses the story-110 MockCurveDolaMetaPool. Every invariant
+    ///      the harvester will rely on is a loud `require`, so `deploy:local` fails if it is wrong.
+    function _deploySyaHarvesterInfra(address deployer) internal {
+        console.log("\n=== Phase 11.11: SYAHarvester infrastructure (story 115) ===");
+        address curveDola = deployments["MockCurveDolaMetaPool"].addr;
+        require(curveDola != address(0), "story-115: MockCurveDolaMetaPool (Phase 11.8) not deployed");
+
+        SyaHarvesterLocalStack.Infra memory s = SyaHarvesterLocalStack.deploy(
+            SyaHarvesterLocalStack.Inputs({
+                usdc: address(rewardToken),
+                dola: address(dola),
+                usde: address(usde),
+                curveDola: curveDola,
+                poolManagerOwner: deployer,
+                payer: deployer
+            })
+        );
+        syaHarvesterInfra = s;
+
+        _trackDeployment("MockCrvUSD", address(s.crvUSD), 0);
+        _trackDeployment("MockCurveUsdeCrvusdPool", address(s.curveUsdeCrvusd), 0);
+        _trackDeployment("MockCurveCrvusdUsdcPool", address(s.curveCrvusdUsdc), 0);
+        _trackDeployment("MockCurveRouterNG", address(s.router), 0);
+        _trackDeployment("UniswapV4PoolManager", address(s.poolManager), 0);
+        _trackDeployment("UniswapV4LiquidityRouter", address(s.liquidityRouter), 0);
+
+        // The router resolves both mainnet-shaped routes to USDC, the SYA reward token.
+        require(stableYieldAccumulator.rewardToken() == address(rewardToken), "story-115: SYA reward token is not USDC");
+        (address usdeOut, uint256 usdeHops) =
+            s.router.resolveOutput(SyaHarvesterLocalStack.usdeRoute(s, address(usde), address(rewardToken)).path);
+        require(usdeOut == address(rewardToken) && usdeHops == 2, "story-115: USDe route does not deliver USDC in 2 hops");
+        (address dolaOut, uint256 dolaHops) = s.router.resolveOutput(
+            SyaHarvesterLocalStack.dolaRoute(curveDola, address(dola), address(rewardToken)).path
+        );
+        require(dolaOut == address(rewardToken) && dolaHops == 1, "story-115: DOLA route does not deliver USDC in 1 hop");
+        // The ETH/USDC pool holds the seed.
+        require(address(s.poolManager).balance >= 99 ether, "story-115: V4 ETH/USDC pool not seeded (ETH)");
+        require(rewardToken.balanceOf(address(s.poolManager)) >= 199_000e6, "story-115: V4 ETH/USDC pool not seeded (USDC)");
+
+        console.log("  MockCrvUSD:", address(s.crvUSD));
+        console.log("  MockCurveUsdeCrvusdPool (USDe=0, crvUSD=1):", address(s.curveUsdeCrvusd));
+        console.log("  MockCurveCrvusdUsdcPool (USDC=0, crvUSD=1):", address(s.curveCrvusdUsdc));
+        console.log("  MockCurveRouterNG:", address(s.router));
+        console.log("  UniswapV4PoolManager:", address(s.poolManager));
+        console.log("  UniswapV4LiquidityRouter:", address(s.liquidityRouter));
+        console.log("  ETH/USDC V4 pool liquidity:", uint256(s.ethPoolLiquidity));
     }
 
     // =====================================================================
