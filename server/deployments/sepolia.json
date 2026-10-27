@@ -416,6 +416,13 @@
       "configured": false,
       "deployGas": 0,
       "configGas": 0
+    },
+    "SYAHarvester": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
+      "configGas": 0
     }
   }
 }

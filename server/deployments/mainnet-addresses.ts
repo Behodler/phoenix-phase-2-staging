@@ -40,6 +40,8 @@
 // BalancerPooler (retired BalancerPoolerV2, drained and paused) 0x7f6874332c4629429d70D15f685A8230323F11F1.
 // Updated 2026-10-27: AntimatterPoolSeeder + AntimatterSusdsPair added as ZERO placeholders (story 114) so the
 // key-set matches ContractAddresses; fill them after the mainnet Antimatter/sUSDS cutover.
+// Updated 2026-10-27: SYAHarvester added as a ZERO placeholder (story 116) so the key-set matches
+// ContractAddresses; the human deploys the mainnet harvester, then fill it by hand.
 import { ContractAddresses } from './addresses';
 
 
@@ -161,6 +163,10 @@ export const mainnetAddresses: ContractAddresses = {
   // cutover broadcast, then patch by hand (transient, expected).
   AntimatterPoolSeeder: "0x0000000000000000000000000000000000000000",
   AntimatterSusdsPair: "0x0000000000000000000000000000000000000000",
+  // Story 116: SYAHarvester (lib/sya-harvester) claims SYA yield with flash-borrowed USDC, sells it
+  // through Curve Router NG and pays the profit in ETH. Not deployed on mainnet yet: the human
+  // deploys it. ZERO until then, then patch by hand (transient, expected).
+  SYAHarvester: "0x0000000000000000000000000000000000000000",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts

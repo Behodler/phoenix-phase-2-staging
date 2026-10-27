@@ -101,6 +101,11 @@ import {AntimatterPoolSeeder} from "../src/periphery/AntimatterPoolSeeder.sol";
 // Story 115: the anvil infrastructure SYAHarvester needs (Router NG mock, crvUSD + Curve pools,
 // Uniswap V4 PoolManager + seeded ETH/USDC pool), shared with test/SyaHarvesterLocalStack.t.sol.
 import {SyaHarvesterLocalStack} from "./helpers/SyaHarvesterLocalStack.sol";
+// Story 116: SYAHarvester itself, deployed, configured and smoke-harvested on top of story 115's
+// infrastructure through a library shared with test/SyaHarvesterLocalHarvest.t.sol.
+import {SYAHarvester} from "sya-harvester/SYAHarvester.sol";
+import {IStableYieldAccumulator} from "@stable-yield-accumulator/interfaces/IStableYieldAccumulator.sol";
+import {SyaHarvesterLocalConfig} from "./helpers/SyaHarvesterLocalConfig.sol";
 
 /**
  * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
@@ -1532,6 +1537,13 @@ contract DeployMocks is Script {
         // the terminal sweep, which stays the last statement.
         _deploySyaHarvesterInfra(deployer);
 
+        // ====== PHASE 11.12: SYAHarvester deploy + config + smoke harvest (story 116) ======
+        // APPENDED after 11.11, whose infrastructure it uses, so no existing address moves. Registers
+        // USDe with SYA (mirroring mainnet's three strategies), deploys and configures SYAHarvester
+        // (ETH pool, DOLA and USDe Router NG routes), seeds yield and runs a real harvest. Before the
+        // terminal sweep, which stays the last statement and asserts the harvester's end state.
+        _deployAndSmokeSyaHarvester(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1609,6 +1621,8 @@ contract DeployMocks is Script {
         _markConfigured("MockCurveRouterNG", 0);
         _markConfigured("UniswapV4PoolManager", 0);
         _markConfigured("UniswapV4LiquidityRouter", 0);
+        // Story 116: SYAHarvester (configured and smoke-harvested inside _deployAndSmokeSyaHarvester).
+        _markConfigured("SYAHarvester", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -1879,6 +1893,8 @@ contract DeployMocks is Script {
         console.log(
             "  end-state phUSD ACL asserted: deployer + StableStakerV1 OUT, PhlimboV3 + minter + StableStakerV2 + Antimatter + 5 hooks IN"
         );
+
+        _requireSyaHarvesterEndState(deployer);
     }
 
     /// @dev Asserts one row of the end-state phUSD ACL, using the TWO-FIELD idiom. Checking
@@ -2236,6 +2252,139 @@ contract DeployMocks is Script {
         console.log("  UniswapV4PoolManager:", address(s.poolManager));
         console.log("  UniswapV4LiquidityRouter:", address(s.liquidityRouter));
         console.log("  ETH/USDC V4 pool liquidity:", uint256(s.ethPoolLiquidity));
+    }
+
+    // =====================================================================
+    // Story 116: SYAHarvester deployed, configured and smoke-harvested on anvil
+    // =====================================================================
+
+    /// @dev Yield minted into each SYA strategy's vault, twice: once before the smoke harvest (which
+    ///      consumes it) and once after it, so the chain is handed over with claimable DOLA, USDe and
+    ///      USDC yield for the UI, as it was before this phase existed. Only the strategy's share of
+    ///      each vault counts as SYA yield; the requires in `SyaHarvesterLocalConfig.smokeHarvest`
+    ///      assert each strategy still ends up with a non-zero claim amount.
+    uint256 internal constant SYA_HARVEST_YIELD_DOLA = 2_000e18;
+    uint256 internal constant SYA_HARVEST_YIELD_USDE = 2_000e18;
+    uint256 internal constant SYA_HARVEST_YIELD_USDC = 2_000e6;
+
+    /// @dev Set by `_deployAndSmokeSyaHarvester`. Tracked as "SYAHarvester" (ContractAddresses key
+    ///      `SYAHarvester`; zero on mainnet/Sepolia until the human deploys it).
+    SYAHarvester public syaHarvester;
+
+    /// @dev Phase 11.12 (story 116). Owner is the deployer, standing in for the mainnet OWNER exactly
+    ///      as for every other contract here; the terminal sweep asserts it and that the deployer's
+    ///      temporary claim-NFT approval to the harvester was revoked.
+    function _deployAndSmokeSyaHarvester(address deployer) internal {
+        console.log("\n=== Phase 11.12: SYAHarvester deploy + config + smoke harvest (story 116) ===");
+        _registerUsdeWithSya();
+
+        address curveDola = deployments["MockCurveDolaMetaPool"].addr;
+        require(curveDola != address(0), "story-116: MockCurveDolaMetaPool (Phase 11.8) not deployed");
+        syaHarvester = SyaHarvesterLocalConfig.deploy(
+            syaHarvesterInfra,
+            SyaHarvesterLocalConfig.Inputs({
+                owner: deployer,
+                sya: address(stableYieldAccumulator),
+                usdc: address(rewardToken),
+                dola: address(dola),
+                usde: address(usde),
+                curveDola: curveDola
+            })
+        );
+        _trackDeployment("SYAHarvester", address(syaHarvester), 0);
+        console.log("  SYAHarvester:", address(syaHarvester));
+        console.log("  routes: DOLA -> USDC (1 hop), USDe -> crvUSD -> USDC (2 hops); USDC (reward token) has no route");
+
+        _seedSyaHarvestYield();
+        _fundSyaHarvestCaller(deployer);
+        SyaHarvesterLocalConfig.SmokeResult memory r =
+            SyaHarvesterLocalConfig.smokeHarvest(syaHarvester, _syaSmokeInputs(deployer, curveDola));
+        // Revoke the caller's temporary approval: a UI harvest must ask for its own.
+        nftMinterV2.setApprovalForAll(address(syaHarvester), false);
+        console.log("  smoke harvest ETH out (wei):", r.ethOut);
+        console.log("  smoke harvest gas used:", r.gasUsed);
+        console.log("  DOLA sold:", r.dolaSold);
+        console.log("  USDe sold:", r.usdeSold);
+
+        // Hand the chain over with claimable yield again (the smoke harvest consumed it).
+        _seedSyaHarvestYield();
+    }
+
+    /// @dev Mirrors mainnet SYA 0x0cD353bf...21B6, which registers USDC, USDe (YieldStrategyUSDe
+    ///      0xaC2e5936...7f95) and DOLA (sDOLA strategy) with `setTokenConfig(token, decimals, 1e18)` and
+    ///      SYA as an authorised withdrawer on each strategy (read on-chain 2026-10-27). Locally only
+    ///      USDC and DOLA were registered; this adds USDe to the EXISTING Phase 2.7 strategy.
+    ///      Transactions only, at the end of the run, so no earlier address moves.
+    function _registerUsdeWithSya() internal {
+        stableYieldAccumulator.setTokenConfig(address(usde), 18, 1e18);
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDe), address(usde));
+        yieldStrategyUSDe.setWithdrawer(address(stableYieldAccumulator), true);
+        require(
+            stableYieldAccumulator.strategyTokens(address(yieldStrategyUSDe)) == address(usde),
+            "story-116: YieldStrategyUSDe not registered with SYA"
+        );
+        require(stableYieldAccumulator.getYieldStrategies().length == 3, "story-116: SYA should carry 3 strategies");
+        console.log("  SYA: USDe registered (18 decimals, 1e18 rate) with YieldStrategyUSDe; SYA authorised withdrawer");
+    }
+
+    function _seedSyaHarvestYield() internal {
+        mockSDola.addYield(SYA_HARVEST_YIELD_DOLA);
+        susde.addYield(SYA_HARVEST_YIELD_USDE);
+        rewardToken.mint(address(mockAutoUSDC), SYA_HARVEST_YIELD_USDC);
+    }
+
+    /// @dev Buys one claim NFT at index 4 (UniPoolerV2, priced in USDS) through the normal paid
+    ///      mint path and approves the harvester to pull it.
+    function _fundSyaHarvestCaller(address deployer) internal {
+        (, uint256 price,,) = nftMinterV2.configs(UNI_POOLER_INDEX);
+        usds.approve(address(nftMinterV2), price);
+        nftMinterV2.mint(UNI_POOLER_INDEX, deployer);
+        usds.approve(address(nftMinterV2), 0);
+        nftMinterV2.setApprovalForAll(address(syaHarvester), true);
+    }
+
+    function _syaSmokeInputs(address deployer, address curveDola)
+        internal
+        view
+        returns (SyaHarvesterLocalConfig.SmokeInputs memory)
+    {
+        return SyaHarvesterLocalConfig.SmokeInputs({
+            sya: address(stableYieldAccumulator),
+            usdc: address(rewardToken),
+            dola: address(dola),
+            usde: address(usde),
+            crvUSD: address(syaHarvesterInfra.crvUSD),
+            dolaPool: curveDola,
+            usdePool: address(syaHarvesterInfra.curveUsdeCrvusd),
+            dolaStrategy: address(yieldStrategyDola),
+            usdeStrategy: address(yieldStrategyUSDe),
+            usdcStrategy: address(yieldStrategyUSDC),
+            caller: deployer,
+            nftIndex: UNI_POOLER_INDEX
+        });
+    }
+
+    /// @dev Terminal-sweep row for the harvester: owned by the deployer (the local OWNER), no lingering
+    ///      claim-NFT approval from the deployer, holds nothing, and SYA has claimable yield again on all
+    ///      three strategies for the UI.
+    function _requireSyaHarvesterEndState(address deployer) internal view {
+        require(syaHarvester.owner() == deployer, "RESIDUAL PRIVILEGE SWEEP FAILED: SYAHarvester owner is not the deployer");
+        require(
+            !nftMinterV2.isApprovedForAll(deployer, address(syaHarvester)),
+            "RESIDUAL PRIVILEGE SWEEP FAILED: deployer claim-NFT approval to SYAHarvester not revoked"
+        );
+        require(
+            address(syaHarvester).balance == 0 && rewardToken.balanceOf(address(syaHarvester)) == 0,
+            "story-116: SYAHarvester holds a residual balance"
+        );
+        IStableYieldAccumulator sya = IStableYieldAccumulator(address(stableYieldAccumulator));
+        require(
+            SyaHarvesterLocalConfig.claimAmountFor(sya, address(yieldStrategyDola)) > 0
+                && SyaHarvesterLocalConfig.claimAmountFor(sya, address(yieldStrategyUSDe)) > 0
+                && SyaHarvesterLocalConfig.claimAmountFor(sya, address(yieldStrategyUSDC)) > 0,
+            "story-116: SYA left without claimable DOLA/USDe/USDC yield"
+        );
+        console.log("  SYAHarvester end state asserted: owner = deployer, no NFT approval, empty; SYA yield claimable");
     }
 
     // =====================================================================
