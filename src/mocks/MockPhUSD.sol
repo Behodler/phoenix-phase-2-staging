@@ -50,13 +50,15 @@ contract MockPhUSD is ERC20, Ownable {
     }
 
     /**
-     * @notice Burn phUSD tokens from holder
+     * @notice Burn phUSD tokens from holder using the allowance mechanism
+     * @dev Mirrors mainnet FlaxToken.burn (lib/flax-token-v2/src/FlaxToken.sol L77) exactly:
+     *      permissionless and allowance-gated, like transferFrom but burning. A contract
+     *      burning its own balance therefore needs a self-allowance.
      * @param holder Address to burn from
      * @param amount Amount to burn
      */
     function burn(address holder, uint256 amount) external {
-        MinterInfo memory info = _authorizedMinters[msg.sender];
-        require(info.canMint && info.mintVersion == mintVersion, "Not authorized to burn");
+        _spendAllowance(holder, msg.sender, amount);
         _burn(holder, amount);
     }
 
