@@ -2,13 +2,13 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-10-27T03:27:00.119Z",
+  "extractedAt": "2026-10-28T11:49:36.403Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
       "deployed": true,
       "configured": true,
-      "deployGas": 867182,
+      "deployGas": 867183,
       "configGas": 0
     },
     "USDC": {
@@ -78,21 +78,21 @@
       "address": "0x9A676e781A523b5d0C0e43731313A708CB607508",
       "deployed": true,
       "configured": true,
-      "deployGas": 616453,
+      "deployGas": 616454,
       "configGas": 0
     },
     "WBTC": {
       "address": "0x0B306BF915C4d645ff596e518fAf3F9669b97016",
       "deployed": true,
       "configured": true,
-      "deployGas": 580991,
+      "deployGas": 580990,
       "configGas": 0
     },
     "Pauser": {
       "address": "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1",
       "deployed": true,
       "configured": true,
-      "deployGas": 1046060,
+      "deployGas": 1046061,
       "configGas": 0
     },
     "AutoDOLA": {
@@ -106,7 +106,7 @@
       "address": "0x68B1D87F95878fE05B998F19b66F4baba5De1aed",
       "deployed": true,
       "configured": true,
-      "deployGas": 2901159,
+      "deployGas": 2901160,
       "configGas": 0
     },
     "SDOLA": {
@@ -120,7 +120,7 @@
       "address": "0xc6e7DF5E7b4f2A278906862b61205850344D4e7d",
       "deployed": true,
       "configured": true,
-      "deployGas": 2899855,
+      "deployGas": 2899856,
       "configGas": 0
     },
     "AutoUSDC": {
@@ -134,7 +134,7 @@
       "address": "0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1",
       "deployed": true,
       "configured": true,
-      "deployGas": 2899935,
+      "deployGas": 2899934,
       "configGas": 0
     },
     "USDeAMMAdapter": {
@@ -148,7 +148,7 @@
       "address": "0xa85233C63b9Ee964Add6F2cffe00Fd84eb32338f",
       "deployed": true,
       "configured": true,
-      "deployGas": 3111227,
+      "deployGas": 3111228,
       "configGas": 0
     },
     "PhusdStableMinter": {
@@ -197,7 +197,7 @@
       "address": "0x4EE6eCAD1c2Dae9f525404De8555724e3c35d07B",
       "deployed": true,
       "configured": true,
-      "deployGas": 2465649,
+      "deployGas": 2465650,
       "configGas": 0
     },
     "UniboostSCX": {
@@ -386,14 +386,14 @@
       "address": "0xcC4c41415fc68B2fBf70102742A83cDe435e0Ca7",
       "deployed": true,
       "configured": true,
-      "deployGas": 4058926,
+      "deployGas": 4058928,
       "configGas": 0
     },
     "ViewRouter": {
       "address": "0x90b97E83e22AFa2e6A96b3549A0E495D5Bae61aF",
       "deployed": true,
       "configured": true,
-      "deployGas": 517007,
+      "deployGas": 517006,
       "configGas": 0
     },
     "UniswapHelper": {
