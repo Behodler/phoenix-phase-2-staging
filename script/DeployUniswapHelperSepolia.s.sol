@@ -78,7 +78,8 @@ contract DeployUniswapHelperSepolia is Script {
             usde: _dependency(json, "USDe"),
             weth: _dependency(json, "WETH9"),
             skyPSM: _dependency(json, "MockSkyPSM"),
-            v2Router: _dependency(json, "UniswapV2Router02")
+            v2Router: _dependency(json, "UniswapV2Router02"),
+            antimatter: _dependency(json, "Antimatter")
         });
         address pair = _dependency(json, "PhusdSusdsPair");
 

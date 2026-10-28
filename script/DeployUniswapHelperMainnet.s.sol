@@ -89,6 +89,7 @@ abstract contract UniswapHelperMainnetBase is Script {
         address v3Quoter;
         address curveDolaPool;
         address curveUsdePool;
+        address antimatter;
         uint24 v3Fee;
     }
 
@@ -108,6 +109,7 @@ abstract contract UniswapHelperMainnetBase is Script {
         c.v3Quoter = V3_QUOTER_V2;
         c.curveDolaPool = CURVE_DOLA_3CRV;
         c.curveUsdePool = CURVE_USDE_USDC;
+        c.antimatter = _requireBook(book, "Antimatter");
         c.v3Fee = V3_FEE;
     }
 
@@ -147,6 +149,7 @@ abstract contract UniswapHelperMainnetBase is Script {
         _code(c.v3Quoter, "V3QuoterV2");
         _code(c.curveDolaPool, "CurveDola3CRV");
         _code(c.curveUsdePool, "CurveUsdeUsdc");
+        _code(c.antimatter, "Antimatter");
     }
 
     /// @dev Configuration safety (repo CLAUDE.md): every venue is cross-checked against the tokens it must trade,
@@ -199,6 +202,7 @@ abstract contract UniswapHelperMainnetBase is Script {
         require(h.v3Quoter() == c.v3Quoter, "verify: v3Quoter mismatch");
         require(h.curveDolaPool() == c.curveDolaPool, "verify: curveDolaPool mismatch");
         require(h.curveUsdePool() == c.curveUsdePool, "verify: curveUsdePool mismatch");
+        require(h.antimatter() == c.antimatter, "verify: antimatter mismatch");
         require(h.v3Fee() == c.v3Fee, "verify: v3Fee mismatch");
         require(h.ETH() == address(0), "verify: ETH sentinel mismatch");
     }
@@ -217,6 +221,7 @@ abstract contract UniswapHelperMainnetBase is Script {
         console.log("  V3 QuoterV2    ", c.v3Quoter);
         console.log("  Curve DOLA-3CRV", c.curveDolaPool);
         console.log("  Curve USDe/USDC", c.curveUsdePool);
+        console.log("  Antimatter     ", c.antimatter);
         console.log("  V3 fee tier    ", uint256(c.v3Fee));
     }
 
@@ -293,6 +298,7 @@ contract DeployUniswapHelperMainnet is UniswapHelperMainnetBase {
             c.v3Quoter,
             c.curveDolaPool,
             c.curveUsdePool,
+            c.antimatter,
             c.v3Fee
         );
         if (isPreview) {

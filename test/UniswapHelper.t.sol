@@ -12,6 +12,7 @@ import {IUniswapV3SwapRouter} from "../src/periphery/interfaces/IUniswapV3SwapRo
 import {IQuoterV2} from "../src/periphery/interfaces/IQuoterV2.sol";
 import {IWETH} from "../src/periphery/interfaces/IWETH.sol";
 import {IUniswapV2RouterPeriphery} from "../src/periphery/interfaces/IUniswapV2RouterPeriphery.sol";
+import {console} from "@forge-std/console.sol";
 
 // ============================================================================
 // Local stubs. Deliberately test-only: story 110 owns src/mocks (MockSkyPSM, V3/Curve mocks).
@@ -197,6 +198,8 @@ contract UniswapHelperTest is Test {
     IUniswapV2FactoryLike internal factory;
     IUniswapV2RouterLike internal router;
     address internal lp;
+    StubToken internal am;
+    address internal amLp;
 
     address internal user = makeAddr("user");
     address internal recipient = makeAddr("recipient");
@@ -204,6 +207,7 @@ contract UniswapHelperTest is Test {
     function setUp() public {
         (weth, factory, router) = UniswapV2Deployer.deploy(address(this));
         phUSD = new StubToken("phUSD", 18);
+        am = new StubToken("AM", 18);
         usdc = new StubToken("USDC", 6);
         dola = new StubToken("DOLA", 18);
         usde = new StubToken("USDe", 18);
@@ -236,10 +240,22 @@ contract UniswapHelperTest is Test {
         phUSD.approve(address(router), type(uint256).max);
         router.addLiquidity(address(susds), address(phUSD), shares, 2 * SEED, 0, 0, address(this), block.timestamp);
 
+        // Seed the AM/sUSDS pair (story 120): ~4 AM per sUSDS share.
+        usds.mint(address(this), 2 * SEED);
+        uint256 amShares = susds.deposit(2 * SEED, address(this));
+        am.mint(address(this), 8 * SEED);
+        amLp = factory.createPair(address(susds), address(am));
+        am.approve(address(router), type(uint256).max);
+        router.addLiquidity(address(susds), address(am), amShares, 8 * SEED, 0, 0, address(this), block.timestamp);
+
         vm.warp(1_000_000);
     }
 
     function _deployHelper(address v2) internal returns (UniswapHelper) {
+        return _deployHelper(v2, address(am));
+    }
+
+    function _deployHelper(address v2, address antimatter_) internal returns (UniswapHelper) {
         return new UniswapHelper(
             address(phUSD),
             address(susds),
@@ -254,6 +270,7 @@ contract UniswapHelperTest is Test {
             address(quoter),
             address(curveDola),
             address(curveUsde),
+            antimatter_,
             500
         );
     }
@@ -292,6 +309,8 @@ contract UniswapHelperTest is Test {
         assertEq(susds.balanceOf(h), 0, "helper sUSDS");
         assertEq(IERC20(weth).balanceOf(h), 0, "helper WETH");
         assertEq(IERC20(lp).balanceOf(h), 0, "helper LP");
+        assertEq(am.balanceOf(h), 0, "helper AM");
+        assertEq(IERC20(amLp).balanceOf(h), 0, "helper AM LP");
     }
 
     function _swapIn(address token, uint256 amt, uint256 minOut) internal returns (uint256) {
@@ -665,8 +684,14 @@ contract UniswapHelperTest is Test {
             address(quoter),
             address(curveDola),
             address(curveUsde),
+            address(am),
             500
         );
+    }
+
+    function test_constructor_rejectsZeroAntimatter() public {
+        vm.expectRevert(UniswapHelper.ZeroAddress.selector);
+        _deployHelper(address(router), address(0));
     }
 
     function test_constructor_rejectsCurveCoinMismatch() public {
@@ -686,8 +711,545 @@ contract UniswapHelperTest is Test {
             address(quoter),
             address(curveDola),
             address(swapped),
+            address(am),
             500
         );
+    }
+
+    // ================================================================ Antimatter (story 120)
+
+    function _swapInAM(address token, uint256 amt, uint256 minOut) internal returns (uint256 out) {
+        _fund(token, user, amt);
+        vm.startPrank(user);
+        IERC20(token).approve(address(helper), amt);
+        out = helper.swapToAM(token, amt, minOut, recipient, block.timestamp);
+        vm.stopPrank();
+    }
+
+    function _swapOutAM(address token, uint256 amIn, uint256 minOut) internal returns (uint256 out) {
+        am.mint(user, amIn);
+        vm.startPrank(user);
+        am.approve(address(helper), amIn);
+        out = helper.swapFromAM(token, amIn, minOut, recipient, block.timestamp);
+        vm.stopPrank();
+    }
+
+    function _path3(address a, address b) internal view returns (address[] memory p) {
+        p = new address[](3);
+        p[0] = a;
+        p[1] = address(susds);
+        p[2] = b;
+    }
+
+    function test_am_immutableAndPair() public view {
+        assertEq(helper.antimatter(), address(am), "antimatter");
+        assertEq(helper.amPair(), amLp, "amPair");
+        assertEq(helper.amPair(), factory.getPair(address(susds), address(am)), "amPair != factory");
+        assertEq(helper.pair(), lp, "phUSD pair unchanged");
+    }
+
+    function test_swapToAM_everyStable_quoteMatches() public {
+        psm.setFees(1e15, 0); // 0.1% tin
+        address[5] memory toks = _stables();
+        for (uint256 i; i < toks.length; i++) {
+            uint256 amt = _amount(toks[i]);
+            uint256 quote = helper.quoteToAM(toks[i], amt);
+            uint256 before = am.balanceOf(recipient);
+            uint256 phBefore = phUSD.balanceOf(recipient);
+            uint256 out = _swapInAM(toks[i], amt, quote);
+            assertGt(out, 0, "no AM");
+            assertEq(out, quote, "quote != actual");
+            assertEq(am.balanceOf(recipient) - before, out, "recipient AM");
+            assertEq(phUSD.balanceOf(recipient), phBefore, "phUSD must not move");
+            _assertHelperEmpty();
+        }
+    }
+
+    function test_swapFromAM_everyStable_quoteMatches() public {
+        psm.setFees(0, 1e15 + 7); // odd tout: exercises flooring
+        address[5] memory toks = _stables();
+        for (uint256 i; i < toks.length; i++) {
+            uint256 amt = 4000e18 + 123_456_789;
+            uint256 quote = helper.quoteFromAM(toks[i], amt);
+            uint256 before = IERC20(toks[i]).balanceOf(recipient);
+            uint256 out = _swapOutAM(toks[i], amt, quote);
+            assertGt(out, 0, "no output");
+            assertEq(out, quote, "quote != actual");
+            if (toks[i] != address(usds)) {
+                assertEq(IERC20(toks[i]).balanceOf(recipient) - before, out, "recipient out");
+            }
+            _assertHelperEmpty();
+        }
+    }
+
+    function test_amEthRoutes_bothDirections() public {
+        vm.deal(user, 2 ether);
+        uint256 q = helper.quoteETHToAM(1 ether);
+        vm.prank(user);
+        uint256 out = helper.swapETHToAM{value: 1 ether}(q, recipient, block.timestamp);
+        assertGt(out, 0, "no AM");
+        assertEq(out, q, "eth->AM quote");
+        assertEq(am.balanceOf(recipient), out);
+        _assertHelperEmpty();
+
+        uint256 amIn = 12_000e18;
+        uint256 qe = helper.quoteAMToETH(amIn);
+        am.mint(user, amIn);
+        vm.startPrank(user);
+        am.approve(address(helper), amIn);
+        uint256 ethOut = helper.swapAMToETH(amIn, qe, payable(recipient), block.timestamp);
+        vm.stopPrank();
+        assertGt(ethOut, 1 ether, "eth out");
+        assertEq(ethOut, qe, "AM->eth quote");
+        assertEq(recipient.balance, ethOut, "recipient ETH");
+        _assertHelperEmpty();
+    }
+
+    function test_swapAMToETH_revertsIfRecipientRejectsETH() public {
+        Rejecter r = new Rejecter();
+        am.mint(user, 12_000e18);
+        vm.startPrank(user);
+        am.approve(address(helper), 12_000e18);
+        vm.expectRevert(UniswapHelper.ETHTransferFailed.selector);
+        helper.swapAMToETH(12_000e18, 0, payable(address(r)), block.timestamp);
+        vm.stopPrank();
+    }
+
+    /// @dev phUSD -> AM is ONE router call over [phUSD, sUSDS, AM], and the sUSDS hop never reaches
+    ///      the helper: no sUSDS transfer to it, no sUSDS approval from it.
+    function test_swapPhUSDToAM_singleRouterCall_quoteMatches() public {
+        uint256 amt = 1000e18 + 77;
+        uint256 quote = helper.quotePhUSDToAM(amt);
+        phUSD.mint(user, amt);
+        vm.startPrank(user);
+        phUSD.approve(address(helper), amt);
+
+        vm.expectCall(
+            address(router), abi.encodeWithSelector(IUniswapV2RouterLike.swapExactTokensForTokens.selector), 1
+        );
+        vm.expectCall(
+            address(router),
+            abi.encodeCall(
+                IUniswapV2RouterLike.swapExactTokensForTokens,
+                (amt, 0, _path3(address(phUSD), address(am)), recipient, block.timestamp)
+            ),
+            1
+        );
+        vm.expectCall(address(susds), abi.encodeWithSelector(IERC20.transfer.selector, address(helper)), 0);
+        vm.expectCall(address(susds), abi.encodeWithSelector(IERC20.approve.selector, address(router)), 0);
+        uint256 out = helper.swapPhUSDToAM(amt, quote, recipient, block.timestamp);
+        vm.stopPrank();
+
+        assertGt(out, 0, "no AM");
+        assertEq(out, quote, "quote != actual");
+        assertEq(am.balanceOf(recipient), out, "recipient AM");
+        _assertHelperEmpty();
+    }
+
+    function test_swapAMToPhUSD_singleRouterCall_quoteMatches() public {
+        uint256 amt = 4000e18 + 77;
+        uint256 quote = helper.quoteAMToPhUSD(amt);
+        am.mint(user, amt);
+        vm.startPrank(user);
+        am.approve(address(helper), amt);
+
+        vm.expectCall(
+            address(router), abi.encodeWithSelector(IUniswapV2RouterLike.swapExactTokensForTokens.selector), 1
+        );
+        vm.expectCall(
+            address(router),
+            abi.encodeCall(
+                IUniswapV2RouterLike.swapExactTokensForTokens,
+                (amt, 0, _path3(address(am), address(phUSD)), recipient, block.timestamp)
+            ),
+            1
+        );
+        vm.expectCall(address(susds), abi.encodeWithSelector(IERC20.transfer.selector, address(helper)), 0);
+        vm.expectCall(address(susds), abi.encodeWithSelector(IERC20.approve.selector, address(router)), 0);
+        uint256 out = helper.swapAMToPhUSD(amt, quote, recipient, block.timestamp);
+        vm.stopPrank();
+
+        assertGt(out, 0, "no phUSD");
+        assertEq(out, quote, "quote != actual");
+        assertEq(phUSD.balanceOf(recipient), out, "recipient phUSD");
+        _assertHelperEmpty();
+    }
+
+    function test_am_unsupportedToken_reverts() public {
+        address[4] memory bad = [address(phUSD), address(am), weth, makeAddr("random")];
+        for (uint256 i; i < bad.length; i++) {
+            vm.expectRevert(abi.encodeWithSelector(UniswapHelper.UnsupportedToken.selector, bad[i]));
+            helper.swapToAM(bad[i], 1e18, 0, recipient, block.timestamp);
+            vm.expectRevert(abi.encodeWithSelector(UniswapHelper.UnsupportedToken.selector, bad[i]));
+            helper.swapFromAM(bad[i], 1e18, 0, recipient, block.timestamp);
+            vm.expectRevert(abi.encodeWithSelector(UniswapHelper.UnsupportedToken.selector, bad[i]));
+            helper.quoteToAM(bad[i], 1e18);
+            vm.expectRevert(abi.encodeWithSelector(UniswapHelper.UnsupportedToken.selector, bad[i]));
+            helper.quoteFromAM(bad[i], 1e18);
+        }
+        // AM is not a stable on the phUSD routes either.
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.UnsupportedToken.selector, address(am)));
+        helper.swapToPhUSD(address(am), 1e18, 0, recipient, block.timestamp);
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.UnsupportedToken.selector, address(am)));
+        helper.swapFromPhUSD(address(am), 1e18, 0, recipient, block.timestamp);
+    }
+
+    function test_am_deadline_reverts() public {
+        uint256 past = block.timestamp - 1;
+        bytes memory err = abi.encodeWithSelector(UniswapHelper.Expired.selector, past, block.timestamp);
+        vm.expectRevert(err);
+        helper.swapToAM(address(usds), 1e18, 0, recipient, past);
+        vm.expectRevert(err);
+        helper.swapFromAM(address(usds), 1e18, 0, recipient, past);
+        vm.expectRevert(err);
+        helper.swapETHToAM{value: 0}(0, recipient, past);
+        vm.expectRevert(err);
+        helper.swapAMToETH(1e18, 0, payable(recipient), past);
+        vm.expectRevert(err);
+        helper.swapPhUSDToAM(1e18, 0, recipient, past);
+        vm.expectRevert(err);
+        helper.swapAMToPhUSD(1e18, 0, recipient, past);
+        vm.expectRevert(err);
+        helper.addLiquidityAMSUSDS(1, 1, 0, 0, recipient, past);
+        vm.expectRevert(err);
+        helper.addLiquidityAMUSDS(1, 1, 0, 0, recipient, past);
+        vm.expectRevert(err);
+        helper.removeLiquidityAMSUSDS(1, 0, 0, recipient, past);
+        vm.expectRevert(err);
+        helper.removeLiquidityAMUSDS(1, 0, 0, recipient, past);
+    }
+
+    function test_am_zeroAmountAndRecipient_revert() public {
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.swapToAM(address(usds), 0, 0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.swapFromAM(address(usds), 0, 0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.swapETHToAM{value: 0}(0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.swapAMToETH(0, 0, payable(recipient), block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.swapPhUSDToAM(0, 0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.swapAMToPhUSD(0, 0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.removeLiquidityAMSUSDS(0, 0, 0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAmount.selector);
+        helper.removeLiquidityAMUSDS(0, 0, 0, recipient, block.timestamp);
+
+        vm.expectRevert(UniswapHelper.ZeroAddress.selector);
+        helper.swapToAM(address(usds), 1, 0, address(0), block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAddress.selector);
+        helper.swapFromAM(address(usds), 1, 0, address(0), block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAddress.selector);
+        helper.swapPhUSDToAM(1, 0, address(0), block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAddress.selector);
+        helper.addLiquidityAMSUSDS(1, 1, 0, 0, address(0), block.timestamp);
+        vm.expectRevert(UniswapHelper.ZeroAddress.selector);
+        helper.removeLiquidityAMUSDS(1, 0, 0, address(0), block.timestamp);
+    }
+
+    function test_am_minOut_reverts() public {
+        uint256 amt = 500e18;
+
+        uint256 q = helper.quoteToAM(address(usds), amt);
+        usds.mint(user, amt);
+        vm.startPrank(user);
+        usds.approve(address(helper), amt);
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.InsufficientOutput.selector, q, q + 1));
+        helper.swapToAM(address(usds), amt, q + 1, recipient, block.timestamp);
+        vm.stopPrank();
+
+        uint256 qo = helper.quoteFromAM(address(usdc), amt);
+        am.mint(user, amt);
+        vm.startPrank(user);
+        am.approve(address(helper), amt);
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.InsufficientOutput.selector, qo, qo + 1));
+        helper.swapFromAM(address(usdc), amt, qo + 1, recipient, block.timestamp);
+        vm.stopPrank();
+
+        vm.deal(user, 1 ether);
+        uint256 qe = helper.quoteETHToAM(1 ether);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.InsufficientOutput.selector, qe, qe + 1));
+        helper.swapETHToAM{value: 1 ether}(qe + 1, recipient, block.timestamp);
+
+        uint256 amIn = 12_000e18;
+        uint256 qae = helper.quoteAMToETH(amIn);
+        am.mint(user, amIn);
+        vm.startPrank(user);
+        am.approve(address(helper), amIn);
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.InsufficientOutput.selector, qae, qae + 1));
+        helper.swapAMToETH(amIn, qae + 1, payable(recipient), block.timestamp);
+        vm.stopPrank();
+
+        uint256 qpa = helper.quotePhUSDToAM(amt);
+        phUSD.mint(user, amt);
+        vm.startPrank(user);
+        phUSD.approve(address(helper), amt);
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.InsufficientOutput.selector, qpa, qpa + 1));
+        helper.swapPhUSDToAM(amt, qpa + 1, recipient, block.timestamp);
+        vm.stopPrank();
+
+        uint256 qap = helper.quoteAMToPhUSD(amt);
+        am.mint(user, amt);
+        vm.startPrank(user);
+        am.approve(address(helper), amt);
+        vm.expectRevert(abi.encodeWithSelector(UniswapHelper.InsufficientOutput.selector, qap, qap + 1));
+        helper.swapAMToPhUSD(amt, qap + 1, recipient, block.timestamp);
+        vm.stopPrank();
+    }
+
+    /// @dev A helper whose AM has no AM/sUSDS pair: every AM route, quote and liquidity call reverts
+    ///      PairNotFound, the phUSD routes keep working, and nothing creates the pair.
+    function test_am_revertsPairNotFound_phusdRoutesUnaffected() public {
+        StubToken am2 = new StubToken("AM2", 18);
+        UniswapHelper h3 = _deployHelper(address(router), address(am2));
+        assertEq(h3.amPair(), address(0), "AM2 pair should not exist");
+        assertEq(h3.pair(), lp, "phUSD pair");
+
+        bytes4 e = UniswapHelper.PairNotFound.selector;
+        vm.expectRevert(e);
+        h3.swapToAM(address(usds), 1e18, 0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.swapETHToAM{value: 0}(0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.swapFromAM(address(usds), 1e18, 0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.swapAMToETH(1e18, 0, payable(recipient), block.timestamp);
+        vm.expectRevert(e);
+        h3.swapPhUSDToAM(1e18, 0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.swapAMToPhUSD(1e18, 0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.quoteToAM(address(usds), 1e18);
+        vm.expectRevert(e);
+        h3.quoteFromAM(address(usds), 1e18);
+        vm.expectRevert(e);
+        h3.quoteETHToAM(1e18);
+        vm.expectRevert(e);
+        h3.quoteAMToETH(1e18);
+        vm.expectRevert(e);
+        h3.quotePhUSDToAM(1e18);
+        vm.expectRevert(e);
+        h3.quoteAMToPhUSD(1e18);
+        vm.expectRevert(e);
+        h3.addLiquidityAMSUSDS(1e18, 1e18, 0, 0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.addLiquidityAMUSDS(1e18, 1e18, 0, 0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.removeLiquidityAMSUSDS(1e18, 0, 0, recipient, block.timestamp);
+        vm.expectRevert(e);
+        h3.removeLiquidityAMUSDS(1e18, 0, 0, recipient, block.timestamp);
+        assertEq(factory.getPair(address(susds), address(am2)), address(0), "helper created the AM pair");
+
+        // phUSD routes on the same helper still work.
+        uint256 amt = 100e18;
+        uint256 q = h3.quoteToPhUSD(address(usds), amt);
+        usds.mint(user, amt);
+        vm.startPrank(user);
+        usds.approve(address(h3), amt);
+        assertEq(h3.swapToPhUSD(address(usds), amt, q, recipient, block.timestamp), q, "phUSD route on h3");
+        vm.stopPrank();
+    }
+
+    function test_am_revertsPairNotFound_noPairsAtAll() public {
+        (,, IUniswapV2RouterLike r2) = UniswapV2Deployer.deploy(address(this));
+        UniswapHelper h2 = _deployHelper(address(r2));
+        assertEq(h2.amPair(), address(0));
+        vm.expectRevert(UniswapHelper.PairNotFound.selector);
+        h2.swapToAM(address(usds), 1e18, 0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.PairNotFound.selector);
+        h2.addLiquidityAMSUSDS(1e18, 1e18, 0, 0, recipient, block.timestamp);
+        vm.expectRevert(UniswapHelper.PairNotFound.selector);
+        h2.swapPhUSDToAM(1e18, 0, recipient, block.timestamp);
+    }
+
+    // ---------------------------------------------------------------- AM liquidity
+
+    function _assertNoAllowances() internal view {
+        assertEq(susds.allowance(address(helper), address(router)), 0, "sUSDS allowance not reset");
+        assertEq(am.allowance(address(helper), address(router)), 0, "AM allowance not reset");
+        assertEq(usds.allowance(address(helper), address(susds)), 0, "USDS allowance left");
+    }
+
+    function test_addLiquidityAMSUSDS_refundsLeftovers_resetsAllowances() public {
+        uint256 sDesired = 1000e18;
+        uint256 aDesired = 20_000e18; // far more AM than the ratio needs
+        _fund(address(susds), user, sDesired);
+        am.mint(user, aDesired);
+        vm.startPrank(user);
+        IERC20(address(susds)).approve(address(helper), sDesired);
+        am.approve(address(helper), aDesired);
+        (uint256 sUsed, uint256 aUsed, uint256 liq) =
+            helper.addLiquidityAMSUSDS(sDesired, aDesired, sDesired, 0, recipient, block.timestamp);
+        vm.stopPrank();
+        assertEq(sUsed, sDesired, "sUSDS used");
+        assertLt(aUsed, aDesired, "AM should be partly unused");
+        assertGt(liq, 0, "no LP");
+        assertEq(IERC20(amLp).balanceOf(recipient), liq, "AM LP to recipient");
+        assertEq(IERC20(lp).balanceOf(recipient), 0, "phUSD LP must not be minted");
+        assertEq(susds.balanceOf(recipient), 0);
+        assertEq(am.balanceOf(recipient), aDesired - aUsed, "AM refund");
+        _assertHelperEmpty();
+        _assertNoAllowances();
+    }
+
+    function test_addLiquidityAMSUSDS_minEnforced() public {
+        _fund(address(susds), user, 1000e18);
+        am.mint(user, 20_000e18);
+        vm.startPrank(user);
+        IERC20(address(susds)).approve(address(helper), 1000e18);
+        am.approve(address(helper), 20_000e18);
+        vm.expectRevert(); // Router02: INSUFFICIENT_B_AMOUNT
+        helper.addLiquidityAMSUSDS(1000e18, 20_000e18, 0, 20_000e18, recipient, block.timestamp);
+        vm.stopPrank();
+    }
+
+    function test_addLiquidityAMUSDS_wrapsAndRefundsUSDS_resetsAllowances() public {
+        uint256 uDesired = 5000e18; // far more USDS than the ratio needs
+        uint256 aDesired = 1000e18;
+        usds.mint(user, uDesired);
+        am.mint(user, aDesired);
+        vm.startPrank(user);
+        usds.approve(address(helper), uDesired);
+        am.approve(address(helper), aDesired);
+        (uint256 uUsed, uint256 aUsed, uint256 liq) =
+            helper.addLiquidityAMUSDS(uDesired, aDesired, 0, aDesired, recipient, block.timestamp);
+        vm.stopPrank();
+        assertEq(aUsed, aDesired, "AM used");
+        assertLt(uUsed, uDesired, "USDS should be partly unused");
+        assertEq(usds.balanceOf(recipient), uDesired - uUsed, "USDS refund");
+        assertEq(susds.balanceOf(recipient), 0, "refund must be USDS, not sUSDS");
+        assertEq(IERC20(amLp).balanceOf(recipient), liq, "AM LP to recipient");
+        _assertHelperEmpty();
+        _assertNoAllowances();
+    }
+
+    function test_addLiquidityAMUSDS_usdsMinConvertedToShares() public {
+        usds.mint(user, 5000e18);
+        am.mint(user, 1000e18);
+        vm.startPrank(user);
+        usds.approve(address(helper), 5000e18);
+        am.approve(address(helper), 1000e18);
+        vm.expectRevert(); // Router02: INSUFFICIENT_A_AMOUNT (share min from previewDeposit(usdsMin))
+        helper.addLiquidityAMUSDS(5000e18, 1000e18, 5000e18, 0, recipient, block.timestamp);
+        vm.stopPrank();
+    }
+
+    function test_removeLiquidityAMSUSDS() public {
+        _fund(address(susds), user, 1000e18);
+        am.mint(user, 8000e18);
+        vm.startPrank(user);
+        IERC20(address(susds)).approve(address(helper), 1000e18);
+        am.approve(address(helper), 8000e18);
+        (uint256 sUsed, uint256 aUsed, uint256 liq) =
+            helper.addLiquidityAMSUSDS(1000e18, 8000e18, 0, 0, user, block.timestamp);
+        IERC20(amLp).approve(address(helper), liq);
+
+        vm.expectPartialRevert(UniswapHelper.InsufficientOutput.selector);
+        helper.removeLiquidityAMSUSDS(liq, type(uint256).max, 0, recipient, block.timestamp);
+        vm.expectPartialRevert(UniswapHelper.InsufficientOutput.selector);
+        helper.removeLiquidityAMSUSDS(liq, 0, type(uint256).max, recipient, block.timestamp);
+
+        (uint256 sOut, uint256 aOut) = helper.removeLiquidityAMSUSDS(liq, 0, 0, recipient, block.timestamp);
+        vm.stopPrank();
+        assertApproxEqAbs(sOut, sUsed, 2, "sUSDS back");
+        assertApproxEqAbs(aOut, aUsed, 2, "AM back");
+        assertEq(susds.balanceOf(recipient), sOut, "sUSDS to recipient");
+        assertEq(am.balanceOf(recipient), aOut, "AM to recipient");
+        assertEq(IERC20(amLp).balanceOf(user), 0, "AM LP burned");
+        _assertHelperEmpty();
+    }
+
+    function test_removeLiquidityAMUSDS() public {
+        usds.mint(user, 1000e18);
+        am.mint(user, 4000e18);
+        vm.startPrank(user);
+        usds.approve(address(helper), 1000e18);
+        am.approve(address(helper), 4000e18);
+        (,, uint256 liq) = helper.addLiquidityAMUSDS(1000e18, 4000e18, 0, 0, user, block.timestamp);
+        IERC20(amLp).approve(address(helper), liq);
+
+        vm.expectPartialRevert(UniswapHelper.InsufficientOutput.selector);
+        helper.removeLiquidityAMUSDS(liq, 0, type(uint256).max, recipient, block.timestamp);
+        uint256 bal = susds.balanceOf(amLp);
+        uint256 expectedUsds = susds.previewRedeem(liq * bal / IERC20(amLp).totalSupply());
+        vm.expectRevert(
+            abi.encodeWithSelector(UniswapHelper.InsufficientOutput.selector, expectedUsds, type(uint256).max)
+        );
+        helper.removeLiquidityAMUSDS(liq, type(uint256).max, 0, recipient, block.timestamp);
+
+        (uint256 uOut, uint256 aOut) = helper.removeLiquidityAMUSDS(liq, 0, 0, recipient, block.timestamp);
+        vm.stopPrank();
+        assertGt(uOut, 0);
+        assertGt(aOut, 0);
+        assertEq(usds.balanceOf(recipient), uOut, "USDS to recipient");
+        assertEq(am.balanceOf(recipient), aOut, "AM to recipient");
+        assertEq(susds.balanceOf(recipient), 0, "sUSDS must be unwrapped");
+        _assertHelperEmpty();
+    }
+
+    // ---------------------------------------------------------------- gas (story 120)
+
+    /// @dev gasleft() deltas around the external call, logged for the story record. The phUSD
+    ///      numbers are compared against the pre-story helper via `forge test --gas-report`.
+    function test_gas_routes() public {
+        uint256 amt = 1000e18;
+        uint256 g;
+
+        _fund(address(susds), user, amt);
+        vm.startPrank(user);
+        IERC20(address(susds)).approve(address(helper), amt);
+        g = gasleft();
+        helper.swapToPhUSD(address(susds), amt, 0, recipient, block.timestamp);
+        console.log("gas sUSDS->phUSD", g - gasleft());
+        vm.stopPrank();
+
+        _fund(address(susds), user, amt);
+        vm.startPrank(user);
+        IERC20(address(susds)).approve(address(helper), amt);
+        g = gasleft();
+        helper.swapToAM(address(susds), amt, 0, recipient, block.timestamp);
+        console.log("gas sUSDS->AM", g - gasleft());
+        vm.stopPrank();
+
+        phUSD.mint(user, amt);
+        vm.startPrank(user);
+        phUSD.approve(address(helper), amt);
+        g = gasleft();
+        helper.swapPhUSDToAM(amt, 0, recipient, block.timestamp);
+        uint256 phAm = g - gasleft();
+        console.log("gas phUSD->AM", phAm);
+        vm.stopPrank();
+
+        am.mint(user, amt);
+        vm.startPrank(user);
+        am.approve(address(helper), amt);
+        g = gasleft();
+        helper.swapAMToPhUSD(amt, 0, recipient, block.timestamp);
+        uint256 amPh = g - gasleft();
+        console.log("gas AM->phUSD", amPh);
+        vm.stopPrank();
+
+        usdc.mint(user, 1000e6);
+        vm.startPrank(user);
+        usdc.approve(address(helper), 1000e6);
+        g = gasleft();
+        helper.swapToAM(address(usdc), 1000e6, 0, recipient, block.timestamp);
+        console.log("gas USDC->AM", g - gasleft());
+        vm.stopPrank();
+
+        vm.deal(user, 1 ether);
+        vm.prank(user);
+        g = gasleft();
+        helper.swapETHToAM{value: 1 ether}(0, recipient, block.timestamp);
+        console.log("gas ETH->AM", g - gasleft());
+
+        // Ceiling well under two router calls (two separate V2 swaps + a helper-held sUSDS hop).
+        assertLt(phAm, 250_000, "phUSD->AM too expensive");
+        assertLt(amPh, 250_000, "AM->phUSD too expensive");
+        _assertHelperEmpty();
     }
 
     receive() external payable {}

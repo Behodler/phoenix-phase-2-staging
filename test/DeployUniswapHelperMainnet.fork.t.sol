@@ -75,6 +75,8 @@ abstract contract Story111Table {
     address constant V3_QUOTER = 0x61fFE014bA17989E743c5F6cB21bF9697530B21e;
     address constant CURVE_DOLA = 0xAA5A67c256e27A5d80712c51971408db3370927D;
     address constant CURVE_USDE = 0x02950460E2b9529D0E00284A5fA2d7bDF3fA4d72;
+    /// @dev Story 120: the constructor gained the Antimatter token.
+    address constant ANTIMATTER = 0x9CA92B527012DfC6Fdca7B7493C722D5901FF151;
     uint24 constant FEE = 500;
 }
 
@@ -100,6 +102,7 @@ contract DeployUniswapHelperMainnetConfigTest is Test, Story111Table {
         assertEq(c.v3Quoter, V3_QUOTER, "v3Quoter");
         assertEq(c.curveDolaPool, CURVE_DOLA, "curveDolaPool");
         assertEq(c.curveUsdePool, CURVE_USDE, "curveUsdePool");
+        assertEq(c.antimatter, ANTIMATTER, "antimatter");
         assertEq(uint256(c.v3Fee), uint256(FEE), "v3Fee");
     }
 
@@ -157,6 +160,7 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
         assertEq(h.v3Quoter(), V3_QUOTER, "v3Quoter");
         assertEq(h.curveDolaPool(), CURVE_DOLA, "curveDolaPool");
         assertEq(h.curveUsdePool(), CURVE_USDE, "curveUsdePool");
+        assertEq(h.antimatter(), ANTIMATTER, "antimatter");
         assertEq(uint256(h.v3Fee()), uint256(FEE), "v3Fee");
     }
 
@@ -196,6 +200,7 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
         assertGt(address(h).code.length, 0, "helper code");
         _assertTable(h);
         assertEq(h.pair(), address(0), "pair absent until Stage 4");
+        assertEq(h.amPair(), address(0), "AM pair absent until the AM pool cutover");
         assertFalse(vm.exists(path), "preview must not write the progress file");
     }
 
@@ -292,6 +297,7 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
             V3_QUOTER,
             CURVE_DOLA,
             CURVE_USDE,
+            ANTIMATTER,
             3000
         );
         vm.writeFile(

@@ -49,6 +49,7 @@ library UniswapHelperLocalStack {
         address weth;
         address skyPSM;
         address v2Router;
+        address antimatter;
     }
 
     struct Venues {
@@ -108,6 +109,7 @@ library UniswapHelperLocalStack {
             address(v.v3Quoter),
             address(v.curveDola),
             address(v.curveUsde),
+            t.antimatter,
             V3_FEE
         );
     }

@@ -6,6 +6,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 import {IUniswapV2Router02} from "@yield-claim-nft/interfaces/uniswap/IUniswapV2Router02.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+/// @dev Stand-in for Antimatter if it has no code at FORK_BLOCK (story 120).
+contract ForkStubAM is ERC20 {
+    constructor() ERC20("Antimatter", "AM") {}
+}
 
 interface IUniswapV2FactoryCreate {
     function getPair(address, address) external view returns (address);
@@ -34,6 +40,7 @@ contract UniswapHelperForkTest is Test {
     address constant V3_QUOTER = 0x61fFE014bA17989E743c5F6cB21bF9697530B21e;
     address constant CURVE_DOLA = 0xAA5A67c256e27A5d80712c51971408db3370927D;
     address constant CURVE_USDE = 0x02950460E2b9529D0E00284A5fA2d7bDF3fA4d72;
+    address constant ANTIMATTER = 0x9CA92B527012DfC6Fdca7B7493C722D5901FF151;
 
     /// @dev Quotes are read in the same state as the swap and are exact for every venue except one:
     ///      the Curve DOLA-3CRV metapool's `get_dy_underlying` for USDC -> DOLA estimates the 3pool
@@ -43,6 +50,8 @@ contract UniswapHelperForkTest is Test {
 
     UniswapHelper helper;
     address lp;
+    address am;
+    address amLp;
     address user = makeAddr("user");
     address recipient = makeAddr("recipient");
 
@@ -53,6 +62,10 @@ contract UniswapHelperForkTest is Test {
             return;
         }
         vm.createSelectFork(rpc, FORK_BLOCK);
+
+        // Story 120: the live Antimatter token, or a plain ERC20 stand-in if it is not deployed yet
+        // at FORK_BLOCK. Either way the AM/sUSDS pair is created and seeded in-fork below.
+        am = ANTIMATTER.code.length > 0 ? ANTIMATTER : address(new ForkStubAM());
 
         // Deploy from a dedicated EOA: the test contract's own CREATE addresses collide with mainnet
         // addresses that already hold ETH dust, which would mask the zero-balance assertions.
@@ -71,6 +84,7 @@ contract UniswapHelperForkTest is Test {
             V3_QUOTER,
             CURVE_DOLA,
             CURVE_USDE,
+            am,
             500
         );
 
@@ -89,6 +103,22 @@ contract UniswapHelperForkTest is Test {
             IUniswapV2Router02(V2_ROUTER).addLiquidity(SUSDS, PHUSD, shares, seed, 0, 0, address(this), block.timestamp);
         }
         assertEq(helper.pair(), lp, "helper resolves the pair");
+
+        amLp = factory.getPair(SUSDS, am);
+        if (amLp == address(0)) {
+            // Seed ~$1M of sUSDS against 4M AM (AM ~ $0.25).
+            amLp = factory.createPair(SUSDS, am);
+            uint256 seed = 1_000_000e18;
+            deal(USDS, address(this), seed);
+            IERC20(USDS).approve(SUSDS, seed);
+            uint256 shares = IERC4626(SUSDS).deposit(seed, address(this));
+            deal(am, address(this), 4 * seed);
+            IERC20(SUSDS).approve(V2_ROUTER, shares);
+            IERC20(am).approve(V2_ROUTER, 4 * seed);
+            IUniswapV2Router02(V2_ROUTER)
+                .addLiquidity(SUSDS, am, shares, 4 * seed, 0, 0, address(this), block.timestamp);
+        }
+        assertEq(helper.amPair(), amLp, "helper resolves the AM pair");
         _assertHelperEmpty();
     }
 
@@ -116,7 +146,7 @@ contract UniswapHelperForkTest is Test {
     function _assertHelperEmpty() internal view {
         address h = address(helper);
         assertEq(h.balance, 0, "helper ETH");
-        address[8] memory toks = [PHUSD, SUSDS, USDS, USDC, DOLA, USDE, WETH, lp];
+        address[10] memory toks = [PHUSD, SUSDS, USDS, USDC, DOLA, USDE, WETH, lp, am, amLp];
         for (uint256 i; i < toks.length; i++) {
             assertEq(IERC20(toks[i]).balanceOf(h), 0, "helper holds a token");
         }
@@ -264,6 +294,94 @@ contract UniswapHelperForkTest is Test {
         assertApproxEqRel(sOut, sIn, 1e15, "sUSDS back");
         assertApproxEqRel(pOut2, pUsed, 1e15, "phUSD back");
         assertEq(IERC20(lp).balanceOf(user), 0, "all LP burned");
+        _assertHelperEmpty();
+    }
+
+    // ---------------------------------------------------------------- Antimatter (story 120)
+
+    function test_fork_amRoutes_everyStable_bothWays() public {
+        address[5] memory toks = _stables();
+        for (uint256 i; i < toks.length; i++) {
+            uint256 amt = 1000 * _unit(toks[i]);
+            _fund(toks[i], user, amt);
+            uint256 quote = helper.quoteToAM(toks[i], amt);
+            vm.startPrank(user);
+            IERC20(toks[i]).approve(address(helper), amt);
+            uint256 out = helper.swapToAM(toks[i], amt, quote * 999 / 1000, recipient, block.timestamp);
+            vm.stopPrank();
+            console2.log("to AM from", IERC20Meta(toks[i]).symbol(), out);
+            assertGt(out, 0, "no AM");
+            assertApproxEqRel(out, quote, QUOTE_TOLERANCE, "quote != actual (to AM)");
+            _assertHelperEmpty();
+
+            uint256 amIn = 4000e18;
+            deal(am, user, amIn);
+            uint256 q2 = helper.quoteFromAM(toks[i], amIn);
+            vm.startPrank(user);
+            IERC20(am).approve(address(helper), amIn);
+            uint256 back = helper.swapFromAM(toks[i], amIn, q2 * 999 / 1000, recipient, block.timestamp);
+            vm.stopPrank();
+            console2.log("from AM to", IERC20Meta(toks[i]).symbol(), back);
+            assertGt(back, 0, "no output");
+            assertApproxEqRel(back, q2, QUOTE_TOLERANCE, "quote != actual (from AM)");
+            _assertHelperEmpty();
+        }
+    }
+
+    function test_fork_amEthAndPhusdRoutes() public {
+        vm.deal(user, 1 ether);
+        uint256 q = helper.quoteETHToAM(1 ether);
+        vm.prank(user);
+        uint256 out = helper.swapETHToAM{value: 1 ether}(q * 999 / 1000, recipient, block.timestamp);
+        assertApproxEqRel(out, q, QUOTE_TOLERANCE, "eth->AM quote");
+        _assertHelperEmpty();
+
+        uint256 amIn = 8000e18;
+        deal(am, user, amIn);
+        uint256 qe = helper.quoteAMToETH(amIn);
+        vm.startPrank(user);
+        IERC20(am).approve(address(helper), amIn);
+        uint256 ethOut = helper.swapAMToETH(amIn, qe * 999 / 1000, payable(recipient), block.timestamp);
+        vm.stopPrank();
+        assertApproxEqRel(ethOut, qe, QUOTE_TOLERANCE, "AM->eth quote");
+        _assertHelperEmpty();
+
+        deal(PHUSD, user, 1000e18);
+        uint256 qa = helper.quotePhUSDToAM(1000e18);
+        vm.startPrank(user);
+        IERC20(PHUSD).approve(address(helper), 1000e18);
+        uint256 amOut = helper.swapPhUSDToAM(1000e18, qa, recipient, block.timestamp);
+        vm.stopPrank();
+        assertEq(amOut, qa, "phUSD->AM quote");
+        _assertHelperEmpty();
+
+        deal(am, user, 4000e18);
+        uint256 qp = helper.quoteAMToPhUSD(4000e18);
+        vm.startPrank(user);
+        IERC20(am).approve(address(helper), 4000e18);
+        uint256 phOut = helper.swapAMToPhUSD(4000e18, qp, recipient, block.timestamp);
+        vm.stopPrank();
+        assertEq(phOut, qp, "AM->phUSD quote");
+        _assertHelperEmpty();
+    }
+
+    function test_fork_amLiquidity_addAndRemove() public {
+        deal(USDS, user, 5000e18);
+        deal(am, user, 4000e18);
+        vm.startPrank(user);
+        IERC20(USDS).approve(address(helper), 5000e18);
+        IERC20(am).approve(address(helper), 4000e18);
+        (uint256 uUsed,, uint256 liq) = helper.addLiquidityAMUSDS(5000e18, 4000e18, 0, 4000e18, user, block.timestamp);
+        assertEq(IERC20(USDS).balanceOf(user), 5000e18 - uUsed, "USDS refund");
+        assertEq(IERC20(amLp).balanceOf(user), liq, "AM LP to user");
+        _assertHelperEmpty();
+
+        IERC20(amLp).approve(address(helper), liq);
+        (uint256 uOut, uint256 aOut) =
+            helper.removeLiquidityAMUSDS(liq, uUsed * 999 / 1000, 0, recipient, block.timestamp);
+        vm.stopPrank();
+        assertApproxEqRel(uOut, uUsed, 1e15, "USDS back");
+        assertApproxEqRel(aOut, 4000e18, 1e15, "AM back");
         _assertHelperEmpty();
     }
 }

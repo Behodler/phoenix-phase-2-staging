@@ -19,6 +19,7 @@ import {MockCurveStableSwapNG} from "../src/mocks/MockCurveStableSwapNG.sol";
 import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 import {IUniswapV3SwapRouter} from "../src/periphery/interfaces/IUniswapV3SwapRouter.sol";
 import {IQuoterV2} from "../src/periphery/interfaces/IQuoterV2.sol";
+import {Antimatter} from "antimatter/Antimatter.sol";
 
 /// @title  UniswapHelperAnvilTest
 /// @notice Story 110. Deploys the anvil mock set through `UniswapHelperLocalStack` — the SAME
@@ -26,6 +27,8 @@ import {IQuoterV2} from "../src/periphery/interfaces/IQuoterV2.sol";
 ///         and the canonical Uniswap V2 stack, seeds the phUSD/sUSDS pair, then drives every
 ///         UniswapHelper route in both directions plus all four liquidity operations, asserting
 ///         quote == actual where the helper quotes, and that the helper holds nothing afterwards.
+///         Story 120: the real `Antimatter` token, with the AM/sUSDS pair created AFTER the helper is
+///         deployed (DeployMocks order: helper at 11.8, AM pair at 11.10) to prove lazy resolution.
 contract UniswapHelperAnvilTest is Test {
     uint256 internal constant PAIR_SEED = 50_000e18;
 
@@ -40,6 +43,8 @@ contract UniswapHelperAnvilTest is Test {
     IUniswapV2FactoryLike internal factory;
     IUniswapV2RouterLike internal router;
     address internal lp;
+    Antimatter internal am;
+    address internal amLp;
 
     UniswapHelperLocalStack.Inputs internal inputs;
     MockUniswapV3SwapRouter internal v3Router;
@@ -79,6 +84,8 @@ contract UniswapHelperAnvilTest is Test {
         phUSD.approve(address(router), type(uint256).max);
         router.addLiquidity(address(susds), address(phUSD), shares, PAIR_SEED, 0, 0, address(this), block.timestamp);
 
+        am = new Antimatter(address(this));
+
         inputs = UniswapHelperLocalStack.Inputs({
             phUSD: address(phUSD),
             sUSDS: address(susds),
@@ -88,7 +95,8 @@ contract UniswapHelperAnvilTest is Test {
             usde: address(usde),
             weth: weth,
             skyPSM: address(psm),
-            v2Router: address(router)
+            v2Router: address(router),
+            antimatter: address(am)
         });
         UniswapHelperLocalStack.Venues memory v = UniswapHelperLocalStack.deploy(inputs);
         v3Router = v.v3Router;
@@ -96,6 +104,15 @@ contract UniswapHelperAnvilTest is Test {
         curveDola = v.curveDola;
         curveUsde = v.curveUsde;
         helper = v.helper;
+
+        // AM/sUSDS pair AFTER the helper, as on anvil (Phase 11.10 after 11.8): ~3 AM per share.
+        require(helper.amPair() == address(0), "AM pair must not exist yet");
+        usds.mint(address(this), PAIR_SEED);
+        uint256 amShares = susds.deposit(PAIR_SEED, address(this));
+        am.mint(address(this), 3 * PAIR_SEED);
+        amLp = factory.createPair(address(susds), address(am));
+        am.approve(address(router), type(uint256).max);
+        router.addLiquidity(address(susds), address(am), amShares, 3 * PAIR_SEED, 0, 0, address(this), block.timestamp);
 
         vm.warp(1_000_000);
     }
@@ -131,12 +148,16 @@ contract UniswapHelperAnvilTest is Test {
         assertEq(susds.balanceOf(h), 0, "helper sUSDS");
         assertEq(IERC20(weth).balanceOf(h), 0, "helper WETH");
         assertEq(IERC20(lp).balanceOf(h), 0, "helper LP");
+        assertEq(am.balanceOf(h), 0, "helper AM");
+        assertEq(IERC20(amLp).balanceOf(h), 0, "helper AM LP");
     }
 
     // ---------------------------------------------------------------- wiring
 
     function test_wiring_matchesAnvilDeploy() public view {
         assertEq(helper.pair(), lp, "pair");
+        assertEq(helper.antimatter(), address(am), "antimatter");
+        assertEq(helper.amPair(), amLp, "amPair resolves lazily");
         assertEq(helper.skyPSM(), address(psm));
         assertEq(helper.v2Router(), address(router));
         assertEq(helper.v3SwapRouter(), address(v3Router));
@@ -285,6 +306,149 @@ contract UniswapHelperAnvilTest is Test {
         assertApproxEqAbs(pOut, pUsed, 1e6, "phUSD back");
         assertEq(usds.balanceOf(recipient), uOut);
         assertEq(phUSD.balanceOf(recipient), pOut);
+        _assertHelperEmpty();
+    }
+
+    // ---------------------------------------------------------------- Antimatter (story 120)
+
+    function test_swapToAM_everyStable() public {
+        psm.setTin(1e15);
+        address[5] memory toks = _stables();
+        for (uint256 i; i < toks.length; i++) {
+            uint256 amt = _amount(toks[i]);
+            uint256 quote = helper.quoteToAM(toks[i], amt);
+            _fund(toks[i], user, amt);
+            uint256 before = am.balanceOf(recipient);
+            vm.startPrank(user);
+            IERC20(toks[i]).approve(address(helper), amt);
+            uint256 out = helper.swapToAM(toks[i], amt, quote, recipient, block.timestamp);
+            vm.stopPrank();
+            assertGt(out, 0, "no AM");
+            assertEq(out, quote, "quote != actual");
+            assertEq(am.balanceOf(recipient) - before, out, "recipient AM");
+            assertEq(IERC20(toks[i]).balanceOf(user), 0, "input not pulled");
+            _assertHelperEmpty();
+        }
+    }
+
+    function test_swapFromAM_everyStable() public {
+        psm.setTout(1e15);
+        address[5] memory toks = _stables();
+        for (uint256 i; i < toks.length; i++) {
+            uint256 amIn = 750_123456789012345678;
+            uint256 quote = helper.quoteFromAM(toks[i], amIn);
+            am.mint(user, amIn);
+            uint256 before = IERC20(toks[i]).balanceOf(recipient);
+            vm.startPrank(user);
+            am.approve(address(helper), amIn);
+            uint256 out = helper.swapFromAM(toks[i], amIn, quote, recipient, block.timestamp);
+            vm.stopPrank();
+            assertGt(out, 0, "no output");
+            assertEq(out, quote, "quote != actual");
+            assertGe(IERC20(toks[i]).balanceOf(recipient) - before, out, "recipient output");
+            _assertHelperEmpty();
+        }
+    }
+
+    function test_amEthRoutes() public {
+        uint256 ethIn = 0.1 ether;
+        uint256 quote = helper.quoteETHToAM(ethIn);
+        vm.deal(user, ethIn);
+        vm.prank(user);
+        uint256 out = helper.swapETHToAM{value: ethIn}(quote, recipient, block.timestamp);
+        assertGt(out, 0);
+        assertEq(out, quote, "eth->AM quote != actual");
+        assertEq(am.balanceOf(recipient), out);
+        _assertHelperEmpty();
+
+        uint256 amIn = 900e18;
+        uint256 qe = helper.quoteAMToETH(amIn);
+        am.mint(user, amIn);
+        vm.startPrank(user);
+        am.approve(address(helper), amIn);
+        uint256 ethOut = helper.swapAMToETH(amIn, qe, payable(recipient), block.timestamp);
+        vm.stopPrank();
+        assertGt(ethOut, 0);
+        assertEq(ethOut, qe, "AM->eth quote != actual");
+        assertEq(recipient.balance, ethOut, "recipient ETH");
+        _assertHelperEmpty();
+    }
+
+    function test_phusdToAM() public {
+        uint256 phIn = 250e18;
+        uint256 q = helper.quotePhUSDToAM(phIn);
+        phUSD.mint(user, phIn);
+        vm.startPrank(user);
+        phUSD.approve(address(helper), phIn);
+        vm.expectCall(
+            address(router), abi.encodeWithSelector(IUniswapV2RouterLike.swapExactTokensForTokens.selector), 1
+        );
+        uint256 out = helper.swapPhUSDToAM(phIn, q, recipient, block.timestamp);
+        vm.stopPrank();
+        assertGt(out, 0);
+        assertEq(out, q, "phUSD->AM quote != actual");
+        assertEq(am.balanceOf(recipient), out);
+        _assertHelperEmpty();
+    }
+
+    function test_amToPhusd() public {
+        uint256 amIn = 750e18;
+        uint256 qb = helper.quoteAMToPhUSD(amIn);
+        am.mint(user, amIn);
+        vm.startPrank(user);
+        am.approve(address(helper), amIn);
+        vm.expectCall(
+            address(router), abi.encodeWithSelector(IUniswapV2RouterLike.swapExactTokensForTokens.selector), 1
+        );
+        uint256 back = helper.swapAMToPhUSD(amIn, qb, recipient, block.timestamp);
+        vm.stopPrank();
+        assertGt(back, 0);
+        assertEq(back, qb, "AM->phUSD quote != actual");
+        assertEq(phUSD.balanceOf(recipient), back);
+        _assertHelperEmpty();
+    }
+
+    function test_amLiquidity_sUSDS_and_USDS() public {
+        // sUSDS variant, AM over-supplied.
+        _fund(address(susds), user, 1_000e18);
+        am.mint(user, 6_000e18);
+        vm.startPrank(user);
+        IERC20(address(susds)).approve(address(helper), 1_000e18);
+        am.approve(address(helper), 6_000e18);
+        (uint256 sUsed, uint256 aUsed, uint256 liq) =
+            helper.addLiquidityAMSUSDS(1_000e18, 6_000e18, 0, 0, user, block.timestamp);
+        assertGt(liq, 0, "no AM LP");
+        assertEq(IERC20(amLp).balanceOf(user), liq);
+        assertEq(am.balanceOf(user), 6_000e18 - aUsed, "AM refund");
+        _assertHelperEmpty();
+        IERC20(amLp).approve(address(helper), liq);
+        (uint256 sOut, uint256 aOut) = helper.removeLiquidityAMSUSDS(liq, 0, 0, recipient, block.timestamp);
+        vm.stopPrank();
+        assertApproxEqAbs(sOut, sUsed, 1e6, "sUSDS back");
+        assertApproxEqAbs(aOut, aUsed, 1e6, "AM back");
+        _assertHelperEmpty();
+
+        // USDS variant, USDS over-supplied.
+        usds.mint(user, 5_000e18);
+        am.mint(user, 1_500e18);
+        vm.startPrank(user);
+        usds.approve(address(helper), 5_000e18);
+        am.approve(address(helper), 1_500e18);
+        uint256 usdsBefore = usds.balanceOf(user);
+        (uint256 uUsed, uint256 aUsed2, uint256 liq2) =
+            helper.addLiquidityAMUSDS(5_000e18, 1_500e18, 0, 0, user, block.timestamp);
+        assertEq(aUsed2, 1_500e18, "all AM used");
+        assertEq(usdsBefore - usds.balanceOf(user), uUsed, "USDS refund");
+        assertEq(susds.allowance(address(helper), address(router)), 0, "sUSDS allowance reset");
+        assertEq(am.allowance(address(helper), address(router)), 0, "AM allowance reset");
+        _assertHelperEmpty();
+        IERC20(amLp).approve(address(helper), liq2);
+        uint256 recipientUsds = usds.balanceOf(recipient);
+        (uint256 uOut, uint256 aOut2) = helper.removeLiquidityAMUSDS(liq2, 0, 0, recipient, block.timestamp);
+        vm.stopPrank();
+        assertApproxEqRel(uOut, uUsed, 1e12, "USDS back");
+        assertApproxEqAbs(aOut2, aUsed2, 1e6, "AM back");
+        assertEq(usds.balanceOf(recipient) - recipientUsds, uOut);
         _assertHelperEmpty();
     }
 

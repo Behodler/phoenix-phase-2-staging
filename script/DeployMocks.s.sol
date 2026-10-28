@@ -1555,6 +1555,13 @@ contract DeployMocks is Script {
         require(stableStakerV2.claimEnabled(), "claim unblock trial: claimEnabled must be true");
         console.log("StableStakerV2: claimEnabled set TRUE (trial run of the mainnet unblock)");
 
+        // ====== PHASE 11.14: Antimatter demo balances (story 120) ======
+        // APPENDED after 11.13 and before the terminal sweep: transactions only, no deployments, so
+        // no existing address moves (inserting before 11.10-11.12 would shift the AntimatterPoolSeeder
+        // and SYAHarvester CREATE addresses). Phase 11.8's helper resolves the AM/sUSDS pair lazily,
+        // and 11.10 has created and seeded it by now.
+        _antimatterDemoBalances(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1975,6 +1982,22 @@ contract DeployMocks is Script {
         console.log("  deployer demo balances topped up: DOLA, USDC, USDe, USDS, sUSDS");
     }
 
+    /// @dev Phase 11.14 (story 120): checks UniswapHelper resolves the AM/sUSDS pair seeded in 11.10
+    ///      and mints the deployer the same `UH_DEMO_18` demo amount of AM that 11.8 gives it of each
+    ///      stable. The deployer owns Antimatter, which admits it as a minter.
+    function _antimatterDemoBalances(address deployer) internal {
+        console.log("\n=== Phase 11.14: Antimatter demo balances (story 120) ===");
+        require(antimatterSusdsPair != address(0), "story-120: AM/sUSDS pair not created");
+        require(uniswapHelper.amPair() == antimatterSusdsPair, "story-120: UniswapHelper resolves the wrong AM pair");
+        require(uniswapHelper.antimatter() == address(antimatter), "story-120: UniswapHelper antimatter mismatch");
+
+        uint256 before = antimatter.balanceOf(deployer);
+        antimatter.mint(deployer, UH_DEMO_18);
+        require(antimatter.balanceOf(deployer) == before + UH_DEMO_18, "story-120: demo AM mint did not land");
+        console.log("  UniswapHelper.amPair():", uniswapHelper.amPair());
+        console.log("  deployer demo AM minted:", UH_DEMO_18);
+    }
+
     function _uhInputs() internal view returns (UniswapHelperLocalStack.Inputs memory) {
         return UniswapHelperLocalStack.Inputs({
             phUSD: address(phUSD),
@@ -1985,7 +2008,8 @@ contract DeployMocks is Script {
             usde: address(usde),
             weth: weth9,
             skyPSM: address(mockSkyPSM),
-            v2Router: address(uniRouter)
+            v2Router: address(uniRouter),
+            antimatter: address(antimatter)
         });
     }
 

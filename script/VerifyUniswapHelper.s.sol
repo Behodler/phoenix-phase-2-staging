@@ -60,6 +60,12 @@ contract VerifyUniswapHelper is UniswapHelperMainnetBase {
         address p = helper.pair();
         address factory = IUniHelperPreflightV2Router(c.v2Router).factory();
         require(p == IUniHelperVerifyFactory(factory).getPair(c.sUSDS, c.phUSD), "verify: pair() != factory.getPair");
+        // Story 120: the AM/sUSDS pair resolves lazily too; zero until the mainnet AM pool cutover.
+        require(
+            helper.amPair() == IUniHelperVerifyFactory(factory).getPair(c.sUSDS, c.antimatter),
+            "verify: amPair() != factory.getPair"
+        );
+        console.log("AM/sUSDS pair (zero until the AM pool cutover):", helper.amPair());
         if (p == address(0)) {
             console.log("pair not yet created (Stage 4 pending) - quote smoke test skipped.");
             return;

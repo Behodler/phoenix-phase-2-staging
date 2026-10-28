@@ -12,6 +12,7 @@ import {MockSUSDS} from "../src/mocks/MockSUSDS.sol";
 import {MockDola} from "../src/mocks/MockDola.sol";
 import {MockUSDe} from "../src/mocks/MockUSDe.sol";
 import {MockSkyPSM} from "../src/mocks/MockSkyPSM.sol";
+import {Antimatter} from "antimatter/Antimatter.sol";
 import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 
 /// @dev Pins the progress path (never the real progress.11155111.json), the deployer key and the WETH
@@ -70,6 +71,7 @@ contract DeployUniswapHelperSepoliaTest is Test {
     address internal weth;
     IUniswapV2RouterLike internal router;
     address internal pair;
+    Antimatter internal am;
 
     function setUp() public {
         vm.chainId(11155111);
@@ -87,6 +89,7 @@ contract DeployUniswapHelperSepoliaTest is Test {
         usde = new MockUSDe();
         psm = new MockSkyPSM(address(usdc), address(usds));
         usdc.mint(address(psm), 1_000_000e6);
+        am = new Antimatter(address(this)); // story 120: read from the progress file's "Antimatter" key
 
         usds.mint(address(this), 2_000e18);
         usds.approve(address(susds), type(uint256).max);
@@ -134,6 +137,8 @@ contract DeployUniswapHelperSepoliaTest is Test {
             _entry("PhusdSusdsPair", pair),
             ",",
             _entry("MockSkyPSM", address(psm)),
+            ",",
+            _entry("Antimatter", address(am)),
             extra,
             "}}"
         );
@@ -167,6 +172,8 @@ contract DeployUniswapHelperSepoliaTest is Test {
         assertEq(h.skyPSM(), address(psm), "psm");
         assertEq(h.phUSD(), address(phUSD), "phUSD");
         assertEq(h.v2Router(), address(router), "v2 router");
+        assertEq(h.antimatter(), address(am), "antimatter");
+        assertEq(h.amPair(), address(0), "no AM pair on Sepolia");
         _cleanup();
     }
 
