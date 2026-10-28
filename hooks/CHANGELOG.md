@@ -5,6 +5,36 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-10-28
+
+Story-120 (antimatter-route). `UniswapHelper` is upgraded in place to also route Antimatter (AM).
+**Additive for callers**: every existing function, event and error keeps its signature, so the
+phUSD routes work unchanged against the helper deployed on mainnet today. The constructor gains
+one argument, so the ABI's `constructor` entry changes. Not published.
+
+### Changed
+- `uniswapHelperAbi`
+  - Constructor: new `antimatter_` address, between `curveUsdePool_` and `v3Fee_` (15 args).
+  - Added getters `antimatter()` and `amPair()`. `amPair()` is `factory.getPair(sUSDS, AM)`,
+    resolved at call time, and is zero until the AM/sUSDS pair exists.
+  - Added AM swaps: `swapToAM` / `swapFromAM` (DOLA, USDC, USDe, USDS, sUSDS),
+    `swapETHToAM` / `swapAMToETH`, and `swapPhUSDToAM` / `swapAMToPhUSD`. The phUSD <-> AM
+    swaps make a single Router02 call over [phUSD, sUSDS, AM].
+  - Added AM quotes: `quoteToAM` / `quoteFromAM` and `quotePhUSDToAM` / `quoteAMToPhUSD` (view),
+    plus `quoteETHToAM` / `quoteAMToETH`, which are non-view (QuoterV2), so call them with
+    `simulateContract` / `eth_call` only.
+  - Added AM/sUSDS liquidity: `addLiquidityAMSUSDS` / `addLiquidityAMUSDS` and
+    `removeLiquidityAMSUSDS` / `removeLiquidityAMUSDS`. The events are the existing
+    `LiquidityAdded` / `LiquidityRemoved`: their `phusdIn` / `phusdOut` fields carry the AM
+    amount, and the pair address tells the two pools apart.
+  - Every AM function reverts `PairNotFound` while the AM/sUSDS pair does not exist. That is the
+    state on mainnet (until the AM pool cutover and the helper redeploy) and on Sepolia.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+No key changes. The anvil `UniswapHelper` is redeployed at the same address (DeployMocks Phase 11.8,
+whose CREATE nonce is unchanged). Gate the AM options on `AntimatterSusdsPair` being non-zero: it is
+live on anvil and zero on mainnet and Sepolia.
+
 ## [0.18.0] - 2026-10-24
 
 Story-106 (Balancexit, post-cutover). The mainnet BalancerPoolerV2 -> UniPoolerV2 cutover has

@@ -16,6 +16,25 @@ broadcast at **Stage 4**. Until then:
 
 After Stage 4, re-run `npm run uniswap-helper:verify`. It then runs the quote smoke test on every route.
 
+## Story 120: the next deploy needs Antimatter, and must follow the AM pool cutover
+
+Story 120 upgraded `UniswapHelper` in place with Antimatter (AM) routes and AM/sUSDS liquidity. The
+constructor now takes **15** inputs: the 14 below plus `antimatter`, read from the `Antimatter` key of
+`mainnet-addresses.ts` (`0x9CA92B527012DfC6Fdca7B7493C722D5901FF151`). It sits between `curveUsdePool` and
+`v3Fee`. Wherever this page says "14 constructor inputs", read 15.
+
+- The helper live at `0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3` predates story 120. It has no
+  `antimatter()` getter, so `:verify` and the idempotent re-run path both fail against it with the new
+  script. That is expected until the redeploy. Its phUSD routes keep working, because the new ABI is
+  additive.
+- **Do not redeploy before the mainnet AM/sUSDS pool cutover** (the stories 112-117 cutover). The helper
+  resolves the AM pair lazily with `factory.getPair(sUSDS, AM)`. It deploys without the pair, but every
+  AM function reverts `PairNotFound` until the pair exists. `AntimatterSusdsPair` is still a zero placeholder in
+  `mainnet-addresses.ts`.
+- The redeploy is a later cutover story. It must clear (or archive) the old
+  `server/deployments/progress.uniswap-helper.1.json` and re-point the `UniswapHelper` key. The patcher refuses
+  to overwrite a non-zero value, so the cutover story has to deal with that explicitly.
+
 ## Steps
 
 All commands run from the repo root, with `RPC_MAINNET` exported (`.envrc`) and the Ledger connected on
