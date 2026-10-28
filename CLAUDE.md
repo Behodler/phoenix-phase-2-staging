@@ -344,6 +344,14 @@ The bug works like this. Curve Router NG stops at the first empty pool slot and 
 
 Also check each payload off-chain against the story-052 rules: no non-zero entry after the executed prefix, no zero intermediate token, `path[2k] == tokenOut` where `k` is the executed hop count, and zeroed unexecuted rows and pools. Keep the dry run in the `:preview` script and the bidirectional assertions in the script body, so a broadcast cannot skip them.
 
+## USDC YieldStrategy Destination: Move Off autoUSD At The Next Cutover
+
+**The owner wants a safer destination for USDC than autoUSD.** The live USDC YieldStrategy (`YieldStrategyUSDC` in `server/deployments/mainnet-addresses.ts`) deposits into autoUSD, which carries too much trust risk for the protocol. StableStaker is the most exposed client, because its stakers' USDC sits in that position.
+
+**Reference: audit finding `ryv18l31`** (reflax-yield-vault run 18, L-31; JSON at `/home/justin/code/audits/reflax-yield-vault/reports/18/findings/low/L-31-direct-strategy-no-exit-floor-v2-mints-shortfall.json`, write-up under `[L-31]` in `/home/justin/code/audits/reflax-yield-vault/reports/18/submissions/qa-report.md`). The live USDC strategy `0xaFDf8DeA…AB83` is a direct `ERC4626YieldStrategy` over autoUSD. Its `_disposeShares` redeems with no minimum-assets floor. autoUSD's redeem delivers a measured, static 1.38 bps below `convertToAssets`, and StableStakerV2 mints that shortfall as unbacked phUSD on every USDC `autoAnnihilate`. The proven loss is dust today, but the finding's escalation triggers note an unverified risk: an exit larger than autoUSD's idle balance might have its redeem output depressed by manipulation. Any replacement destination whose `previewRedeem`/`convertToAssets` gap exceeds about 10 bps would raise the finding to Medium, so measure that gap on a fork before choosing a new vault.
+
+This is guidance for future cutovers, not a request to migrate now. Whenever the USDC YieldStrategy is upgraded, redeployed or otherwise cut over, do not simply redeploy against autoUSD. Seek a different, lower-trust destination and raise the choice with the user before writing the script. Treat the destination vault as a safety-critical parameter under [Configuration Safety](#configuration-safety-non-negotiable): record in a code comment where the choice came from and why it was judged safer.
+
 ## Contract Deployment Order
 
 Critical deployment sequence (dependencies must be deployed first):
