@@ -438,8 +438,10 @@ contract MigrateStableStakerMainnet is Script {
     }
 
     /// @dev Route payloads transcribed verbatim from lib/vault/AMMRoutes.json (Curve.RouterNG):
-    ///      USDe <-> sUSDe via crvUSD, two stable-ng hops each way. setRoute validates the path
-    ///      endpoints (path[0] == tokenIn, last non-zero == tokenOut) on-chain.
+    ///      USDe <-> sUSDe via crvUSD, two stable-ng hops each way. The adapter deployed by this
+    ///      script (0x2D02…D6f) validates only the path endpoints (path[0] == tokenIn, last
+    ///      non-zero == tokenOut). Current vault source (story 052, M-01 fix) instead enforces
+    ///      Curve Router NG contiguity; these routes pass both rules.
     function _setUsdeRoutes(CurveAMMAdapter adapter) internal {
         address[5] memory noBasePools; // all zero — no meta-swaps on this route
 
