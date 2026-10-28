@@ -327,6 +327,23 @@ If you encounter a safety parameter not in this list, the list's incompleteness 
 
 This repo deploys to **Mainnet with real funds** (see the multi-network table above). The phUSD minter and Phlimbo handle user collateral and rewards. A single unbounded swap, missing oracle staleness check, or misassigned admin role is the difference between a working protocol and a post-mortem. Pedantry is the cheapest insurance available — pay it every time.
 
+## YieldStrategy Cutovers With Curve AMM Routes (OPEN BUG — audit ryv18m5)
+
+**Any cutover, migration or route change that calls `setRoute` on a `CurveAMMAdapter` must treat the route as unvalidated by the contract.** Audit finding `ryv18m5` (reflax-yield-vault run 18, M-05; full write-up at `/home/justin/code/audits/reflax-yield-vault/reports/18/submissions/M-05.md`) shows that legacy adapters still on mainnet accept malformed routes, and that legacy code carrying the same flaw is still percolating through the stack.
+
+The bug works like this. Curve Router NG stops at the first empty pool slot and delivers whatever token sits at that point in the path. The story-052 validator in `reflax-yield-vault` source rejects such "gapped" routes, but the live adapter `0x2D024e0d03Fb6Ead4F8E7Ba1EBECF6db0E755D6f` was deployed before story-052. That adapter only checks that the last non-zero path entry equals `tokenOut`, so a payload like `[USDe, pool, crvUSD, 0, sUSDe, 0, …]` is stored. Every later deposit then succeeds and emits a normal event while the strategy actually receives crvUSD. The deposit floor is denominated in sUSDe shares, so crvUSD at ~1:1 clears it. The strategy also trusts the router's return value instead of measuring its balance, and it has no way to move the crvUSD out. The result is a silent, permanent loss shared by every client of the commingled position (e.g. YieldStrategyUSDe `0xaC2e…7f95`, which holds this adapter as an `immutable`).
+
+**Preferred fix.** Cut over to a YieldStrategy bound to a new adapter built from the story-052 (or later) `reflax-yield-vault` source. Because `ammAdapter` is immutable on `ERC4626MarketYieldStrategy`, redeploying only the adapter does not protect an existing strategy. Before using any adapter, confirm from its deploy commit or bytecode that it contains the story-052 validator. Do not assume it does because the submodule source does.
+
+**If the fixed adapter cannot be deployed, dry-run every route before the mainnet `setRoute`.** On a mainnet fork, the script must:
+
+1. Call `setRoute` with the exact payload that will be broadcast, pranking the adapter owner.
+2. Swap a realistic amount `tokenIn -> tokenOut` through the adapter, and assert the receiver's **`tokenOut` balance delta** is at least the expected minimum. Do not trust the swap's return value: a gapped route returns the intermediate token's amount.
+3. Swap back in the reverse direction (`tokenOut -> tokenIn`) on its route and assert the same balance-delta check.
+4. Abort the broadcast if either direction fails or delivers the wrong token.
+
+Also check each payload off-chain against the story-052 rules: no non-zero entry after the executed prefix, no zero intermediate token, `path[2k] == tokenOut` where `k` is the executed hop count, and zeroed unexecuted rows and pools. Keep the dry run in the `:preview` script and the bidirectional assertions in the script body, so a broadcast cannot skip them.
+
 ## Contract Deployment Order
 
 Critical deployment sequence (dependencies must be deployed first):
