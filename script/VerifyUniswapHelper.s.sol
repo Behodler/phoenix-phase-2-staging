@@ -41,7 +41,7 @@ contract VerifyUniswapHelper is UniswapHelperMainnetBase {
         _requireVenues(c);
 
         address fromProgress = _progressHelper();
-        address fromBook = _bookAddress(vm.readFile(ADDRESS_BOOK), "UniswapHelper");
+        address fromBook = _bookHelper();
         console.log("  progress file :", fromProgress);
         console.log("  address book  :", fromBook);
         if (fromProgress != address(0) && fromBook != address(0)) {
@@ -70,6 +70,12 @@ contract VerifyUniswapHelper is UniswapHelperMainnetBase {
         console.log("phUSD/sUSDS pair:", p);
         _quoteSmoke(helper, c);
         console.log("OK: quote smoke test passed on every route.");
+    }
+
+    /// @dev The helper named by the address book's `UniswapHelper` key. `virtual` only so fork tests pinned before
+    ///      the deploy can stand in the pre-patch zero placeholder; production reads ADDRESS_BOOK.
+    function _bookHelper() internal view virtual returns (address) {
+        return _bookAddress(vm.readFile(ADDRESS_BOOK), "UniswapHelper");
     }
 
     function _quoteSmoke(UniswapHelper helper, HelperConfig memory c) internal {

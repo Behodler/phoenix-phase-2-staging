@@ -34,6 +34,8 @@ contract DeployUniswapHelperHarness is DeployUniswapHelperMainnet {
     }
 }
 
+/// @dev The fork block predates the deploy, so the live address book's filled `UniswapHelper` key names a helper with
+///      no code there. The harness stands in the pre-patch zero placeholder so only the scratch progress file counts.
 contract VerifyUniswapHelperHarness is VerifyUniswapHelper {
     string internal progressPath;
 
@@ -43,6 +45,10 @@ contract VerifyUniswapHelperHarness is VerifyUniswapHelper {
 
     function _progressFile() internal view override returns (string memory) {
         return progressPath;
+    }
+
+    function _bookHelper() internal pure override returns (address) {
+        return address(0);
     }
 }
 
@@ -102,8 +108,8 @@ contract DeployUniswapHelperMainnetConfigTest is Test, Story111Table {
         assertEq(b.bookAddress("USDC"), USDC, "USDC, not AutoUSDC");
         assertEq(b.bookAddress("USDe"), USDE, "USDe, not SUSDe");
         assertEq(b.bookAddress("NoSuchKey"), address(0), "absent key");
-        // The patcher fills this; until the human broadcasts it stays the zero placeholder.
-        assertEq(b.bookAddress("UniswapHelper"), address(0), "UniswapHelper still a placeholder");
+        // Filled by the patcher after the 2026-10-23 mainnet broadcast.
+        assertEq(b.bookAddress("UniswapHelper"), 0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3, "deployed UniswapHelper");
     }
 }
 
