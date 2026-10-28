@@ -1544,6 +1544,17 @@ contract DeployMocks is Script {
         // terminal sweep, which stays the last statement and asserts the harvester's end state.
         _deployAndSmokeSyaHarvester(deployer);
 
+        // ====== PHASE 11.13: StableStakerV2 claim unblock — trial run of the mainnet unblock ======
+        // We are moving to open `claim` on mainnet soon, and this trial-runs that owner action
+        // locally so the UI can test annihilating HELD Antimatter (only `claim` leaves Antimatter in
+        // a staker's wallet; `autoAnnihilate` burns it against principal). Phase 6.5 step 10
+        // (story 080) deliberately keeps claims CLOSED and asserts it; that block is KEPT on purpose
+        // so DeployMocks records both decisions in order. Clean up once mainnet has unblocked.
+        // APPENDED after 11.12 and before the terminal sweep, while the deployer still owns V2.
+        stableStakerV2.setClaimEnabled(true);
+        require(stableStakerV2.claimEnabled(), "claim unblock trial: claimEnabled must be true");
+        console.log("StableStakerV2: claimEnabled set TRUE (trial run of the mainnet unblock)");
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1683,6 +1694,7 @@ contract DeployMocks is Script {
         console.log("  - Antimatter is the reward token; Antimatter mints phUSD on annihilate, V2 only for shortfall cover");
         console.log("  - antimatterPerDay mirrors V1: DOLA 10/day, USDC 5/day, USDe 10/day");
         console.log("  - claimEnabled left FALSE - the reward path under test is autoAnnihilate");
+        console.log("  - Phase 11.13 then sets claimEnabled TRUE - trial run of the mainnet unblock");
         console.log("  - V1 deployed but UNTRACKED, seeded with 12 stakers per pool, then drained");
         console.log("    into V2 through CrossVersionMigrator in chunks of 10; V1 left empty and");
         console.log("    stripped of its phUSD mint authority");
