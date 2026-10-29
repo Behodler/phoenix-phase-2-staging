@@ -172,6 +172,25 @@ interface IPhlimboAPYLike {
  *          convention mainnet-addresses.ts uses for undeployed keys. `BalancerPoolerMintDebtHook`
  *          is KEPT: the hook contract is live and unchanged on mainnet; only its dispatcher moved.
  *
+ *        - SYA / StableStaker re-sync with DeployMocks stories 115, 116 and the claim unblock:
+ *          * USDe is registered with SYA in Phase 7.5 (DeployMocks appends it in Phase 11.12), and
+ *            YieldStrategyUSDe gets a deployer StableStakerV2 stake plus sUSDe yield in Phase 9.57,
+ *            because this chain has no migrated stakers to supply the principal.
+ *          * StableStakerV2 opens claims directly in Phase 6.5 (DeployMocks asserts them closed,
+ *            then opens them in Phase 11.13).
+ *          * SYAHarvester and its infrastructure (Phases 11.11/11.12) live in the add-on
+ *            `script/DeploySyaHarvesterSepolia.s.sol`, because its DOLA route runs through the
+ *            MockCurveDolaMetaPool that `DeployUniswapHelperSepolia` deploys after this script. The
+ *            add-on seeds the V4 ETH/USDC pool faucet-sized and skips the smoke harvest (see its header).
+ *        - NOT mirrored: the story-112 seed deepening, the story-114 Antimatter/sUSDS cutover
+ *          rehearsal and the story-120 Phase 11.14 demo Antimatter. `AntimatterPoolSeeder` and
+ *          `AntimatterSusdsPair` stay zero placeholders, so UniswapHelper's AM routes revert
+ *          `PairNotFound` on Sepolia.
+ *
+ *      SEPOLIA-ONLY ADDITION — MockSUSDS is priced at 1.1 USDS (Phase 1, `SEPOLIA_SUSDS_PREMIUM_BPS`)
+ *      so code that assumes 1 sUSDS == 1 USDS misbehaves visibly here, and the phUSD/sUSDS pair is
+ *      seeded at phUSD par to match. DeployMocks keeps sUSDS at 1:1.
+ *
  *      WHAT WAS DELIBERATELY KEPT — the index-6 "bugged pooler" placeholder. On mainnet dispatcher
  *      index 6 is permanently held by the disabled story-047 Balancer pooler. Story 104: with the
  *      Balancer mocks gone the placeholder is a second, never-wired `UniPoolerV2` on the same pair
@@ -219,10 +238,14 @@ contract DeployMocksSepolia is Script {
     // pools (EYE/WETH9 target, USDC/WETH9 routing). Faucet-sized; override with SEPOLIA_WETH_SEED
     // (wei). DeployMocks wraps 300 ETH and seeds 100 WETH per pool.
     uint256 constant SEPOLIA_DEFAULT_WETH_SEED = 0.1 ether;
-    // Story 104: the phUSD/sUSDS UniV2 pair seed (Phase 9.8). 1:1, sized well inside the ~10k
-    // phUSD Phases 9/9.55 mint to the deployer and the 10k sUSDS Phase 1 deposits for it.
+    // sUSDS share-price premium over USDS, in bps (Phase 1): 1 sUSDS = 1.1 USDS.
+    uint256 constant SEPOLIA_SUSDS_PREMIUM_BPS = 1_000;
+    // Story 104: the phUSD/sUSDS UniV2 pair seed (Phase 9.8), sized well inside the ~10k phUSD
+    // Phases 9/9.55 mint to the deployer and the 10k sUSDS Phase 1 deposits for it. The phUSD
+    // side carries the sUSDS premium, so the pair opens with phUSD at par with USDS
+    // (2,000 sUSDS = 2,200 USDS against 2,200 phUSD).
     uint256 constant SEPOLIA_PAIR_SUSDS_SEED = 2_000e18;
-    uint256 constant SEPOLIA_PAIR_PHUSD_SEED = 2_000e18;
+    uint256 constant SEPOLIA_PAIR_PHUSD_SEED = SEPOLIA_PAIR_SUSDS_SEED * (10_000 + SEPOLIA_SUSDS_PREMIUM_BPS) / 10_000;
     // UniPoolerV2 lives at NFTMinterV2 index 4, the slot the Balancer pooler held on mainnet.
     uint256 constant UNI_POOLER_INDEX = 4;
 
@@ -433,6 +456,12 @@ contract DeployMocksSepolia is Script {
         usds.approve(address(susds), initialSusdsDeposit);
         susds.deposit(initialSusdsDeposit, deployer);
         console.log("Deposited 10,000 USDS into MockSUSDS (baseline shares established)");
+
+        // Sepolia-only: price sUSDS at a 10% premium over USDS, like mainnet's accrued sUSDS rate,
+        // so UI and periphery code that silently assumes 1 sUSDS == 1 USDS shows up on testnet.
+        // Donating 10% of the baseline as yield moves the share price from 1 to 1.1 before anyone
+        // else holds shares. DeployMocks keeps sUSDS at 1:1.
+        _priceSusdsAtPremium(initialSusdsDeposit);
 
         // Deploy MockUSDe (ERC20, 18 decimals) — mirrors mainnet Ethena USDe
         gasBefore = gasleft();
@@ -1167,6 +1196,13 @@ contract DeployMocksSepolia is Script {
         stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDC), address(rewardToken));
         console.log("Added YieldStrategyUSDC to yield strategy registry");
 
+        // USDe as the third SYA strategy, mirroring mainnet SYA 0x0cD353bf...21B6 (USDC, USDe on
+        // YieldStrategyUSDe, DOLA on sDOLA). DeployMocks appends this in Phase 11.12 (story 116,
+        // `_registerUsdeWithSya`) so no earlier anvil address moves; this chain registers it here.
+        stableYieldAccumulator.setTokenConfig(address(usde), 18, 1e18);
+        stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDe), address(usde));
+        console.log("Configured USDe token config (18 decimals, 1:1) and added YieldStrategyUSDe (story 116)");
+
         // Set discount rate (20% = 2000 basis points)
         stableYieldAccumulator.setDiscountRate(2000);
         console.log("Set discount rate to 2000 basis points (20%)");
@@ -1182,6 +1218,14 @@ contract DeployMocksSepolia is Script {
 
         yieldStrategyUSDC.setWithdrawer(address(stableYieldAccumulator), true);
         console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDC");
+
+        yieldStrategyUSDe.setWithdrawer(address(stableYieldAccumulator), true);
+        console.log("Authorized StableYieldAccumulator as withdrawer on YieldStrategyUSDe");
+        require(
+            stableYieldAccumulator.strategyTokens(address(yieldStrategyUSDe)) == address(usde),
+            "story-116: YieldStrategyUSDe not registered with SYA"
+        );
+        require(stableYieldAccumulator.getYieldStrategies().length == 3, "story-116: SYA should carry 3 strategies");
 
         // Wire nudge config on StableYieldAccumulator (story 045.5)
         //   nudge address first, then split (mirrors mainnet sequence in story 046).
@@ -1326,6 +1370,12 @@ contract DeployMocksSepolia is Script {
         console.log("  - totalAssets increased without minting new shares");
         console.log("  - Share price now > 1, creating claimable yield");
         console.log("  - YieldStrategyUSDC can claim this yield via ERC4626YieldStrategy");
+
+        // ====== PHASE 9.57: Seed YieldStrategyUSDe + add USDe yield (story 116 parity) ======
+        // DeployMocks' USDe strategy holds principal from its migrated anvil stakers, and Phase
+        // 11.12 seeds sUSDe yield so SYA (and SYAHarvester) has USDe to sell. This chain has no
+        // migrated stakers, so the deployer stakes the principal into StableStakerV2.
+        _seedUsdeStrategyAndYield();
 
         // ====== PHASE 9.8: Seed the phUSD/sUSDS UniV2 pair + assert the index-4 end state ======
         // Story 104. Runs after Phases 9/9.55 because the deployer has no phUSD mint right on this
@@ -1492,7 +1542,12 @@ contract DeployMocksSepolia is Script {
         console.log("  - DOLA -> YieldStrategyDola (ERC4626YieldStrategy over MockSDOLA) -> PhusdStableMinter");
         console.log("  - USDC -> YieldStrategyUSDC (ERC4626YieldStrategy over MockAutoUSDC) -> PhusdStableMinter");
         console.log("  - USDe -> YieldStrategyUSDe (ERC4626MarketYieldStrategy) -> StableStakerV2");
-        console.log("  - SYA: reward USDC, 20% discount, strategies YieldStrategyDola + YieldStrategyUSDC");
+        console.log(
+            "  - SYA: reward USDC, 20% discount, strategies YieldStrategyDola + YieldStrategyUSDC + YieldStrategyUSDe"
+        );
+        console.log("  - SYAHarvester: deployed by the sya-harvester:sepolia add-on (needs the UniswapHelper venues)");
+        console.log("  - MockSUSDS share price 1.1 USDS; phUSD/sUSDS pair seeded at phUSD par");
+        console.log("  - StableStakerV2 claimEnabled TRUE (DeployMocks Phase 11.13 end state)");
         console.log("  - Global Pauser: minter, PhlimboV3, SYA, NFTMinterV2, NFTStaker, stakers, V2, Antimatter");
         console.log("  - Terminal sweep: deployer phUSD mint authority REVOKED, end-state ACL asserted");
         console.log("  - Owner of every contract: the deployer EOA (mock-stack exception, story 098)");
@@ -1614,7 +1669,8 @@ contract DeployMocksSepolia is Script {
         console.log("UniPoolerV2.setHook -> BalancerPoolerMintDebtHook (hook.dispatcher == UniPoolerV2)");
     }
 
-    /// @dev Phase 9.8: seeds the pair 1:1 from the deployer's own sUSDS and minter-minted phUSD,
+    /// @dev Phase 9.8: seeds the pair at phUSD-par (1 sUSDS : 1.1 phUSD, the Phase 1 sUSDS premium)
+    ///      from the deployer's own sUSDS and minter-minted phUSD,
     ///      LP to the deployer (a mock-stack seed, like every other pool here), then asserts the
     ///      whole index-4 end state the story-101 rehearsal leaves DeployMocks in.
     function _seedPhusdSusdsPairAndAssertIndex4(address deployer) internal {
@@ -1877,10 +1933,57 @@ contract DeployMocksSepolia is Script {
             console.log("  StableStakerV2 pool wired (token / antimatter-per-day):", ssTokens[i], dailyRate);
         }
 
-        // ---- 10. Claims stay CLOSED. The reward path under test is `autoAnnihilate`; the
-        //          teaching phase deliberately never calls `setClaimEnabled`. ----
-        require(!stableStakerV2.claimEnabled(), "story-080: claimEnabled must stay false");
-        console.log("  StableStakerV2: 3 pools wired, claimEnabled left FALSE (teaching phase)");
+        // ---- 10. Claims OPEN. DeployMocks keeps story 080's closed-claim assertion and then
+        //          opens claims in Phase 11.13, a trial run of the imminent mainnet unblock that lets
+        //          the UI annihilate HELD Antimatter (only `claim` leaves Antimatter in a staker's
+        //          wallet; `autoAnnihilate` burns it against principal). This chain has no history
+        //          to replay, so it lands directly in that end state. ----
+        stableStakerV2.setClaimEnabled(true);
+        require(stableStakerV2.claimEnabled(), "claim unblock: claimEnabled must be true");
+        console.log("  StableStakerV2: 3 pools wired, claimEnabled set TRUE (DeployMocks Phase 11.13 end state)");
+    }
+
+    /// @dev Phase 1 (Sepolia only): donates `SEPOLIA_SUSDS_PREMIUM_BPS` of the baseline deposit as
+    ///      yield, so 1 sUSDS = 1.1 USDS while the deployer is still the only shareholder.
+    function _priceSusdsAtPremium(uint256 baselineDeposit) internal {
+        susds.addYield(baselineDeposit * SEPOLIA_SUSDS_PREMIUM_BPS / 10_000);
+        uint256 sharePrice = susds.convertToAssets(1e18);
+        require(sharePrice > 1.0999e18 && sharePrice <= 1.1e18, "sepolia: sUSDS share price != 1.1 USDS");
+        console.log("MockSUSDS share price (USDS per sUSDS, 18dp):", sharePrice);
+    }
+
+    /// @dev Phase 9.57. Stakes 5,000 USDe into StableStakerV2 from the deployer (the strategy's only
+    ///      client here, as on anvil, where the principal arrives with the migrated V1 stakers; the
+    ///      stable minter is deliberately NOT a USDe-strategy client). The principal lands in
+    ///      MockSUSDe through the AMM adapter. Then 1,000 USDe of yield is donated to MockSUSDe. The
+    ///      strategy holds about a third of the sUSDe shares (the deployer holds the Phase 1
+    ///      baseline), so SYA sees roughly 330 USDe of claimable yield.
+    function _seedUsdeStrategyAndYield() internal {
+        console.log("\n=== Phase 9.57: Seed YieldStrategyUSDe via a StableStakerV2 stake + USDe yield ===");
+        uint256 usdeAmount = 5000 * 10 ** 18;
+        usde.approve(address(stableStakerV2), usdeAmount);
+        stableStakerV2.stake(address(usde), usdeAmount);
+        usde.approve(address(stableStakerV2), 0);
+        require(susde.balanceOf(address(yieldStrategyUSDe)) > 0, "sepolia: USDe stake left YieldStrategyUSDe empty");
+        console.log("Deployer staked 5000 USDe into StableStakerV2 (deposited to YieldStrategyUSDe)");
+
+        susde.addYield(1000 * 10 ** 18);
+        require(
+            stableYieldAccumulator.calculateClaimAmount(_allSyaStrategiesExcept(address(yieldStrategyUSDe))) > 0,
+            "sepolia: SYA sees no claimable USDe yield"
+        );
+        console.log("Minted 1000 USDe directly to MockSUSDe as yield; SYA USDe claim amount > 0");
+    }
+
+    /// @dev Every registered SYA strategy except `keep`: the exemption list that makes
+    ///      `calculateClaimAmount` price `keep` alone.
+    function _allSyaStrategiesExcept(address keep) internal view returns (address[] memory exempt) {
+        address[] memory all = stableYieldAccumulator.getYieldStrategies();
+        exempt = new address[](all.length - 1);
+        uint256 j;
+        for (uint256 i = 0; i < all.length; i++) {
+            if (all[i] != keep) exempt[j++] = all[i];
+        }
     }
 
     /// @dev Story 098 — the DOLA end state DeployMocks reaches only after its Phase 9.7 repoint

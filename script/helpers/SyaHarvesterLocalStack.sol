@@ -58,7 +58,8 @@ library SyaHarvesterLocalStack {
     uint256 internal constant ETH_SEED = 100 ether;
     /// @dev Sent on top of ETH_SEED to cover rounding; refunded by PoolModifyLiquidityTest.
     uint256 internal constant ETH_SEED_MARGIN = 1 ether;
-    /// @dev USDC minted to the caller for the seed: the ~200k the pool takes, plus headroom.
+    /// @dev USDC minted to the caller for the ETH_SEED seed: the ~200k the pool takes, plus headroom.
+    ///      Must stay ETH_SEED-proportional: `deploy(t, ethSeed)` scales it per ETH.
     uint256 internal constant USDC_SEED_MINT = 250_000e6;
 
     /// @dev Reserves of each side of the two new Curve pool mocks (USDC 6dp, the rest 18dp).
@@ -103,6 +104,16 @@ library SyaHarvesterLocalStack {
 
     /// @notice Deploys and funds everything above, initialises the ETH/USDC pool and seeds it.
     function deploy(Inputs memory t) internal returns (Infra memory s) {
+        return deploy(t, ETH_SEED);
+    }
+
+    /// @notice As `deploy(t)`, with the ETH/USDC pool's ETH side sized to `ethSeed` instead of
+    ///         `ETH_SEED` (Sepolia: faucet-sized). The rounding margin (1%) and the USDC minted for
+    ///         the seed (2,500 USDC per ETH, ~2,000 of which the pool takes) scale with it, so
+    ///         `deploy(t, ETH_SEED)` is exactly the anvil wiring.
+    function deploy(Inputs memory t, uint256 ethSeed) internal returns (Infra memory s) {
+        require(ethSeed > 0, "SyaHarvesterLocalStack: zero ETH seed");
+        uint256 usdcSeedMint = ethSeed * (USDC_SEED_MINT / 100) / 1 ether;
         require(t.curveDola != address(0), "SyaHarvesterLocalStack: DOLA metapool missing");
 
         // --- Curve side ---
@@ -127,10 +138,10 @@ library SyaHarvesterLocalStack {
         s.poolManager.initialize(s.ethPoolKey, SQRT_PRICE_2000_USDC_PER_ETH);
 
         // Full-range position sized so its ETH side is ~ETH_SEED: L = amount0 * sqrtP / 2^96.
-        s.ethPoolLiquidity = uint128(ETH_SEED * uint256(SQRT_PRICE_2000_USDC_PER_ETH) / (1 << 96));
-        IMintableHarvestStable(t.usdc).mint(t.payer, USDC_SEED_MINT);
-        IERC20(t.usdc).approve(address(s.liquidityRouter), USDC_SEED_MINT);
-        s.liquidityRouter.modifyLiquidity{value: ETH_SEED + ETH_SEED_MARGIN}(
+        s.ethPoolLiquidity = uint128(ethSeed * uint256(SQRT_PRICE_2000_USDC_PER_ETH) / (1 << 96));
+        IMintableHarvestStable(t.usdc).mint(t.payer, usdcSeedMint);
+        IERC20(t.usdc).approve(address(s.liquidityRouter), usdcSeedMint);
+        s.liquidityRouter.modifyLiquidity{value: ethSeed + ethSeed * ETH_SEED_MARGIN / ETH_SEED}(
             s.ethPoolKey,
             IPoolManager.ModifyLiquidityParams({
                 tickLower: TickMath.minUsableTick(ETH_POOL_TICK_SPACING),

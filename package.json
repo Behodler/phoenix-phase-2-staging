@@ -15,8 +15,8 @@
     "generate:ts-anvil": "node server/generate-ts-addresses.js 31337",
     "//sepolia": "Story 098 — fresh full-surface MOCK deployment to Sepolia (11155111) via script/DeployMocksSepolia.s.sol. Env from .envrc: RPC_SEPOLIA, DEPLOYER_SEPOLIA_pk (optional SEPOLIA_WETH_SEED, wei, default 0.1 ether total). :preview simulates only. deploy:sepolia removes the old progress file, broadcasts --slow (forge's default gas-estimate multiplier; no 300x - that triples the per-tx upfront balance), then extracts sepolia.json and generates sepolia-addresses.ts, which FAILS LOUDLY if the key set differs from the ContractAddresses interface. After a partial broadcast use deploy:sepolia:resume (forge --resume). Never run against mainnet: the script requires chainid 11155111.",
     "deploy:sepolia-preview": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --private-key $DEPLOYER_SEPOLIA_pk -vvv",
-    "deploy:sepolia": "rm -f server/deployments/progress.11155111.json && forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run uniswap-helper:sepolia",
-    "deploy:sepolia:resume": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --resume --private-key $DEPLOYER_SEPOLIA_pk && npm run uniswap-helper:sepolia",
+    "deploy:sepolia": "rm -f server/deployments/progress.11155111.json && forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run uniswap-helper:sepolia && npm run sya-harvester:sepolia",
+    "deploy:sepolia:resume": "forge script script/DeployMocksSepolia.s.sol:DeployMocksSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --resume --private-key $DEPLOYER_SEPOLIA_pk && npm run uniswap-helper:sepolia && npm run sya-harvester:sepolia",
     "extract:sepolia": "node server/extract-addresses.js 11155111",
     "generate:ts-sepolia": "node server/generate-ts-addresses.js 11155111",
     "//serve-and-dev": "Story 003 — API server + local dev orchestration",
@@ -75,7 +75,10 @@
     "uniswap-helper:sepolia": "forge script script/DeployUniswapHelperSepolia.s.sol:DeployUniswapHelperSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia",
     "//ledger": "Tax ledger (ZAR) - append-only record of every mainnet transaction in ledger/transactions.csv (see ledger/README.md). Broadcasting mainnet keys call `node scripts/ledger-record.js <Script.s.sol> 1` as their final step; ledger:record is for transactions sent outside forge (npm run ledger:record -- --tx 0x... --note \"...\"); ledger:reprice appends superseding rows for price_status=missing",
     "ledger:record": "node scripts/ledger-record.js",
-    "ledger:reprice": "node scripts/ledger-record.js --reprice"
+    "ledger:reprice": "node scripts/ledger-record.js --reprice",
+    "//sya-harvester:sepolia": "Add-on to deploy:sepolia (script/DeploySyaHarvesterSepolia.s.sol), the Sepolia leg of DeployMocks Phases 11.11/11.12 (stories 115/116): deploys SYAHarvester plus its infrastructure (Curve Router NG mock, crvUSD + the USDe/crvUSD and crvUSD/USDC Curve pools, Uniswap V4 PoolManager with a seeded native-ETH/USDC pool and a 100k mock-USDC flash float) against the stack recorded in server/deployments/progress.11155111.json, appends them to that file, then extracts sepolia.json and generates sepolia-addresses.ts. Needs uniswap-helper:sepolia first (the DOLA route uses its MockCurveDolaMetaPool) and a DeployMocksSepolia run that registered USDe with SYA. The pool's ETH side is SEPOLIA_WETH_SEED (wei, default 0.1 ether). No smoke harvest. deploy:sepolia and deploy:sepolia:resume chain into it. Idempotent: a no-op once the progress file names a SYAHarvester with code. :preview simulates only.",
+    "sya-harvester:sepolia-preview": "PREVIEW_MODE=true forge script script/DeploySyaHarvesterSepolia.s.sol:DeploySyaHarvesterSepolia --rpc-url $RPC_SEPOLIA -vvv",
+    "sya-harvester:sepolia": "forge script script/DeploySyaHarvesterSepolia.s.sol:DeploySyaHarvesterSepolia --rpc-url $RPC_SEPOLIA --broadcast --skip-simulation --slow --private-key $DEPLOYER_SEPOLIA_pk && npm run extract:sepolia && npm run generate:ts-sepolia"
   },
   "keywords": [
     "phoenix",

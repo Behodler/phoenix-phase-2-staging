@@ -491,7 +491,7 @@ ANVIL_CHAIN_ID=31337
 
 # Sepolia Configuration (names as used by the npm scripts; set in .envrc)
 RPC_SEPOLIA=https://sepolia.infura.io/v3/YOUR_INFURA_KEY
-SEPOLIA_WETH_SEED=  # optional, wei (default 0.1 ether; .envrc sets 0.4 ether): total ETH wrapped for the two WETH UniV2 pools, AND, separately, the UniswapHelper V3 mock router WETH reserve
+SEPOLIA_WETH_SEED=  # optional, wei (default 0.1 ether; .envrc sets 0.4 ether): total ETH wrapped for the two WETH UniV2 pools, AND, separately, the UniswapHelper V3 mock router WETH reserve, AND, separately, the ETH side of SYAHarvester's V4 ETH/USDC pool
 
 # Mainnet Configuration (PRODUCTION - USE WITH EXTREME CAUTION)
 MAINNET_RPC_URL=https://mainnet.infura.io/v3/YOUR_INFURA_KEY
@@ -801,7 +801,10 @@ which stays the anvil script and is not shared with it — re-derive by hand whe
 The script header lists exactly what was dropped (anvil gates, `vm.roll`, the 300-ETH WETH seed,
 the StableStakerV1 -> V2 cutover rehearsal, the DOLA autoDOLA -> sDOLA repoint rehearsal, the
 anvil seed stakers and the Kendu promo) and what was kept (the disabled index-6 placeholder, so
-NudgeRatchet sits at dispatcher index / ERC-1155 id 7 as on mainnet).
+NudgeRatchet sits at dispatcher index / ERC-1155 id 7 as on mainnet). SYA, StableStaker and
+SYAHarvester were re-synced with DeployMocks stories 115/116 and the claim unblock: USDe is
+registered with SYA, StableStakerV2 claims are open, and SYAHarvester comes from the add-on. One
+Sepolia-only addition: MockSUSDS is priced at 1.1 USDS, with the phUSD/sUSDS pair seeded at phUSD par.
 
 **Ownership exception.** Every contract is owned by the deployer EOA. Rules 4-5 under *Required
 Behavior* gate relaxations on chainId 31337; this mock Sepolia stack is an explicit product-owner
@@ -818,6 +821,11 @@ any script that touches real assets.
    mocks, appended to `progress.11155111.json`), which runs `extract:sepolia` and `generate:ts-sepolia`.
    Against an existing stack, run `npm run uniswap-helper:sepolia` standalone (`:sepolia-preview`
    simulates without touching the progress file); it is a no-op once UniswapHelper is recorded.
+   `deploy:sepolia` then chains into `sya-harvester:sepolia` (`script/DeploySyaHarvesterSepolia.s.sol`:
+   SYAHarvester + its Router NG / Curve / V4 PoolManager mocks, a faucet-sized ETH/USDC pool and a
+   100k mock-USDC flash float in the PoolManager, no smoke harvest), which must run after the
+   UniswapHelper add-on because the DOLA route uses its MockCurveDolaMetaPool. Same preview and
+   idempotency rules.
 5. **Resume**: after a partial broadcast, `npm run deploy:sepolia:resume` (forge `--resume`)
 6. **Result**: `server/deployments/sepolia-addresses.ts` exports
    `sepoliaAddresses: ContractAddresses`. `generate:ts-sepolia` never rewrites `addresses.ts`;
