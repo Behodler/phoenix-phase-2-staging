@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-10-29T01:04:45.942Z
+// Generated from local.json on 2026-10-29T18:36:41.524Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -64,6 +64,7 @@ export const anvilAddresses: ContractAddresses = {
   AntimatterPoolSeeder: "0xD1760AA0FCD9e64bA4ea43399Ad789CFd63C7809",
   AntimatterSusdsPair: "0xbE9f6E78FF3F4272d38E423C606e5dB952c7065e",
   SYAHarvester: "0x532802f2F9E0e3EE9d5Ba70C35E1F43C0498772D",
+  BalancerLPMigrator: "0x0000000000000000000000000000000000000000",
 };
 
 export type AnvilContractName = keyof ContractAddresses;

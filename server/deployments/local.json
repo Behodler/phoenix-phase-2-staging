@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-10-29T01:04:45.843Z",
+  "extractedAt": "2026-10-29T18:36:41.492Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -421,6 +421,13 @@
       "address": "0x532802f2F9E0e3EE9d5Ba70C35E1F43C0498772D",
       "deployed": true,
       "configured": true,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "BalancerLPMigrator": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
       "deployGas": 0,
       "configGas": 0
     }

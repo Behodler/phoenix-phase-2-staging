@@ -42,6 +42,8 @@
 // key-set matches ContractAddresses; fill them after the mainnet Antimatter/sUSDS cutover.
 // Updated 2026-10-27: SYAHarvester added as a ZERO placeholder (story 116) so the key-set matches
 // ContractAddresses; the human deploys the mainnet harvester, then fill it by hand.
+// Updated 2026-10-29: BalancerLPMigrator added as a ZERO placeholder (story 121) so the key-set matches
+// ContractAddresses; script/DeployBalancerLPMigratorMainnet.s.sol deploys it and the patcher fills it.
 import { ContractAddresses } from './addresses';
 
 
@@ -167,6 +169,10 @@ export const mainnetAddresses: ContractAddresses = {
   // through Curve Router NG and pays the profit in ETH. Not deployed on mainnet yet: the human
   // deploys it. ZERO until then, then patch by hand (transient, expected).
   SYAHarvester: "0x0000000000000000000000000000000000000000",
+  // Story 121: user-facing Balancer V3 phUSD/sUSDS BPT -> UniV2 phUSD/sUSDS migrator (BalancerLPMigrator).
+  // ZERO placeholder until the human broadcasts `npm run balancer-lp-migrator:broadcast`, whose patcher
+  // (scripts/patch-mainnet-addresses-balancer-lp-migrator.js) fills it. The BPT has no key: read it from pool().
+  BalancerLPMigrator: "0x0000000000000000000000000000000000000000",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts

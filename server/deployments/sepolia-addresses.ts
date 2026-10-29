@@ -1,4 +1,4 @@
-// Generated from sepolia.json on 2026-10-29T07:51:00.900Z
+// Generated from sepolia.json on 2026-10-29T18:36:41.563Z
 // Chain ID: 11155111 (sepolia)
 
 import { ContractAddresses } from './addresses';
@@ -64,6 +64,7 @@ export const sepoliaAddresses: ContractAddresses = {
   AntimatterPoolSeeder: "0xb6fE42437803cd1dF0757AaB4255E2ec1A901dB0",
   AntimatterSusdsPair: "0x1dD2Da9B6faf90b9500bAcf3ea4F90Ff7b1aA388",
   SYAHarvester: "0x995C633DF7E0E10E0A0486171B420464C4F2B53F",
+  BalancerLPMigrator: "0x0000000000000000000000000000000000000000",
 };
 
 export type SepoliaContractName = keyof ContractAddresses;

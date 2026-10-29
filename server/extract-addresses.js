@@ -59,7 +59,9 @@ const ZERO_PLACEHOLDER_CHAIN_IDS = [11155111, 31337];
  * UniPoolerV2). Add a key here only to keep a no-longer-deployed key in the interface on purpose.
  */
 const ANVIL_CHAIN_ID = 31337;
-const ANVIL_ZERO_PLACEHOLDER_KEYS = Object.freeze([]);
+// Story 121: `BalancerLPMigrator` is mainnet-only (anvil has no Balancer V3 since story 107), so DeployMocks never
+// deploys it. Listing it here keeps the key in the interface as a zero placeholder on anvil (and therefore Sepolia).
+const ANVIL_ZERO_PLACEHOLDER_KEYS = Object.freeze(["BalancerLPMigrator"]);
 
 /**
  * The keys `chainId` completes its extraction against: anvil's fixed list, otherwise the

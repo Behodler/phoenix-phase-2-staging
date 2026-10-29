@@ -6,7 +6,8 @@
  * deploys the Balancer mocks either, emits zero placeholders for exactly ANVIL_ZERO_PLACEHOLDER_KEYS
  * and nothing else. Story 107 (wind-down confirmed): the legacy Balancer keys are gone from the
  * interface, so neither chain emits them, anvil emits no placeholders at all, and
- * BalancerPoolerMintDebtHook stays a real interface key.
+ * BalancerPoolerMintDebtHook stays a real interface key. Story 121: `BalancerLPMigrator` is mainnet-only, so
+ * anvil emits exactly that one placeholder (ANVIL_ZERO_PLACEHOLDER_KEYS) and Sepolia emits it from the interface.
  *
  * Pure: reads the ContractAddresses interface and (optionally) a progress file; writes NOTHING.
  *
@@ -36,6 +37,8 @@ const ANVIL = 31337;
 const LEGACY_BALANCER_KEYS = ['BalancerPooler', 'BalancerPool', 'BalancerVault', 'BalancerRouter'];
 // Index-4 keys DeployMocksSepolia must now deploy for real (never placeholders).
 const UNIPOOLER_KEYS = ['UniPooler', 'PhusdSusdsPair', 'UniswapV2Router'];
+// Story 121: mainnet-only (no Balancer V3 on anvil or Sepolia); never deployed by either mock stack.
+const MAINNET_ONLY_KEYS = ['BalancerLPMigrator'];
 
 let failures = 0;
 function check(cond, msg) {
@@ -67,7 +70,7 @@ function fakeAddress(i) {
  * the zero-address checkpoint markers and a dropped deploy-only name.
  */
 function syntheticSepoliaProgress() {
-    const notDeployed = new Set([...LEGACY_BALANCER_KEYS, 'UniswapHelper']);
+    const notDeployed = new Set([...LEGACY_BALANCER_KEYS, 'UniswapHelper', ...MAINNET_ONLY_KEYS]);
     const contracts = {};
     interfaceKeys.forEach((key, i) => {
         if (notDeployed.has(key)) return;
@@ -100,6 +103,10 @@ function checkSepolia(label, progress, { expectUniPoolerDeployed }) {
     check(!names.some((n) => ['Seeding', 'DolaYield', 'UsdcYield', 'UsdcSeeding'].includes(n)), 'checkpoint markers still filtered');
     check(!names.includes('BuggedPoolerV2Index6'), 'BuggedPoolerV2Index6 still dropped');
     check(placeholders.every((k) => interfaceKeys.includes(k)), 'placeholders are interface keys only');
+    for (const key of MAINNET_ONLY_KEYS) {
+        const c = extracted.contracts[key];
+        check(c && c.address === ZERO_ADDRESS && c.deployed === false, `${key} is a zero placeholder (story 121)`);
+    }
     if (expectUniPoolerDeployed) {
         for (const key of UNIPOOLER_KEYS) {
             const c = extracted.contracts[key];
@@ -120,11 +127,14 @@ for (const key of LEGACY_BALANCER_KEYS) {
 check(interfaceKeys.includes('BalancerPoolerMintDebtHook'), 'BalancerPoolerMintDebtHook is still an interface key');
 check(!NFT_BASE_NAMES.includes('BalancerPooler'), 'BalancerPooler is not an NFT base name (story 107)');
 
-// ---- 2. Anvil (story 106/107): no placeholders at all now that the Balancer keys are gone ----
+// ---- 2. Anvil (story 106/107/121): only the mainnet-only placeholders now that the Balancer keys are gone ----
 console.log(`\n[synthetic] Anvil (${ANVIL}) extraction`);
 check(ZERO_PLACEHOLDER_CHAIN_IDS.includes(ANVIL), '31337 is a zero-placeholder chain (story 106)');
 check(!ZERO_PLACEHOLDER_CHAIN_IDS.includes(1), 'mainnet (1) is not a zero-placeholder chain');
-check(ANVIL_ZERO_PLACEHOLDER_KEYS.length === 0, 'anvil placeholder list is empty (story 107)');
+check(
+    JSON.stringify([...ANVIL_ZERO_PLACEHOLDER_KEYS]) === JSON.stringify(MAINNET_ONLY_KEYS),
+    'anvil placeholder list is exactly the mainnet-only keys (story 107 emptied it; story 121 added BalancerLPMigrator)'
+);
 {
     const anvilProgress = { ...syntheticSepoliaProgress(), chainId: ANVIL, networkName: 'anvil' };
     // Drop two non-Balancer keys too: anvil must NOT resurrect them (anvil defines the interface).
@@ -132,7 +142,10 @@ check(ANVIL_ZERO_PLACEHOLDER_KEYS.length === 0, 'anvil placeholder list is empty
     const droppedKey = 'WaUSDC';
     delete anvilProgress.contracts[trackedNameFor(droppedKey)];
     const { extracted, placeholders } = buildExtraction(anvilProgress, ANVIL, { quiet: true });
-    check(placeholders.length === 0, `anvil emits no placeholders (got: ${placeholders.join(', ') || 'none'})`);
+    check(
+        JSON.stringify(placeholders) === JSON.stringify(MAINNET_ONLY_KEYS),
+        `anvil emits only the mainnet-only placeholders (got: ${placeholders.join(', ') || 'none'})`
+    );
     for (const key of LEGACY_BALANCER_KEYS) {
         check(!(key in extracted.contracts), `anvil ${key} is not emitted`);
     }

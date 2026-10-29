@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-10-29T01:04:45.938Z
+// Generated interface from local.json on 2026-10-29T18:36:41.521Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -63,4 +63,5 @@ export interface ContractAddresses {
   AntimatterPoolSeeder: string;
   AntimatterSusdsPair: string;
   SYAHarvester: string;
+  BalancerLPMigrator: string;
 }
