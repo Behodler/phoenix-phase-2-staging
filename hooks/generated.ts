@@ -602,6 +602,187 @@ export const antimatterAbi = [
 ] as const
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// BalancerLPMigrator
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const balancerLpMigratorAbi = [
+  {
+    type: 'constructor',
+    inputs: [
+      { name: 'vault_', internalType: 'address', type: 'address' },
+      { name: 'v3Router_', internalType: 'address', type: 'address' },
+      { name: 'pool_', internalType: 'address', type: 'address' },
+      { name: 'uniRouter_', internalType: 'address', type: 'address' },
+      { name: 'sUSDS_', internalType: 'address', type: 'address' },
+      { name: 'phUSD_', internalType: 'address', type: 'address' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'bptAmount', internalType: 'uint256', type: 'uint256' },
+      { name: 'minSUSDSOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'minPhUSDOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'amountSUSDSMin', internalType: 'uint256', type: 'uint256' },
+      { name: 'amountPhUSDMin', internalType: 'uint256', type: 'uint256' },
+      { name: 'to', internalType: 'address', type: 'address' },
+      { name: 'deadline', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'migrate',
+    outputs: [
+      { name: 'sUSDSOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'phUSDOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'liquidity', internalType: 'uint256', type: 'uint256' },
+      { name: 'sUSDSRefund', internalType: 'uint256', type: 'uint256' },
+      { name: 'phUSDRefund', internalType: 'uint256', type: 'uint256' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pair',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'phUSD',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'phUSDIndex',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pool',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'bptAmount', internalType: 'uint256', type: 'uint256' }],
+    name: 'previewMigrate',
+    outputs: [
+      { name: 'sUSDSOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'phUSDOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'sUSDSUsed', internalType: 'uint256', type: 'uint256' },
+      { name: 'phUSDUsed', internalType: 'uint256', type: 'uint256' },
+      { name: 'leftoverToken', internalType: 'address', type: 'address' },
+      { name: 'leftoverAmount', internalType: 'uint256', type: 'uint256' },
+      { name: 'recoveryMode', internalType: 'bool', type: 'bool' },
+      { name: 'expectedLiquidity', internalType: 'uint256', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'sUSDS',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'sUSDSIndex',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'uniRouter',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'v3Router',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'vault',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'user', internalType: 'address', type: 'address', indexed: true },
+      { name: 'to', internalType: 'address', type: 'address', indexed: true },
+      {
+        name: 'bptAmount',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'recoveryMode',
+        internalType: 'bool',
+        type: 'bool',
+        indexed: false,
+      },
+      {
+        name: 'sUSDSOut',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'phUSDOut',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'liquidity',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'sUSDSRefund',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'phUSDRefund',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'Migrated',
+  },
+  { type: 'error', inputs: [], name: 'Expired' },
+  { type: 'error', inputs: [], name: 'PairNotFound' },
+  { type: 'error', inputs: [], name: 'PoolTokensMismatch' },
+  {
+    type: 'error',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'SafeERC20FailedOperation',
+  },
+  { type: 'error', inputs: [], name: 'ZeroAddress' },
+  { type: 'error', inputs: [], name: 'ZeroAmount' },
+  { type: 'error', inputs: [], name: 'ZeroMinimum' },
+] as const
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // BalancerPoolerMintDebtHook
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

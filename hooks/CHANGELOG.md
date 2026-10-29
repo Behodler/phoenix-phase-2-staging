@@ -5,6 +5,40 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-10-29
+
+Story-121 (balancer-lp-migrator). Adds the ABI of `BalancerLPMigrator`, the user-facing helper that
+moves a holder's Balancer V3 phUSD/sUSDS BPT into the Uniswap V2 phUSD/sUSDS pair in one transaction,
+for a later phlimbo-ui migration modal. It is a deliberate, commented exception to the
+`wagmi.config.ts` DeployMocks rule: the contract is mainnet-only (anvil has no Balancer V3), and it
+is short-lived (BIP-928 wind-down). Strictly additive: no existing export changes or disappears.
+Not published.
+
+### Added
+- `balancerLpMigratorAbi`
+  - `migrate(bptAmount, minSUSDSOut, minPhUSDOut, amountSUSDSMin, amountPhUSDMin, to, deadline)`
+    returns `(sUSDSOut, phUSDOut, liquidity, sUSDSRefund, phUSDRefund)`. All four minimums must be
+    non-zero. The exit mode is chosen **on-chain**: proportional while the pool is live; recovery
+    when the pool is already in Recovery Mode, or when the pool or the Vault is paused (the migrator
+    then calls the permissionless `enableRecoveryMode` itself). LP goes to `to`; the leftover sUSDS or
+    phUSD is refunded to the caller as the raw token.
+  - `previewMigrate(bptAmount)` (view) returns `(sUSDSOut, phUSDOut, sUSDSUsed, phUSDUsed,
+    leftoverToken, leftoverAmount, recoveryMode, expectedLiquidity)`. Derive the slippage floors and
+    the leftover warning from it.
+  - Immutable getters `pool()` (the BPT), `pair()` (the V2 phUSD/sUSDS pair), `sUSDS()`, `phUSD()`,
+    `vault()`, `v3Router()`, `uniRouter()`, plus `sUSDSIndex()` / `phUSDIndex()`.
+  - Event `Migrated(user, to, bptAmount, recoveryMode, sUSDSOut, phUSDOut, liquidity, sUSDSRefund,
+    phUSDRefund)`.
+  - The BPT is a plain ERC20 and this package carries no generic ERC20 ABI. Read its `balanceOf` /
+    `allowance(user, migrator)` and send `approve(migrator, amount)` with viem's `erc20Abi` (viem is
+    already a peer dependency) at the address `pool()` returns.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+New key `BalancerLPMigrator`: a zero placeholder on anvil and Sepolia (nothing deploys it there), and
+a zero placeholder on mainnet until the human broadcasts `balancer-lp-migrator:broadcast`. Gate the
+modal on a non-zero address. The BPT has no key (story 107 removed the Balancer keys): read it from
+`pool()`.
+
 ## [0.19.0] - 2026-10-28
 
 Story-120 (antimatter-route). `UniswapHelper` is upgraded in place to also route Antimatter (AM).

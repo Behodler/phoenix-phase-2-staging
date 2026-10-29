@@ -59,6 +59,13 @@ export default defineConfig({
         // Story 110: one-tx phUSD swaps (DOLA/USDC/USDe/USDS/sUSDS/ETH) and phUSD/sUSDS liquidity
         // (key `UniswapHelper`). DeployMocks Phase 11.8 deploys it against local venue mocks.
         'UniswapHelper.sol/UniswapHelper.json',
+        // Story 121: EXCEPTION to the DeployMocks rule above. BalancerLPMigrator moves a holder's
+        // Balancer V3 phUSD/sUSDS BPT into the UniV2 phUSD/sUSDS pair in one transaction. It is
+        // mainnet-only (anvil has no Balancer V3 since story 107, so DeployMocks cannot deploy
+        // it), user-facing (a phlimbo-ui migration modal calls it), and short-lived (the BIP-928
+        // wind-down). Its `BalancerLPMigrator` key is a zero placeholder on anvil and Sepolia, so
+        // the UI must gate on a non-zero address. Drop it once the remaining BPT has migrated.
+        'BalancerLPMigrator.sol/BalancerLPMigrator.json',
         'GatherV2.sol/GatherV2.json',
         'MultiPooler.sol/MultiPooler.json',
 
