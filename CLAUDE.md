@@ -803,7 +803,8 @@ the StableStakerV1 -> V2 cutover rehearsal, the DOLA autoDOLA -> sDOLA repoint r
 anvil seed stakers and the Kendu promo) and what was kept (the disabled index-6 placeholder, so
 NudgeRatchet sits at dispatcher index / ERC-1155 id 7 as on mainnet). SYA, StableStaker and
 SYAHarvester were re-synced with DeployMocks stories 115/116 and the claim unblock: USDe is
-registered with SYA, StableStakerV2 claims are open, and SYAHarvester comes from the add-on. One
+registered with SYA, StableStakerV2 claims are open, and SYAHarvester comes from an add-on, as do
+the deepened phUSD/sUSDS pool, the Antimatter/sUSDS pool and the demo Antimatter (story 112/114/120). One
 Sepolia-only addition: MockSUSDS is priced at 1.1 USDS, with the phUSD/sUSDS pair seeded at phUSD par.
 
 **Ownership exception.** Every contract is owned by the deployer EOA. Rules 4-5 under *Required
@@ -826,6 +827,9 @@ any script that touches real assets.
    100k mock-USDC flash float in the PoolManager, no smoke harvest), which must run after the
    UniswapHelper add-on because the DOLA route uses its MockCurveDolaMetaPool. Same preview and
    idempotency rules.
+   Last in the chain, `antimatter-pool:sepolia` (`script/DeployAntimatterPoolSepolia.s.sol`) mirrors
+   DeployMocks Phases 11.9/11.10/11.14: deepens the phUSD/sUSDS pair (LP to UniPoolerV2), runs the
+   Antimatter/sUSDS cutover through `AntimatterPoolSeeder`, and mints the deployer 10k demo AM.
 5. **Resume**: after a partial broadcast, `npm run deploy:sepolia:resume` (forge `--resume`)
 6. **Result**: `server/deployments/sepolia-addresses.ts` exports
    `sepoliaAddresses: ContractAddresses`. `generate:ts-sepolia` never rewrites `addresses.ts`;

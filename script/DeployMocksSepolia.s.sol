@@ -182,10 +182,11 @@ interface IPhlimboAPYLike {
  *            `script/DeploySyaHarvesterSepolia.s.sol`, because its DOLA route runs through the
  *            MockCurveDolaMetaPool that `DeployUniswapHelperSepolia` deploys after this script. The
  *            add-on seeds the V4 ETH/USDC pool faucet-sized and skips the smoke harvest (see its header).
- *        - NOT mirrored: the story-112 seed deepening, the story-114 Antimatter/sUSDS cutover
- *          rehearsal and the story-120 Phase 11.14 demo Antimatter. `AntimatterPoolSeeder` and
- *          `AntimatterSusdsPair` stay zero placeholders, so UniswapHelper's AM routes revert
- *          `PairNotFound` on Sepolia.
+ *        - The story-112 seed deepening, the story-114 Antimatter/sUSDS cutover (Phases 11.9/11.10)
+ *          and the story-120 demo Antimatter (Phase 11.14) live in the add-on
+ *          `script/DeployAntimatterPoolSepolia.s.sol`, chained after the harvester add-on, so this
+ *          script's addresses are unchanged. It creates `AntimatterPoolSeeder` and
+ *          `AntimatterSusdsPair` and mints the deployer 10k demo Antimatter.
  *
  *      SEPOLIA-ONLY ADDITION — MockSUSDS is priced at 1.1 USDS (Phase 1, `SEPOLIA_SUSDS_PREMIUM_BPS`)
  *      so code that assumes 1 sUSDS == 1 USDS misbehaves visibly here, and the phUSD/sUSDS pair is
