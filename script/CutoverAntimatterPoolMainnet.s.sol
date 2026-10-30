@@ -35,21 +35,32 @@ interface IAmCutoverPair {
  * @title CutoverAntimatterPoolMainnet  (story 122, Script B, sprint sya-antimatter-cutover)
  * @notice The mainnet Antimatter/sUSDS cutover, mirroring DeployMocks Phase 11.10 `_rehearseAntimatterPoolCutover`
  *         (story 114) with `CUTOVER_BPS = 1_000` (10%) instead of the anvil 50%:
- *           0. precondition: `factory.getPair(AM, sUSDS) == 0` - an existing pair ABORTS (griefing risk R1, story 113);
+ *           0. precondition: `factory.getPair(AM, sUSDS) == 0` - an existing pair ABORTS. This is a SIMULATION-TIME
+ *              check only: under `--broadcast --skip-simulation --slow` steps 1, 4, 5 and 6 are mined publicly before
+ *              step 7, so the pair can still appear in between. The on-chain `minSUSDSPaired` floor (step 7) is the
+ *              control for that window (audit run-44 M-01);
  *           1. deploy `AntimatterPoolSeeder(OWNER, phUSD, sUSDS, Antimatter, Router02, PhusdSusdsPair, UniPoolerV2)`;
  *           2. `lp = seeder.lpForBps(1_000)`;
- *           3. floors: pro-rata unwrap amounts minus 0.1% (`_amCutoverMins`);
+ *           3. floors: pro-rata unwrap amounts minus 0.1% (`_floors`), plus `minSPaired`, the floor on the sUSDS
+ *              actually paired with the Antimatter (the same pro-rata sUSDS quote: on a fresh pair every unit of the
+ *              unwrapped sUSDS is paired);
  *           4. `UniPoolerV2.rescueERC20(PhusdSusdsPair, OWNER, lp)`;
  *           5. `PhusdSusdsPair.approve(seeder, lp)`;
  *           6. `Antimatter.setApprovedMinter(seeder, true)` + require (the setter is a silent no-op on no change);
- *           7. `seeder.seed(lp, minPhUSD, minSUSDS, OWNER, now + 1h)`;
+ *           7. `seeder.seed(lp, minPhUSD, minSUSDS, minSUSDSPaired, OWNER, now + 1h)`;
  *           8. `Antimatter.setApprovedMinter(seeder, false)` + require - ALWAYS runs, including on resume;
  *           9. `amSusdsPair = seeder.amSusdsPair()` == `factory.getPair(AM, sUSDS)`; both written to the progress file.
  *
- *         F3 (story 113): the seeder's AM/sUSDS add passes `amountBMin = 0`. Acceptable ONLY because step 0
- *         guarantees the pair is created fresh inside the seed transaction, so there is no price to manipulate.
- *         R1: someone could create the pair first. Step 0 refuses to seed into it; the runbook recommends a
- *         private RPC (Flashbots Protect) for the broadcast.
+ *         F3 (story 113): the seeder's AM/sUSDS router add passes `amountBMin = 0`. That is bounded by the seeder's
+ *         on-chain `minSUSDSPaired` floor, NOT by step 0: if a third party creates and prices the pair AM-cheap
+ *         between the publicly mined setup txs and the seed (possible once AM is in third-party hands, i.e. after
+ *         Script A's `setClaimEnabled(true)`), the seed reverts `InsufficientSUSDSPaired` instead of pouring the
+ *         protocol-minted AM into a pool the attacker can drain (audit run-44 M-01). A one-sided griefed pair
+ *         (dust + sync, no LP) still seeds: the direct mint pairs all the sUSDS, so it clears the floor.
+ *         R1 / private RPC: a private RPC hides only PENDING transactions. Under `--slow` steps 1-6 are mined
+ *         publicly before step 7, so it does not cover the window; it remains optional (`ANTIMATTER_POOL_RPC_URL`,
+ *         scoped to this script's forge call) and carries no part of the safety argument. Run this script BEFORE
+ *         Script A (`npm run sya-antimatter-cutover:broadcast` does B, then A, then C), so no third party holds AM.
  *
  *         RESUMABLE (progress file `server/deployments/progress.antimatter-pool.1.json`). The LP slice `lp` is
  *         fixed at first sizing and persisted, because `lpForBps` reads the pooler's LIVE balance, which the rescue
@@ -63,7 +74,9 @@ interface IAmCutoverPair {
  *         OWNER holds the AM/sUSDS LP.
  *
  * Preview:   npm run antimatter-pool:preview     (PREVIEW_MODE=true, OWNER prank on a fork, nothing signed or written)
- * Broadcast: npm run antimatter-pool:broadcast   (backup -> Ledger -> patcher -> :verify -> ledger). Prefer a private RPC.
+ * Broadcast: npm run sya-antimatter-cutover:broadcast (preferred: B, then Script A, then Script C), or
+ *            npm run antimatter-pool:broadcast alone (backup -> Ledger -> patcher -> :verify -> ledger).
+ *            Optional private RPC for this script only: ANTIMATTER_POOL_RPC_URL=<url>.
  * Verify:    npm run antimatter-pool:verify      (read-only, script/VerifyAntimatterPoolCutover.s.sol)
  */
 abstract contract AntimatterPoolMainnetBase is Script {
@@ -352,16 +365,20 @@ contract CutoverAntimatterPoolMainnet is AntimatterPoolMainnetBase {
 
             // ---- Steps 3 + 7: floors computed against the pair as it stands right before the seed ----
             console.log("\n=== Steps 3 + 7: floors + seed ===");
-            (uint256 minP, uint256 minS) = _floors(c, p.lpAmount);
+            (uint256 minP, uint256 minS, uint256 minSPaired) = _floors(c, p.lpAmount);
             p.phusdSupplyBefore = IERC20(c.phUSD).totalSupply();
             p.amSupplyBefore = IERC20(c.antimatter).totalSupply();
             // A resumed run (rescue landed earlier) records the pooler's LP as it stands now; UniPoolerV2 can
             // gain LP between runs (`pool()`), so the exact "prior minus slice" equality is only asserted when
             // the rescue happened in this run.
             if (!rescuedThisRun) p.poolerLpAfter = lpToken.balanceOf(c.uniPooler);
-            uint256 ownerAmLpBefore = 0; // the pair does not exist yet (step 0)
+            // OWNER holds no AM/sUSDS LP before the seed: step 0 saw no pair, and a pair a third party creates in
+            // the tx1-tx5 window mints its LP to that third party, not to OWNER (and an AM-cheap one reverts at the
+            // minSUSDSPaired floor).
+            uint256 ownerAmLpBefore = 0;
             _begin();
-            (p.amMinted, p.liquidity) = seeder.seed(p.lpAmount, minP, minS, OWNER, block.timestamp + SEED_DEADLINE);
+            (p.amMinted, p.liquidity) =
+                seeder.seed(p.lpAmount, minP, minS, minSPaired, OWNER, block.timestamp + SEED_DEADLINE);
             _end();
             seededThisRun = true;
             p.seeded = true;
@@ -393,6 +410,7 @@ contract CutoverAntimatterPoolMainnet is AntimatterPoolMainnetBase {
             );
             console.log("  floors: minPhUSD", minP);
             console.log("          minSUSDS", minS);
+            console.log("          minSUSDSPaired", minSPaired);
             console.log("  AM minted == phUSD burned:", p.amMinted);
             console.log("  AM/sUSDS LP to OWNER:     ", p.liquidity);
             console.log("  UniPoolerV2 LP after:     ", p.poolerLpAfter);
@@ -435,13 +453,21 @@ contract CutoverAntimatterPoolMainnet is AntimatterPoolMainnetBase {
     }
 
     /// @dev Pro-rata share of the pair's balances (what `burn` pays) less FLOOR_TOLERANCE_BPS.
-    function _floors(Config memory c, uint256 lp) internal view returns (uint256 minP, uint256 minS) {
+    ///      `minSPaired` is the M-01 floor on the sUSDS the seeder pairs with the Antimatter. It equals `minS`
+    ///      today (a fresh pair pairs every unit of the unwrapped sUSDS) and is returned separately so the intent
+    ///      at the call site is explicit.
+    function _floors(Config memory c, uint256 lp)
+        internal
+        view
+        returns (uint256 minP, uint256 minS, uint256 minSPaired)
+    {
         uint256 supply = IAmCutoverPair(c.phusdSusdsPair).totalSupply();
         uint256 expP = IERC20(c.phUSD).balanceOf(c.phusdSusdsPair) * lp / supply;
         uint256 expS = IERC20(c.sUSDS).balanceOf(c.phusdSusdsPair) * lp / supply;
         minP = expP * (BPS - FLOOR_TOLERANCE_BPS) / BPS;
         minS = expS * (BPS - FLOOR_TOLERANCE_BPS) / BPS;
         require(minP > 0 && minS > 0, "Step 3: zero unwrap floor");
+        minSPaired = minS;
         console.log("  expected phUSD out:", expP);
         console.log("  expected sUSDS out:", expS);
     }

@@ -72,6 +72,9 @@ contract AntimatterPoolSeeder is Ownable {
     error PairMismatch(address expected, address actual);
     error InsufficientPhUSD(uint256 phusdOut, uint256 minPhUSD);
     error InsufficientSUSDS(uint256 susdsOut, uint256 minSUSDS);
+    /// @dev The sUSDS actually paired with the Antimatter fell below the caller's floor: the AM/sUSDS
+    ///      pair was pre-priced AM-cheap (audit run-44 M-01), so seeding would leak the Antimatter.
+    error InsufficientSUSDSPaired(uint256 susdsPaired, uint256 minSUSDSPaired);
     error AntimatterNotFullyConsumed(uint256 amMinted, uint256 susdsRequired, uint256 susdsAvailable);
     error ResidualBalance(address token, uint256 before, uint256 afterwards);
     /// @dev A one-sided pair that already has LP supply. Unreachable with canonical UniswapV2Pair
@@ -146,15 +149,25 @@ contract AntimatterPoolSeeder is Ownable {
     /// @param lpAmount   phUSD/sUSDS LP to unwrap; the owner must have approved this contract for it.
     /// @param minPhUSD   Floor on phUSD released by the unwrap.
     /// @param minSUSDS   Floor on sUSDS released by the unwrap.
+    /// @param minSUSDSPaired Floor on sUSDS actually paired with the minted Antimatter. On a fresh or
+    ///                   one-sided pair all of the unwrapped sUSDS is paired; on a pre-priced pair the
+    ///                   router pairs `am * rSusds / rAm`, which an AM-cheap price drives toward zero
+    ///                   (audit run-44 M-01: anyone holding AM can create and price the pair between the
+    ///                   publicly mined setup txs and `seed`). Production callers pass the pro-rata
+    ///                   expected sUSDS less a small tolerance; callers deliberately seeding into an
+    ///                   existing pair may pass 0.
     /// @param lpRecipient Receives the AM/sUSDS LP and any sUSDS not needed to pair the Antimatter.
     /// @param deadline   Unix timestamp after which the call reverts.
     /// @return amBurnedEquivalent The phUSD burned, equal to the Antimatter minted.
     /// @return liquidity  AM/sUSDS LP minted to `lpRecipient`.
-    function seed(uint256 lpAmount, uint256 minPhUSD, uint256 minSUSDS, address lpRecipient, uint256 deadline)
-        external
-        onlyOwner
-        returns (uint256 amBurnedEquivalent, uint256 liquidity)
-    {
+    function seed(
+        uint256 lpAmount,
+        uint256 minPhUSD,
+        uint256 minSUSDS,
+        uint256 minSUSDSPaired,
+        address lpRecipient,
+        uint256 deadline
+    ) external onlyOwner returns (uint256 amBurnedEquivalent, uint256 liquidity) {
         if (lpAmount == 0) revert ZeroAmount();
         if (lpRecipient == address(0)) revert ZeroAddress();
         if (block.timestamp > deadline) revert Expired(deadline, block.timestamp);
@@ -187,6 +200,7 @@ contract AntimatterPoolSeeder is Ownable {
         } else {
             (susdsPaired, liquidity) = _addLiquidity(phusdOut, susdsOut, lpRecipient, deadline);
         }
+        if (susdsPaired < minSUSDSPaired) revert InsufficientSUSDSPaired(susdsPaired, minSUSDSPaired);
         if (susdsOut > susdsPaired) IERC20(sUSDS).safeTransfer(lpRecipient, susdsOut - susdsPaired);
 
         // 5. Burn the phUSD released (allowance-gated; self-allowance granted in the constructor).

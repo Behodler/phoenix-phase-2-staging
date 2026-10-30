@@ -75,7 +75,7 @@ contract AntimatterPoolSeederForkTest is Test {
         vm.startPrank(OWNER);
         IUniPoolerRescue(UNIPOOLER).rescueERC20(PAIR, OWNER, lpAmount);
         IERC20(PAIR).approve(address(seeder), lpAmount);
-        (burned, liquidity) = seeder.seed(lpAmount, minP, minS, OWNER, block.timestamp + 1 hours);
+        (burned, liquidity) = seeder.seed(lpAmount, minP, minS, minS, OWNER, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
