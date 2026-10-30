@@ -2503,10 +2503,11 @@ contract DeployMocks is Script {
         antimatter.setApprovedMinter(address(antimatterPoolSeeder), true);
         require(antimatter.isApprovedMinter(address(antimatterPoolSeeder)), "story-114: seeder is not an AM minter");
 
-        // 5. Seed. LP (and any unused sUSDS) to the deployer, the OWNER stand-in.
+        // 5. Seed. LP (and any unused sUSDS) to the deployer, the OWNER stand-in. The pro-rata sUSDS
+        //    floor doubles as the M-01 minSUSDSPaired floor (audit run-44): a pre-priced AM-cheap pair reverts.
         uint256 deployerAmLpBefore = 0; // the pair does not exist yet (asserted above)
         (snap.amMinted, snap.liquidity) =
-            antimatterPoolSeeder.seed(snap.lpAmount, minP, minS, deployer, block.timestamp + 1 hours);
+            antimatterPoolSeeder.seed(snap.lpAmount, minP, minS, minS, deployer, block.timestamp + 1 hours);
 
         // One-shot posture: the seeder never mints again.
         antimatter.setApprovedMinter(address(antimatterPoolSeeder), false);

@@ -223,8 +223,9 @@ contract DeployAntimatterPoolSepolia is Script {
         s.antimatter.setApprovedMinter(address(seeder), true);
         require(s.antimatter.isApprovedMinter(address(seeder)), "story-114: seeder is not an AM minter");
 
-        // 5. Seed, then revoke the role (one-shot posture).
-        (uint256 amMinted, uint256 liquidity) = seeder.seed(lpAmount, minP, minS, s.deployer, block.timestamp + 1 hours);
+        // 5. Seed, then revoke the role (one-shot posture). minS is also the M-01 minSUSDSPaired floor.
+        (uint256 amMinted, uint256 liquidity) =
+            seeder.seed(lpAmount, minP, minS, minS, s.deployer, block.timestamp + 1 hours);
         s.antimatter.setApprovedMinter(address(seeder), false);
         require(!s.antimatter.isApprovedMinter(address(seeder)), "story-114: seeder AM minter role not revoked");
 

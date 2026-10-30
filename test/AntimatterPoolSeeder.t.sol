@@ -82,7 +82,7 @@ contract AntimatterPoolSeederTest is Test {
     function _seed(uint256 lpAmount) internal returns (uint256 burned, uint256 liquidity) {
         _rescueAndApprove(lpAmount);
         vm.prank(owner);
-        (burned, liquidity) = seeder.seed(lpAmount, 0, 0, recipient, block.timestamp);
+        (burned, liquidity) = seeder.seed(lpAmount, 0, 0, 0, recipient, block.timestamp);
     }
 
     /// @dev phUSD and sUSDS a burn of `lpAmount` would release (UniswapV2Pair.burn arithmetic, no fee-on).
@@ -116,7 +116,8 @@ contract AntimatterPoolSeederTest is Test {
         vm.expectEmit(true, false, false, true, address(seeder));
         emit Seeded(lpAmount, phusdOut, phusdOut, susdsOut, expectedLiquidity, recipient);
         vm.prank(owner);
-        (uint256 burned, uint256 liquidity) = seeder.seed(lpAmount, phusdOut, susdsOut, recipient, block.timestamp);
+        (uint256 burned, uint256 liquidity) =
+            seeder.seed(lpAmount, phusdOut, susdsOut, susdsOut, recipient, block.timestamp);
 
         address amPair = seeder.amSusdsPair();
         assertTrue(amPair != address(0), "pair created");
@@ -189,7 +190,7 @@ contract AntimatterPoolSeederTest is Test {
         _rescueAndApprove(lpAmount);
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(AntimatterPoolSeeder.InsufficientPhUSD.selector, phusdOut, phusdOut + 1));
-        seeder.seed(lpAmount, phusdOut + 1, 0, recipient, block.timestamp);
+        seeder.seed(lpAmount, phusdOut + 1, 0, 0, recipient, block.timestamp);
     }
 
     function test_seed_revertsBelowMinSUSDS() public {
@@ -198,7 +199,7 @@ contract AntimatterPoolSeederTest is Test {
         _rescueAndApprove(lpAmount);
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(AntimatterPoolSeeder.InsufficientSUSDS.selector, susdsOut, susdsOut + 1));
-        seeder.seed(lpAmount, 0, susdsOut + 1, recipient, block.timestamp);
+        seeder.seed(lpAmount, 0, susdsOut + 1, 0, recipient, block.timestamp);
     }
 
     function test_seed_revertsForNonOwner() public {
@@ -207,7 +208,7 @@ contract AntimatterPoolSeederTest is Test {
         IERC20(pair).approve(address(seeder), lpAmount);
         vm.prank(pooler);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, pooler));
-        seeder.seed(lpAmount, 0, 0, recipient, block.timestamp);
+        seeder.seed(lpAmount, 0, 0, 0, recipient, block.timestamp);
     }
 
     function test_rescue_revertsForNonOwner() public {
@@ -223,7 +224,7 @@ contract AntimatterPoolSeederTest is Test {
         _rescueAndApprove(lpAmount);
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(Antimatter.NotApprovedMinter.selector, address(seeder)));
-        seeder.seed(lpAmount, 0, 0, recipient, block.timestamp);
+        seeder.seed(lpAmount, 0, 0, 0, recipient, block.timestamp);
     }
 
     function test_seed_revertsWhenAntimatterNotFullyConsumed() public {
@@ -249,7 +250,7 @@ contract AntimatterPoolSeederTest is Test {
                 AntimatterPoolSeeder.AntimatterNotFullyConsumed.selector, phusdOut, required, susdsOut
             )
         );
-        seeder.seed(lpAmount, 0, 0, recipient, block.timestamp);
+        seeder.seed(lpAmount, 0, 0, 0, recipient, block.timestamp);
     }
 
     function test_seed_revertsAfterDeadline() public {
@@ -258,15 +259,15 @@ contract AntimatterPoolSeederTest is Test {
         vm.warp(1_000);
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(AntimatterPoolSeeder.Expired.selector, 999, 1_000));
-        seeder.seed(lpAmount, 0, 0, recipient, 999);
+        seeder.seed(lpAmount, 0, 0, 0, recipient, 999);
     }
 
     function test_seed_revertsOnZeroInputs() public {
         vm.startPrank(owner);
         vm.expectRevert(AntimatterPoolSeeder.ZeroAmount.selector);
-        seeder.seed(0, 0, 0, recipient, block.timestamp);
+        seeder.seed(0, 0, 0, 0, recipient, block.timestamp);
         vm.expectRevert(AntimatterPoolSeeder.ZeroAddress.selector);
-        seeder.seed(1, 0, 0, address(0), block.timestamp);
+        seeder.seed(1, 0, 0, 0, address(0), block.timestamp);
         vm.stopPrank();
     }
 
@@ -317,7 +318,8 @@ contract AntimatterPoolSeederTest is Test {
         vm.expectEmit(true, false, false, true, address(seeder));
         emit Seeded(lpAmount, phusdOut, phusdOut, susdsOut, expectedLiquidity, recipient);
         vm.prank(owner);
-        (uint256 burned, uint256 liquidity) = seeder.seed(lpAmount, phusdOut, susdsOut, recipient, block.timestamp);
+        (uint256 burned, uint256 liquidity) =
+            seeder.seed(lpAmount, phusdOut, susdsOut, susdsOut, recipient, block.timestamp);
 
         // Tax-neutral: phUSD burned == AM minted, with no AM minted outside the seed.
         assertEq(burned, phusdOut, "burned == phUSD out");
@@ -365,7 +367,76 @@ contract AntimatterPoolSeederTest is Test {
         _rescueAndApprove(lpAmount);
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(AntimatterPoolSeeder.OneSidedPair.selector, 0, 5, 42));
-        seeder.seed(lpAmount, 0, 0, recipient, block.timestamp);
+        seeder.seed(lpAmount, 0, 0, 0, recipient, block.timestamp);
+    }
+
+    // ============ minSUSDSPaired floor (audit run-44 M-01) ============
+
+    /// @dev The production floor: the pro-rata sUSDS expected from the unwrap, less 0.1%.
+    function _floor(uint256 susdsOut) internal pure returns (uint256) {
+        return susdsOut * 9_990 / 10_000;
+    }
+
+    /// @dev (a) An AM holder creates and prices the AM/sUSDS pair AM-cheap before the seed. Without
+    ///      the floor, the router would pair all the AM against almost no sUSDS (the M-01 leak).
+    function test_seed_floor_amCheapPrePricedPair_reverts() public {
+        address attacker = makeAddr("attacker");
+        am.mint(attacker, 1e18); // stands in for a claimed AM balance
+        IERC20(address(susds)).transfer(attacker, 1e6);
+        vm.startPrank(attacker);
+        am.approve(address(router), type(uint256).max);
+        IERC20(address(susds)).approve(address(router), type(uint256).max);
+        router.addLiquidity(address(am), address(susds), 1e18, 1e6, 0, 0, attacker, block.timestamp);
+        vm.stopPrank();
+
+        address amPair = seeder.amSusdsPair();
+        (uint112 r0, uint112 r1,) = IUniswapV2PairReserves(amPair).getReserves();
+        (uint256 rAm, uint256 rS) = address(am) < address(susds) ? (r0, r1) : (r1, r0);
+        uint256 lpAmount = seeder.lpForBps(2_500);
+        (uint256 phusdOut, uint256 susdsOut) = _expectedOut(lpAmount);
+        uint256 paired = phusdOut * rS / rAm; // Router02 quote
+        uint256 floor_ = _floor(susdsOut);
+        assertLt(paired, floor_ / 1e9, "pre-priced pair would pair almost no sUSDS");
+
+        _rescueAndApprove(lpAmount);
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(AntimatterPoolSeeder.InsufficientSUSDSPaired.selector, paired, floor_));
+        seeder.seed(lpAmount, phusdOut, susdsOut, floor_, recipient, block.timestamp);
+
+        // Control: the same call with a zero floor goes through and leaks the AM into the cheap pool.
+        vm.prank(owner);
+        seeder.seed(lpAmount, phusdOut, susdsOut, 0, recipient, block.timestamp);
+        assertEq(susds.balanceOf(recipient), susdsOut - paired, "unfloored: nearly all sUSDS refunded, AM leaked");
+    }
+
+    /// @dev (b) Fresh pair: the whole unwrapped sUSDS is paired, which clears a 0.1%-under floor.
+    function test_seed_floor_freshPair_passes_pairsFullSUSDS() public {
+        uint256 lpAmount = seeder.lpForBps(2_500);
+        (uint256 phusdOut, uint256 susdsOut) = _expectedOut(lpAmount);
+        _rescueAndApprove(lpAmount);
+        vm.expectEmit(true, false, false, false, address(seeder));
+        emit Seeded(0, 0, 0, 0, 0, recipient);
+        vm.prank(owner);
+        (uint256 burned,) = seeder.seed(lpAmount, phusdOut, susdsOut, _floor(susdsOut), recipient, block.timestamp);
+        address amPair = seeder.amSusdsPair();
+        assertEq(burned, phusdOut);
+        assertEq(susds.balanceOf(amPair), susdsOut, "full susdsOut paired");
+        assertEq(susds.balanceOf(recipient), 0, "nothing refunded");
+        _assertSeederEmpty();
+    }
+
+    /// @dev (c) One-sided griefed pair (dust + sync, no LP): the direct mint pairs all the sUSDS, so
+    ///      the floor does not block the griefed path.
+    function test_seed_floor_oneSidedGriefedPair_passes() public {
+        address amPair = _griefPair(true);
+        uint256 lpAmount = seeder.lpForBps(2_500);
+        (uint256 phusdOut, uint256 susdsOut) = _expectedOut(lpAmount);
+        _rescueAndApprove(lpAmount);
+        vm.prank(owner);
+        (uint256 burned,) = seeder.seed(lpAmount, phusdOut, susdsOut, _floor(susdsOut), recipient, block.timestamp);
+        assertEq(burned, phusdOut);
+        assertEq(susds.balanceOf(amPair), susdsOut + 1, "all sUSDS paired, dust absorbed");
+        _assertSeederEmpty();
     }
 
     // ============ out-of-band balances and rescue ============
