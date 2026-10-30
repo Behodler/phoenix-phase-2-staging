@@ -8,6 +8,7 @@ import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 import {DeployUniswapHelperMainnet, UniswapHelperMainnetBase} from "../script/DeployUniswapHelperMainnet.s.sol";
 import {VerifyUniswapHelper} from "../script/VerifyUniswapHelper.s.sol";
 import {IUniswapV2Router02} from "@yield-claim-nft/interfaces/uniswap/IUniswapV2Router02.sol";
+import {CutoverAntimatterPoolHarness} from "./CutoverAntimatterPoolMainnet.fork.t.sol";
 
 interface IUniswapV2FactoryCreate111 {
     function getPair(address, address) external view returns (address);
@@ -32,6 +33,18 @@ contract DeployUniswapHelperHarness is DeployUniswapHelperMainnet {
     function _progressFile() internal view override returns (string memory) {
         return progressPath;
     }
+
+    /// @dev Story 122: stands in the address book's AntimatterSusdsPair (the live book is patched only after the
+    ///      human's Script B broadcast).
+    address internal bookAmPair;
+
+    function setBookAmPair(address p) external {
+        bookAmPair = p;
+    }
+
+    function _bookAntimatterSusdsPair() internal view override returns (address) {
+        return bookAmPair;
+    }
 }
 
 /// @dev The fork block predates the deploy, so the live address book's filled `UniswapHelper` key names a helper with
@@ -49,6 +62,16 @@ contract VerifyUniswapHelperHarness is VerifyUniswapHelper {
 
     function _bookHelper() internal pure override returns (address) {
         return address(0);
+    }
+
+    address internal bookAmPair;
+
+    function setBookAmPair(address p) external {
+        bookAmPair = p;
+    }
+
+    function _bookAntimatterSusdsPair() internal view override returns (address) {
+        return bookAmPair;
     }
 }
 
@@ -179,6 +202,31 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
         IUniswapV2Router02(V2_ROUTER).addLiquidity(SUSDS, PHUSD, shares, seed, 0, 0, address(this), block.timestamp);
     }
 
+    /// @dev Story 122: the deploy now refuses unless the AM/sUSDS pair exists and matches the (stood-in) address
+    ///      book. At FORK_BLOCK it does not, so create it - seeded with ~100k a side when `seed`, so the verifier's
+    ///      Antimatter quote smoke has liquidity to quote against.
+    function _createAmPair(bool seed) internal returns (address amp) {
+        IUniswapV2FactoryCreate111 factory = IUniswapV2FactoryCreate111(IUniswapV2Router02(V2_ROUTER).factory());
+        amp = factory.getPair(ANTIMATTER, SUSDS);
+        if (amp == address(0)) amp = factory.createPair(ANTIMATTER, SUSDS);
+        if (!seed) return amp;
+        uint256 amt = 100_000e18;
+        deal(ANTIMATTER, address(this), amt);
+        deal(SUSDS, address(this), amt);
+        IERC20(ANTIMATTER).approve(V2_ROUTER, amt);
+        IERC20(SUSDS).approve(V2_ROUTER, amt);
+        IUniswapV2Router02(V2_ROUTER).addLiquidity(ANTIMATTER, SUSDS, amt, amt, 0, 0, address(this), block.timestamp);
+    }
+
+    function _deployHarness(bool preview_, string memory path, bool seedAm)
+        internal
+        returns (DeployUniswapHelperHarness s, address amp)
+    {
+        amp = _createAmPair(seedAm);
+        s = new DeployUniswapHelperHarness(preview_, path);
+        s.setBookAmPair(amp);
+    }
+
     function _assertHelperEmpty(UniswapHelper h, address lp) internal view {
         assertEq(address(h).balance, 0, "helper ETH");
         address[8] memory toks = [PHUSD, SUSDS, USDS, USDC, DOLA, USDE, WETH, lp];
@@ -192,7 +240,7 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
     function test_fork_preview_deploysTableImmutables_writesNoProgress() public {
         if (!_fork()) return;
         string memory path = _tmp("preview");
-        DeployUniswapHelperHarness s = new DeployUniswapHelperHarness(true, path);
+        (DeployUniswapHelperHarness s, address amp) = _deployHarness(true, path, false);
         s.run();
 
         assertTrue(s.deployedThisRun(), "deployed");
@@ -200,13 +248,13 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
         assertGt(address(h).code.length, 0, "helper code");
         _assertTable(h);
         assertEq(h.pair(), address(0), "pair absent until Stage 4");
-        assertEq(h.amPair(), address(0), "AM pair absent until the AM pool cutover");
+        assertEq(h.amPair(), amp, "helper resolves the AM pair the precondition required");
         assertFalse(vm.exists(path), "preview must not write the progress file");
     }
 
     function test_fork_deployedHelper_swapsThroughInForkPair() public {
         if (!_fork()) return;
-        DeployUniswapHelperHarness s = new DeployUniswapHelperHarness(true, _tmp("swap"));
+        (DeployUniswapHelperHarness s,) = _deployHarness(true, _tmp("swap"), false);
         s.run();
         UniswapHelper h = s.helper();
 
@@ -249,7 +297,7 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
         if (!_fork()) return;
         string memory path = _tmp("broadcast");
 
-        DeployUniswapHelperHarness s = new DeployUniswapHelperHarness(false, path);
+        (DeployUniswapHelperHarness s, address amp) = _deployHarness(false, path, true);
         s.run();
         assertTrue(s.deployedThisRun(), "deployed");
         address h = address(s.helper());
@@ -266,12 +314,14 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
 
         // Re-run: idempotent, nothing deployed.
         DeployUniswapHelperHarness again = new DeployUniswapHelperHarness(false, path);
+        again.setBookAmPair(amp);
         again.run();
         assertFalse(again.deployedThisRun(), "re-run must not deploy");
         assertEq(address(again.helper()), h, "re-run adopts the recorded helper");
 
         // Verifier: passes with the pair absent (Stage 4 pending) ...
         VerifyUniswapHelperHarness v = new VerifyUniswapHelperHarness(path);
+        v.setBookAmPair(amp);
         v.run();
         // ... and again, quote smoke test included, once the pair exists.
         _createPair();
@@ -313,7 +363,7 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
         v.run();
 
         // The deploy refuses to adopt it too, rather than silently skipping.
-        DeployUniswapHelperHarness s = new DeployUniswapHelperHarness(true, path);
+        (DeployUniswapHelperHarness s,) = _deployHarness(true, path, false);
         vm.expectRevert(bytes("verify: v3Fee mismatch"));
         s.run();
         vm.removeFile(path);
@@ -330,10 +380,10 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
                 '","deployed":true}}}'
             )
         );
-        DeployUniswapHelperHarness s = new DeployUniswapHelperHarness(true, path);
+        (DeployUniswapHelperHarness s,) = _deployHarness(true, path, false);
         vm.expectRevert(
             bytes(
-                "Progress file names a UniswapHelper with NO CODE - it was recorded in forge's local pass but never landed. Delete server/deployments/progress.uniswap-helper.1.json and re-run preview."
+                "Progress file names a UniswapHelper with NO CODE - it was recorded in forge's local pass but never landed. Delete server/deployments/progress.uniswap-helper-am.1.json and re-run preview."
             )
         );
         s.run();
@@ -349,5 +399,82 @@ contract DeployUniswapHelperMainnetForkTest is Test, Story111Table {
             )
         );
         v.run();
+    }
+}
+
+/**
+ * @title UniswapHelperAfterAntimatterCutoverForkTest  (story 122, Script C)
+ * @notice At a recent block (phUSD/sUSDS pair live, AM/sUSDS pair absent): the redeploy refuses to run before the
+ *         Antimatter cutover (Script B), and after an in-fork Script B run it deploys, records into the NEW progress
+ *         file and passes the verifier including the Antimatter checks and quote smoke.
+ */
+contract UniswapHelperAfterAntimatterCutoverForkTest is Test {
+    uint256 constant FORK_BLOCK = 26_303_500;
+    address constant ANTIMATTER = 0x9CA92B527012DfC6Fdca7B7493C722D5901FF151;
+    address constant SUSDS = 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD;
+    address constant FACTORY = 0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f;
+    string constant TMP_PREFIX = "server/deployments/progress.uniswap-helper-am.1.forktest-";
+
+    function _fork() internal returns (bool) {
+        string memory rpc = vm.envOr("RPC_MAINNET", string(""));
+        if (bytes(rpc).length == 0) {
+            vm.skip(true);
+            return false;
+        }
+        vm.createSelectFork(rpc, FORK_BLOCK);
+        return true;
+    }
+
+    function _tmp(string memory name) internal returns (string memory path) {
+        path = string.concat(TMP_PREFIX, name, ".json");
+        if (vm.exists(path)) vm.removeFile(path);
+    }
+
+    function test_fork_cBeforeB_revertsOnPrecondition() public {
+        if (!_fork()) return;
+        assertEq(IUniswapV2FactoryCreate111(FACTORY).getPair(ANTIMATTER, SUSDS), address(0), "AM pair absent");
+        DeployUniswapHelperHarness s = new DeployUniswapHelperHarness(true, _tmp("c-before-b"));
+        // the stood-in book key is zero, exactly as mainnet-addresses.ts is before Script B is patched
+        vm.expectRevert(
+            bytes(
+                "precondition: AntimatterSusdsPair is zero in mainnet-addresses.ts - run the Antimatter cutover (Script B) first"
+            )
+        );
+        s.run();
+
+        // A book key that names something the factory does not know is refused too.
+        s.setBookAmPair(makeAddr("notThePair"));
+        vm.expectRevert(
+            bytes(
+                "precondition: factory.getPair(AM, sUSDS) != book AntimatterSusdsPair - run the Antimatter cutover (Script B) first"
+            )
+        );
+        s.run();
+    }
+
+    function test_fork_bThenC_deploysAndVerifies() public {
+        if (!_fork()) return;
+        // Script B in-fork (preview mode: OWNER prank, no progress file).
+        CutoverAntimatterPoolHarness b = new CutoverAntimatterPoolHarness(true, _tmp("b"));
+        b.run();
+        address amp = b.amSusdsPair();
+        assertTrue(amp != address(0), "Script B created the AM pair");
+
+        // Script C in broadcast mode against a scratch progress file.
+        string memory path = _tmp("c");
+        DeployUniswapHelperHarness c = new DeployUniswapHelperHarness(false, path);
+        c.setBookAmPair(amp);
+        c.run();
+        assertTrue(c.deployedThisRun(), "deployed");
+        UniswapHelper h = c.helper();
+        assertEq(h.amPair(), amp, "helper resolves Script B's pair");
+        assertEq(h.antimatter(), ANTIMATTER, "antimatter");
+        assertEq(vm.parseJsonAddress(vm.readFile(path), ".contracts.UniswapHelper.address"), address(h), "new progress");
+        assertGt(h.quotePhUSDToAM(1000e18), 0, "AM quote");
+
+        VerifyUniswapHelperHarness v = new VerifyUniswapHelperHarness(path);
+        v.setBookAmPair(amp);
+        v.run();
+        vm.removeFile(path);
     }
 }

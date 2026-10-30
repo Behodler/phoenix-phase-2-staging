@@ -34,6 +34,11 @@ constructor now takes **15** inputs: the 14 below plus `antimatter`, read from t
 - The redeploy is a later cutover story. It must clear (or archive) the old
   `server/deployments/progress.uniswap-helper.1.json` and re-point the `UniswapHelper` key. The patcher refuses
   to overwrite a non-zero value, so the cutover story has to deal with that explicitly.
+- **Story 122 is that redeploy** (runbook: `docs/SyaAntimatterMainnetCutover.md`, Script C). The deploy now
+  records into a NEW progress file `progress.uniswap-helper-am.1.json` (the old file is left as history), refuses
+  to run until the book's `AntimatterSusdsPair` is filled and matches `factory.getPair(AM, sUSDS)`, and the patcher
+  REPOINTs `UniswapHelper` only from `0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3`. The steps below otherwise
+  apply unchanged; read "progress.uniswap-helper.1.json" as "progress.uniswap-helper-am.1.json".
 
 ## Steps
 

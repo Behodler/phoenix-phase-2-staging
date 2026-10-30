@@ -25,14 +25,25 @@ interface IUniHelperPreflightVault {
     function asset() external view returns (address);
 }
 
+interface IUniHelperPreflightFactory {
+    function getPair(address tokenA, address tokenB) external view returns (address);
+}
+
 interface IUniHelperPreflightCurve {
     function coins(uint256 i) external view returns (address);
 }
 
 /**
- * @title DeployUniswapHelperMainnet  (story 111, sprint Balancexit)
- * @notice Deploys `src/periphery/UniswapHelper.sol` (story 109) to mainnet in ONE owner transaction and records it in
- *         `server/deployments/progress.uniswap-helper.1.json` for `scripts/patch-mainnet-addresses-uniswap-helper.js`.
+ * @title DeployUniswapHelperMainnet  (story 111, sprint Balancexit; redeploy story 122)
+ * @notice Deploys `src/periphery/UniswapHelper.sol` (story 109, Antimatter routes story 120) to mainnet in ONE owner
+ *         transaction and records it in `server/deployments/progress.uniswap-helper-am.1.json` for
+ *         `scripts/patch-mainnet-addresses-uniswap-helper.js`, which REPOINTs the `UniswapHelper` key from the
+ *         story-111 helper 0x5648...a5b3.
+ *
+ *         STORY 122 ORDERING. Runs strictly after the Antimatter/sUSDS cutover (Script B) has landed: the run
+ *         refuses unless the address book's `AntimatterSusdsPair` is non-zero, equals `factory.getPair(AM, sUSDS)`
+ *         and has code ("run the Antimatter cutover (Script B) first"). Its mainnet `:preview` therefore fails on
+ *         that precondition until the human has broadcast Script B and the patcher has filled the key.
  *
  *         CONSTRUCTOR INPUTS. Every input that has a key in the hand-maintained address book
  *         `server/deployments/mainnet-addresses.ts` is READ FROM IT (PhUSD, SUSDS, USDS, USDC, Dola, USDe, SkyPSM,
@@ -65,7 +76,13 @@ abstract contract UniswapHelperMainnetBase is Script {
     address public constant OWNER = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
 
     string public constant ADDRESS_BOOK = "server/deployments/mainnet-addresses.ts";
-    string public constant PROGRESS_FILE = "server/deployments/progress.uniswap-helper.1.json";
+    /// @dev Story 122: the Antimatter-aware redeploy records into a NEW progress file. The story-111 file
+    ///      `progress.uniswap-helper.1.json` names the pre-story-120 helper 0x5648...a5b3, which has no `antimatter()`
+    ///      getter, so the idempotent path would revert on it. It is left untouched as history (PROGRESS_FILE_V1).
+    string public constant PROGRESS_FILE = "server/deployments/progress.uniswap-helper-am.1.json";
+    string public constant PROGRESS_FILE_V1 = "server/deployments/progress.uniswap-helper.1.json";
+    /// @dev The helper this redeploy replaces (story 111 broadcast, 2026-10-23); the patcher REPOINTs only from it.
+    address public constant PREVIOUS_HELPER = 0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3;
 
     // ---- Venues with no mainnet-addresses.ts key (story 111 table; story 109 fork-tested these) ----
     address public constant WETH9 = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
@@ -182,6 +199,32 @@ abstract contract UniswapHelperMainnetBase is Script {
         );
     }
 
+    /// @notice Story 122 ordering guard: the redeploy runs strictly AFTER the Antimatter/sUSDS cutover (Script B,
+    ///         `CutoverAntimatterPoolMainnet`) has landed and been patched into the address book. Technically the
+    ///         helper resolves `amPair()` lazily, so this is a runbook decision enforced in code (story 122).
+    function _requireAntimatterPairLive(HelperConfig memory c) internal view {
+        address bookPair = _bookAntimatterSusdsPair();
+        require(
+            bookPair != address(0),
+            "precondition: AntimatterSusdsPair is zero in mainnet-addresses.ts - run the Antimatter cutover (Script B) first"
+        );
+        address factory = IUniHelperPreflightV2Router(c.v2Router).factory();
+        require(
+            IUniHelperPreflightFactory(factory).getPair(c.antimatter, c.sUSDS) == bookPair,
+            "precondition: factory.getPair(AM, sUSDS) != book AntimatterSusdsPair - run the Antimatter cutover (Script B) first"
+        );
+        require(
+            bookPair.code.length > 0,
+            "precondition: AntimatterSusdsPair has no code - run the Antimatter cutover (Script B) first"
+        );
+    }
+
+    /// @dev The address book's `AntimatterSusdsPair`. `virtual` only so fork tests can stand in the pair their own
+    ///      in-fork Script B run created (the live book is patched only after the human's broadcast).
+    function _bookAntimatterSusdsPair() internal view virtual returns (address) {
+        return _bookAddress(vm.readFile(ADDRESS_BOOK), "AntimatterSusdsPair");
+    }
+
     function _code(address a, string memory name) private view {
         require(a.code.length > 0, string.concat("preflight: no code at ", name));
     }
@@ -265,12 +308,14 @@ contract DeployUniswapHelperMainnet is UniswapHelperMainnetBase {
         _requireCode(c);
         _requireVenues(c);
         console.log("Preflight OK: every input has code and every venue trades the expected tokens.");
+        _requireAntimatterPairLive(c);
+        console.log("Precondition OK: the AM/sUSDS pair is live and recorded in the address book (Script B landed).");
 
         address recorded = _progressHelper();
         if (recorded != address(0)) {
             require(
                 recorded.code.length > 0,
-                "Progress file names a UniswapHelper with NO CODE - it was recorded in forge's local pass but never landed. Delete server/deployments/progress.uniswap-helper.1.json and re-run preview."
+                "Progress file names a UniswapHelper with NO CODE - it was recorded in forge's local pass but never landed. Delete server/deployments/progress.uniswap-helper-am.1.json and re-run preview."
             );
             helper = UniswapHelper(payable(recorded));
             _checkImmutables(helper, c);
