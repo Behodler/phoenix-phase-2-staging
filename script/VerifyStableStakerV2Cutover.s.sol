@@ -463,7 +463,11 @@ contract VerifyStableStakerV2Cutover is CutoverStableStakerV2Mainnet {
             _doneAntimatterPauseWired(), "verify: Phase7: Antimatter setPauser(Pauser) + Pauser.register(Antimatter) not on chain"
         );
         require(_doneV2Unpaused(), "verify: Phase7: V2 unpause not on chain");
-        require(_doneClaimStillDisabled(), "verify: Phase7: V2 claimEnabled is true - must stay false");
+        // Story 122: accepts `true` once the SYAHarvester claim unblock is recorded (see `_doneClaimStillDisabled`).
+        require(
+            _doneClaimStillDisabled(),
+            "verify: Phase7: V2 claimEnabled is true but no story-122 claim unblock is recorded - must stay false"
+        );
         _requireRegistrantsPausable();
         console.log("  buffer recipients, V1 mint revoked, V2/Antimatter pause wiring, V2 unpaused");
     }

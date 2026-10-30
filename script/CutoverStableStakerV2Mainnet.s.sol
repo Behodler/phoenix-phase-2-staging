@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@forge-std/Script.sol";
 import "@forge-std/StdCheats.sol";
+import {ClaimUnblockState} from "./helpers/ClaimUnblockState.sol";
 import "@forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -1458,7 +1459,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         }
         require(_doneV2PauseWired(), "Phase7: V2 pauser / Pauser registration did not land");
         require(_doneAntimatterPauseWired(), "Phase7: Antimatter pauser / Pauser registration did not land");
-        require(_doneClaimStillDisabled(), "Phase7: claimEnabled must stay false");
+        require(_doneClaimStillDisabled(), "Phase7: claimEnabled must stay false (until the story-122 claim unblock is recorded)");
         console.log("  V1 pauser -> OWNER, unregistered from Pauser, left paused; V2 unpaused THEN registered; Antimatter registered");
     }
 
@@ -1553,7 +1554,10 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         require(IPauserRegistry(PAUSER).isRegistered(address(v2)), "Phase8: V2 not registered with Pauser");
         require(IPauserRegistry(PAUSER).isRegistered(address(antimatter)), "Phase8: Antimatter not registered");
         require(!v2.paused(), "Phase8: V2 paused");
-        require(!v2.claimEnabled(), "Phase8: claimEnabled must be false");
+        require(
+            _doneClaimStillDisabled(),
+            "Phase8: claimEnabled must be false (until the story-122 claim unblock is recorded)"
+        );
 
         // Story 084 (audit L-03 option a): static registry sweep, view-compatible so BROADCAST mode gets
         // an end-state guarantee too. `Pauser.pause()` calls `pause()` on every registrant with no
@@ -1989,8 +1993,12 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         return !v2.paused();
     }
 
+    /// @dev Story 122: state-aware. The cutover keeps claims CLOSED, so `false` is the expectation - until story
+    ///      122's Script A (`DeploySyaHarvesterMainnet`) deliberately opens them with `setClaimEnabled(true)`. Once
+    ///      that unblock is on record (its progress file says `claimEnabled: true`, or the address book's
+    ///      `SYAHarvester` key is filled) `true` is accepted too. See script/helpers/ClaimUnblockState.sol.
     function _doneClaimStillDisabled() internal view returns (bool) {
-        return !v2.claimEnabled();
+        return !v2.claimEnabled() || ClaimUnblockState.recorded();
     }
 
     // ---- Phase 6b: minter collateral, SYA, retired source (story 092) ----

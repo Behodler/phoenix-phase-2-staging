@@ -10,7 +10,7 @@ interface IUniHelperVerifyFactory {
 }
 
 /**
- * @title VerifyUniswapHelper  (story 111, sprint Balancexit)
+ * @title VerifyUniswapHelper  (story 111, sprint Balancexit; Antimatter checks story 122)
  * @notice READ-ONLY verifier for the mainnet UniswapHelper: no --broadcast, no --sender, no prank/deal.
  *
  *         WHICH HELPER. `server/deployments/progress.uniswap-helper.1.json` (written by the deploy) and the
@@ -26,6 +26,10 @@ interface IUniHelperVerifyFactory {
  *         Once the pair exists it quotes 1,000 of every supported stable into phUSD, 1,000 phUSD back out to each,
  *         and the two ETH routes (QuoterV2 quotes are non-view, so this run() is not `view`; nothing is sent),
  *         requiring each to be non-zero. If the address book's `PhusdSusdsPair` is non-zero it must equal `pair()`.
+ *
+ *         STORY 122. Reads the redeploy's progress file `progress.uniswap-helper-am.1.json`. Adds: `antimatter()` ==
+ *         book `Antimatter` (in `_checkImmutables`), `amPair()` == `factory.getPair(AM, sUSDS)` == book
+ *         `AntimatterSusdsPair` (which must be non-zero), and an Antimatter quote smoke test (phUSD<->AM, USDC<->AM).
  *
  * Usage: npm run uniswap-helper:verify
  */
@@ -60,12 +64,14 @@ contract VerifyUniswapHelper is UniswapHelperMainnetBase {
         address p = helper.pair();
         address factory = IUniHelperPreflightV2Router(c.v2Router).factory();
         require(p == IUniHelperVerifyFactory(factory).getPair(c.sUSDS, c.phUSD), "verify: pair() != factory.getPair");
-        // Story 120: the AM/sUSDS pair resolves lazily too; zero until the mainnet AM pool cutover.
-        require(
-            helper.amPair() == IUniHelperVerifyFactory(factory).getPair(c.sUSDS, c.antimatter),
-            "verify: amPair() != factory.getPair"
-        );
-        console.log("AM/sUSDS pair (zero until the AM pool cutover):", helper.amPair());
+        // Story 120: the AM/sUSDS pair resolves lazily too. Story 122: the redeploy only happens after the AM pool
+        // cutover (Script B), so the pair must now exist and equal the address book's AntimatterSusdsPair.
+        address amp = helper.amPair();
+        require(amp == IUniHelperVerifyFactory(factory).getPair(c.sUSDS, c.antimatter), "verify: amPair() != factory.getPair");
+        address bookAmPair = _bookAntimatterSusdsPair();
+        require(bookAmPair != address(0), "verify: AntimatterSusdsPair is zero in mainnet-addresses.ts (Script B not patched)");
+        require(amp == bookAmPair, "verify: amPair() != book AntimatterSusdsPair");
+        console.log("AM/sUSDS pair:", amp);
         if (p == address(0)) {
             console.log("pair not yet created (Stage 4 pending) - quote smoke test skipped.");
             return;
@@ -76,6 +82,25 @@ contract VerifyUniswapHelper is UniswapHelperMainnetBase {
         console.log("phUSD/sUSDS pair:", p);
         _quoteSmoke(helper, c);
         console.log("OK: quote smoke test passed on every route.");
+        _amQuoteSmoke(helper, c);
+        console.log("OK: Antimatter quote smoke test passed.");
+    }
+
+    /// @dev Story 122: smoke quotes on the Antimatter routes (AM<->phUSD through [AM, sUSDS, phUSD], AM<->USDC
+    ///      reusing the USDC leg). Each must be non-zero.
+    function _amQuoteSmoke(UniswapHelper helper, HelperConfig memory c) internal view {
+        uint256 phToAm = helper.quotePhUSDToAM(1000e18);
+        uint256 amToPh = helper.quoteAMToPhUSD(1000e18);
+        uint256 usdcToAm = helper.quoteToAM(c.USDC, 1000e6);
+        uint256 amToUsdc = helper.quoteFromAM(c.USDC, 1000e18);
+        console.log("  1000 phUSD -> AM:", phToAm);
+        console.log("  1000 AM -> phUSD:", amToPh);
+        console.log("  1000 USDC -> AM:", usdcToAm);
+        console.log("  1000 AM -> USDC:", amToUsdc);
+        require(phToAm > 0, "verify: zero quote phUSD -> AM");
+        require(amToPh > 0, "verify: zero quote AM -> phUSD");
+        require(usdcToAm > 0, "verify: zero quote USDC -> AM");
+        require(amToUsdc > 0, "verify: zero quote AM -> USDC");
     }
 
     /// @dev The helper named by the address book's `UniswapHelper` key. `virtual` only so fork tests pinned before
