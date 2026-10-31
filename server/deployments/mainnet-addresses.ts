@@ -45,6 +45,9 @@
 // Updated 2026-10-29: BalancerLPMigrator added as a ZERO placeholder (story 121) so the key-set matches
 // ContractAddresses; script/DeployBalancerLPMigratorMainnet.s.sol deploys it and the patcher fills it.
 // Updated 2026-10-30: BalancerLPMigrator deployed (story 121) — BalancerLPMigrator FILLED from progress.balancer-lp-migrator.1.json.
+// Updated 2026-10-31: Antimatter/sUSDS cutover (story 122) — AntimatterPoolSeeder + AntimatterSusdsPair FILLED from progress.antimatter-pool.1.json.
+// Updated 2026-10-31: SYAHarvester deployed (story 122) — SYAHarvester FILLED from progress.sya-harvester.1.json; StableStakerV2 claims enabled.
+// Updated 2026-10-31: UniswapHelper REPOINTED (story 122) — UniswapHelper REPOINTED from 0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3 via progress.uniswap-helper-am.1.json.
 import { ContractAddresses } from './addresses';
 
 
@@ -156,20 +159,19 @@ export const mainnetAddresses: ContractAddresses = {
   UniPooler: "0x56997ea45091CBc01DB8a09E60DEDB8b3706a3D2",
   PhusdSusdsPair: "0x0b96b8ab66d40ba3C7501aa8C28Cdc37688F6F7f",
   UniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-  // Story 111: one-tx phUSD swaps + phUSD/sUSDS liquidity periphery (UniswapHelper), deployed by
-  // DeployUniswapHelperMainnet and patched from progress.uniswap-helper.1.json. Its swaps and
-  // liquidity calls revert until the phUSD/sUSDS pair exists (story 103's Stage 4 cutover).
-  UniswapHelper: "0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3",
-  // Story 114: the Antimatter/sUSDS cutover. `AntimatterPoolSeeder` converts a slice of the
-  // protocol-owned phUSD/sUSDS LP into Antimatter/sUSDS LP, and `AntimatterSusdsPair` is the
-  // UniV2 pair its first seed creates. Neither exists on mainnet yet: ZERO until the mainnet
-  // cutover broadcast, then patch by hand (transient, expected).
-  AntimatterPoolSeeder: "0x0000000000000000000000000000000000000000",
-  AntimatterSusdsPair: "0x0000000000000000000000000000000000000000",
-  // Story 116: SYAHarvester (lib/sya-harvester) claims SYA yield with flash-borrowed USDC, sells it
-  // through Curve Router NG and pays the profit in ETH. Not deployed on mainnet yet: the human
-  // deploys it. ZERO until then, then patch by hand (transient, expected).
-  SYAHarvester: "0x0000000000000000000000000000000000000000",
+  // Story 111/120/122: one-tx phUSD + Antimatter swaps and phUSD/sUSDS + AM/sUSDS liquidity periphery
+  // (UniswapHelper, 15-arg story-120 build), redeployed after the AM/sUSDS cutover by DeployUniswapHelperMainnet
+  // and REPOINTED from 0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3 via progress.uniswap-helper-am.1.json.
+  UniswapHelper: "0x86CcCD22849e48C197048bE96a3D6049fC8d7078",
+  // Story 114/122: the Antimatter/sUSDS cutover. `AntimatterPoolSeeder` converted 10% of the
+  // protocol-owned phUSD/sUSDS LP into Antimatter/sUSDS LP, and `AntimatterSusdsPair` is the UniV2 pair
+  // its seed created. Patched from progress.antimatter-pool.1.json (CutoverAntimatterPoolMainnet).
+  AntimatterPoolSeeder: "0x7643046Eb5AeC0162bff96663000797CCc0B2E23",
+  AntimatterSusdsPair: "0xb6da5138C761Eb7a3Ef7030212bfc9e2EAB8a4DA",
+  // Story 116/122: SYAHarvester (lib/sya-harvester) claims SYA yield with flash-borrowed USDC, sells it
+  // through Curve Router NG and pays the profit in ETH. Deployed by DeploySyaHarvesterMainnet (story 122,
+  // which also opened StableStakerV2.claim) and patched from progress.sya-harvester.1.json.
+  SYAHarvester: "0xeE426A950Cb17D559F6391ef0D140715CD46703B",
   // Story 121: user-facing Balancer V3 phUSD/sUSDS BPT -> UniV2 phUSD/sUSDS migrator (BalancerLPMigrator),
   // deployed by DeployBalancerLPMigratorMainnet and patched from progress.balancer-lp-migrator.1.json.
   // The BPT has no key: read it from BalancerLPMigrator.pool().
