@@ -10,6 +10,7 @@ import {
     IAmCutoverFactory,
     IAmCutoverPair
 } from "./CutoverAntimatterPoolMainnet.s.sol";
+import {IPausableLike, IPauserRegistry} from "./CutoverStableStakerV2Mainnet.s.sol";
 
 /**
  * @title VerifyAntimatterPoolCutover  (story 122, Script B verifier)
@@ -22,7 +23,9 @@ import {
  *         LIVE CHECKS (durable state, required): seeder owner and immutables; the seeder holds none of phUSD,
  *         Antimatter, sUSDS, phUSD/sUSDS LP or AM/sUSDS LP; the seeder is NOT an approved Antimatter minter; the
  *         pair is `factory.getPair(AM, sUSDS)` and `seeder.amSusdsPair()`; both reserves are non-zero; OWNER holds
- *         AM/sUSDS LP.
+ *         AM/sUSDS LP. Story 124: StableStakerV2 is RESTORED after the freeze - `paused() == false`,
+ *         `pauser() == Pauser`, `Pauser.isRegistered(SSV2)` - and the registrant sweep passes (every Pauser registrant
+ *         unpaused with `pauser == Pauser`, so the global breaker is live).
  *
  *         RECORDED CHECKS (required). Supplies, reserves and the pooler's LP keep moving after the cutover (AM is
  *         minted by StableStakerV2, phUSD by its minters, the pair trades, UniPoolerV2 pools), so the exact
@@ -68,6 +71,17 @@ contract VerifyAntimatterPoolCutover is AntimatterPoolMainnetBase {
         console.log("OK live: seeder", seederAddr);
         console.log("         pair  ", pairAddr);
         console.log("         seeder owner/immutables, empty, not an AM minter; canonical pair; OWNER holds LP");
+
+        // Story 124: B's Step 10 (or the unfreeze key) restored SSV2 after the M-02 freeze.
+        IPausableLike ssv2 = IPausableLike(c.stableStakerV2);
+        require(!ssv2.paused(), "verify: StableStakerV2 is still PAUSED - B's Step 10 restore did not land");
+        require(ssv2.pauser() == c.pauser, "verify: StableStakerV2 pauser != Pauser - B's Step 10 restore did not land");
+        require(
+            IPauserRegistry(c.pauser).isRegistered(c.stableStakerV2),
+            "verify: StableStakerV2 is NOT registered with Pauser - B's Step 10 restore did not land"
+        );
+        _requireRegistrantsPausable(c, "verify: ");
+        console.log("OK SSV2: unpaused, pauser == Pauser, registered; every registrant pausable");
 
         if (p.seeded) {
             require(p.lpAmount > 0 && p.amMinted > 0, "verify: progress seed record is empty");

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "@forge-std/Test.sol";
+import {Vm} from "@forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AntimatterPoolSeeder} from "../src/periphery/AntimatterPoolSeeder.sol";
 import {
@@ -12,9 +13,50 @@ import {
     IAmCutoverFactory
 } from "../script/CutoverAntimatterPoolMainnet.s.sol";
 import {VerifyAntimatterPoolCutover} from "../script/VerifyAntimatterPoolCutover.s.sol";
+import {FreezeStableStakerV2ForCutover} from "../script/FreezeStableStakerV2ForCutover.s.sol";
+import {UnfreezeStableStakerV2AfterCutoverAbort} from "../script/UnfreezeStableStakerV2AfterCutoverAbort.s.sol";
+import {IPausableLike, IPauserRegistry} from "../script/CutoverStableStakerV2Mainnet.s.sol";
 
 /// @dev Pins the mode and the progress path (never the process-wide PREVIEW_MODE env, never the real progress file).
 contract CutoverAntimatterPoolHarness is CutoverAntimatterPoolMainnet {
+    bool internal immutable preview;
+    string internal progressPath;
+
+    constructor(bool preview_, string memory progressPath_) {
+        preview = preview_;
+        progressPath = progressPath_;
+    }
+
+    function _previewModeFromEnv() internal view override returns (bool) {
+        return preview;
+    }
+
+    function _progressFile() internal view override returns (string memory) {
+        return progressPath;
+    }
+}
+
+/// @dev Story 124: the freeze step with the same pinned mode / progress path.
+contract FreezeSsv2Harness is FreezeStableStakerV2ForCutover {
+    bool internal immutable preview;
+    string internal progressPath;
+
+    constructor(bool preview_, string memory progressPath_) {
+        preview = preview_;
+        progressPath = progressPath_;
+    }
+
+    function _previewModeFromEnv() internal view override returns (bool) {
+        return preview;
+    }
+
+    function _progressFile() internal view override returns (string memory) {
+        return progressPath;
+    }
+}
+
+/// @dev Story 124: the unfreeze recovery key with the same pinned mode / progress path.
+contract UnfreezeSsv2Harness is UnfreezeStableStakerV2AfterCutoverAbort {
     bool internal immutable preview;
     string internal progressPath;
 
@@ -53,7 +95,8 @@ contract VerifyAntimatterPoolHarness is VerifyAntimatterPoolCutover {
  * @title CutoverAntimatterPoolMainnetForkTest  (story 122, Script B)
  * @notice The cutover script's own logic against a mainnet fork (skipped without RPC_MAINNET): happy path at 10%,
  *         resume after the rescue, resume after the seed (revoke still runs), pair-already-exists abort, end state
- *         and the verifier.
+ *         and the verifier. Story 124: every broadcast-mode run is preceded by the SSV2 freeze step (B refuses
+ *         otherwise) and ends with B's 3-tx SSV2 restore (unpause -> setPauser(Pauser) -> register).
  */
 contract CutoverAntimatterPoolMainnetForkTest is Test {
     /// @dev Recent block (2026-10-30): the AM/sUSDS pair does not exist, UniPoolerV2 holds the protocol LP.
@@ -82,7 +125,19 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         if (vm.exists(path)) vm.removeFile(path);
     }
 
+    function _freeze(string memory path) internal returns (FreezeSsv2Harness f) {
+        f = new FreezeSsv2Harness(false, path);
+        f.run();
+    }
+
+    function _assertSsv2Restored() internal view {
+        assertFalse(IPausableLike(c.stableStakerV2).paused(), "SSV2 unpaused");
+        assertEq(IPausableLike(c.stableStakerV2).pauser(), c.pauser, "SSV2 pauser == Pauser");
+        assertTrue(IPauserRegistry(c.pauser).isRegistered(c.stableStakerV2), "SSV2 registered");
+    }
+
     function _assertEndState(CutoverAntimatterPoolMainnet s, uint256 poolerLpBefore, uint256 lp) internal view {
+        _assertSsv2Restored();
         AntimatterPoolSeeder seeder = s.seeder();
         address pair = s.amSusdsPair();
         assertEq(pair, IAmCutoverFactory(c.factory).getPair(c.antimatter, c.sUSDS), "canonical pair");
@@ -113,7 +168,9 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         assertEq(IERC20(c.antimatter).totalSupply() - amSupply, amMinted, "AM rose by AM minted");
         assertEq(IERC20(c.antimatter).balanceOf(s.amSusdsPair()), amMinted, "all AM in the pair");
         assertEq(IERC20(s.amSusdsPair()).balanceOf(OWNER), liquidity, "OWNER LP == liquidity");
-        assertEq(s.txCount(), 6, "deploy, rescue, approve, grant, seed, revoke");
+        assertEq(s.txCount(), 9, "deploy, rescue, approve, grant, seed, revoke, unpause, setPauser, register");
+        assertEq(s.freezeTxCount(), 3, "preview pranked the freeze step's setPauser, unregister, pause");
+        assertEq(s.globalPauseStageCount(), 3, "global pause probed before the freeze, while frozen, after restore");
         _assertEndState(s, poolerLp, lp);
         assertFalse(vm.exists(path), "preview must not write the progress file");
     }
@@ -122,8 +179,10 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         if (!_fork()) return;
         uint256 poolerLp = IERC20(c.phusdSusdsPair).balanceOf(c.uniPooler);
         string memory path = _tmp("broadcast");
+        assertEq(_freeze(path).txCount(), 3, "freeze: setPauser(OWNER), unregister, pause");
         CutoverAntimatterPoolHarness s = new CutoverAntimatterPoolHarness(false, path);
         s.run();
+        assertEq(s.txCount(), 9, "B: 6 cutover txs + 3 restore txs");
 
         string memory json = vm.readFile(path);
         assertEq(vm.parseJsonString(json, ".deploymentStatus"), "completed", "status");
@@ -133,11 +192,19 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         uint256 lp = vm.parseJsonUint(json, ".cutover.lpAmount");
         _assertEndState(s, poolerLp, lp);
 
+        // Completed-B re-run of the combined key (story 124): the freeze step is a no-op, SSV2 is NOT re-frozen,
+        // and B sends nothing.
+        FreezeSsv2Harness f2 = _freeze(path);
+        assertTrue(f2.skippedBCompleted(), "freeze step recognises the completed B");
+        assertEq(f2.txCount(), 0, "freeze re-run sends nothing");
+        _assertSsv2Restored();
         CutoverAntimatterPoolHarness again = new CutoverAntimatterPoolHarness(false, path);
         again.run();
+        assertTrue(again.completedBeforeRun(), "B recognises its own completed run");
         assertEq(again.txCount(), 0, "re-run sends nothing");
         assertFalse(again.deployedThisRun(), "re-run must not deploy");
         assertFalse(again.seededThisRun(), "re-run must not seed");
+        _assertSsv2Restored();
 
         new VerifyAntimatterPoolHarness(path).run();
         vm.removeFile(path);
@@ -157,13 +224,14 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         IAmCutoverPooler(c.uniPooler).rescueERC20(c.phusdSusdsPair, OWNER, lp);
         vm.stopPrank();
         _writePartialProgress(path, address(seeder), lp, poolerLp, ownerLp);
+        _freeze(path);
 
         CutoverAntimatterPoolHarness s = new CutoverAntimatterPoolHarness(false, path);
         s.run();
         assertFalse(s.deployedThisRun(), "seeder adopted");
         assertFalse(s.rescuedThisRun(), "rescue not repeated");
         assertTrue(s.seededThisRun(), "seeded");
-        assertEq(s.txCount(), 4, "approve, grant, seed, revoke");
+        assertEq(s.txCount(), 7, "approve, grant, seed, revoke + 3 restore");
         _assertEndState(s, poolerLp, lp);
         new VerifyAntimatterPoolHarness(path).run();
         vm.removeFile(path);
@@ -175,6 +243,7 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         uint256 poolerLp = IERC20(c.phusdSusdsPair).balanceOf(c.uniPooler);
         uint256 ownerLp = IERC20(c.phusdSusdsPair).balanceOf(OWNER);
         string memory path = _tmp("resume-seed");
+        _freeze(path);
 
         vm.startPrank(OWNER);
         AntimatterPoolSeeder seeder =
@@ -183,15 +252,16 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         IAmCutoverPooler(c.uniPooler).rescueERC20(c.phusdSusdsPair, OWNER, lp);
         IERC20(c.phusdSusdsPair).approve(address(seeder), lp);
         IAmCutoverAntimatter(c.antimatter).setApprovedMinter(address(seeder), true);
-        seeder.seed(lp, 1, 1, 1, OWNER, block.timestamp + 1 hours);
+        (uint256 amMinted, uint256 liquidity) = seeder.seed(lp, 1, 1, 1, OWNER, block.timestamp + 1 hours);
         vm.stopPrank();
         assertTrue(IAmCutoverAntimatter(c.antimatter).isApprovedMinter(address(seeder)), "still a minter");
-        _writePartialProgress(path, address(seeder), lp, poolerLp, ownerLp);
+        // The broadcast's local pass recorded the seed (pair + liquidity) before tx5 was mined.
+        _writeSeededProgress(path, address(seeder), seeder.amSusdsPair(), lp, poolerLp, ownerLp, amMinted, liquidity);
 
         CutoverAntimatterPoolHarness s = new CutoverAntimatterPoolHarness(false, path);
         s.run();
         assertFalse(s.seededThisRun(), "no second seed");
-        assertEq(s.txCount(), 1, "revoke only");
+        assertEq(s.txCount(), 4, "revoke + 3 restore");
         _assertEndState(s, poolerLp, lp);
         vm.removeFile(path);
     }
@@ -211,11 +281,53 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
         s.run();
     }
 
+    /// @dev Story 124: B refuses to run in broadcast mode until the freeze step has landed.
+    function test_fork_broadcast_withoutFreeze_refuses() public {
+        if (!_fork()) return;
+        CutoverAntimatterPoolHarness s = new CutoverAntimatterPoolHarness(false, _tmp("nofreeze"));
+        vm.expectRevert(
+            bytes(
+                "Step -1 (M-02): StableStakerV2 is NOT frozen (need paused + pauser == OWNER + unregistered from Pauser). Run npm run ssv2-freeze-for-cutover:broadcast first - npm run antimatter-pool:broadcast chains it."
+            )
+        );
+        s.run();
+    }
+
+    /// @dev Story 124: half a freeze (paused but still registered, the M2-fix.md design) is not a freeze.
+    function test_fork_broadcast_pausedButRegistered_refuses() public {
+        if (!_fork()) return;
+        vm.startPrank(OWNER);
+        IPausableLike(c.stableStakerV2).setPauser(OWNER);
+        IPausableLike(c.stableStakerV2).pause();
+        IPausableLike(c.stableStakerV2).setPauser(c.pauser);
+        vm.stopPrank();
+        CutoverAntimatterPoolHarness s = new CutoverAntimatterPoolHarness(false, _tmp("halffreeze"));
+        vm.expectRevert(
+            bytes(
+                "Step -1 (M-02): StableStakerV2 is NOT frozen (need paused + pauser == OWNER + unregistered from Pauser). Run npm run ssv2-freeze-for-cutover:broadcast first - npm run antimatter-pool:broadcast chains it."
+            )
+        );
+        s.run();
+    }
+
     function test_fork_verify_failsBeforeBroadcast() public {
         if (!_fork()) return;
         VerifyAntimatterPoolHarness v = new VerifyAntimatterPoolHarness(_tmp("absent"));
         vm.expectRevert(bytes("verify: no AntimatterPoolSeeder address - broadcast first"));
         v.run();
+    }
+
+    function _writeSeededProgress(
+        string memory path,
+        address seeder,
+        address pair,
+        uint256 lp,
+        uint256 poolerLp,
+        uint256 ownerLp,
+        uint256 amMinted,
+        uint256 liquidity
+    ) internal {
+        vm.writeFile(path, _seededProgressJson(seeder, pair, lp, poolerLp, ownerLp, amMinted, liquidity));
     }
 
     function _writePartialProgress(string memory path, address seeder, uint256 lp, uint256 poolerLp, uint256 ownerLp)
@@ -236,6 +348,48 @@ contract CutoverAntimatterPoolMainnetForkTest is Test {
             )
         );
     }
+}
+
+Vm constant HEVM = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
+/// @dev A progress file as the broadcast's LOCAL pass writes it once the seed is simulated (seeded record included).
+///      Story 124: B's resume gate compares the recorded pair and liquidity with chain state.
+function _seededProgressJson(
+    address seeder,
+    address pair,
+    uint256 lp,
+    uint256 poolerLp,
+    uint256 ownerLp,
+    uint256 amMinted,
+    uint256 liquidity
+) pure returns (string memory) {
+    return string.concat(
+        string.concat(
+            '{"chainId":1,"networkName":"mainnet","deploymentStatus":"in_progress","contracts":{"AntimatterPoolSeeder":{"address":"',
+            HEVM.toString(seeder),
+            '","deployed":true},"AntimatterSusdsPair":{"address":"',
+            HEVM.toString(pair),
+            '","deployed":true}},"cutover":{"bps":1000,"lpAmount":"',
+            HEVM.toString(lp),
+            '","poolerLpBefore":"',
+            HEVM.toString(poolerLp),
+            '","ownerLpBefore":"',
+            HEVM.toString(ownerLp)
+        ),
+        string.concat(
+            '","seeded":true,"amMinted":"',
+            HEVM.toString(amMinted),
+            '","liquidity":"',
+            HEVM.toString(liquidity),
+            '","phusdSupplyBefore":"1","phusdSupplyAfter":"1","amSupplyBefore":"0","amSupplyAfter":"',
+            HEVM.toString(amMinted),
+            '","amReserve":"',
+            HEVM.toString(amMinted),
+            '","poolerLpAfter":"',
+            HEVM.toString(poolerLp - lp),
+            '"}}'
+        )
+    );
 }
 
 interface IAmCutoverFactoryCreate {
@@ -282,6 +436,10 @@ contract CutoverAntimatterPoolFloorsHarness is CutoverAntimatterPoolHarness {
  *         A has opened claims, an AM holder can create the AM/sUSDS pair AM-cheap in that window. Before story 123
  *         tx5 then poured all ~2,457.70 protocol AM in against ~2.46e-9 sUSDS. With the on-chain `minSUSDSPaired`
  *         floor Script B now passes, tx5 reverts `InsufficientSUSDSPaired` instead.
+ *         Story 124 (M-02): Script B now refuses to start at all while AM is outstanding (frozen SSV2 +
+ *         `Antimatter.totalSupply() == 0`), so the attack test first proves that abort, then drives tx1-tx5 by hand to
+ *         keep proving the on-chain floor as the backstop. The control is re-justified: with no AM outstanding (the
+ *         freeze's precondition) nobody can pre-price the pair.
  *         Fork block 26_303_964: AM `pendingReward` exists for the claim-then-attack setup. Skipped without
  *         RPC_MAINNET.
  */
@@ -333,12 +491,14 @@ contract CutoverAntimatterPoolM01RegressionForkTest is Test {
     }
 
     /// forge's LOCAL pass of `:broadcast` (pair absent, every step simulated), rolled back. Returns the predicted
-    /// seeder and the floors the script itself computes right before the seed.
+    /// seeder and the floors the script itself computes right before the seed. Story 124: the freeze step lands
+    /// first, inside the same rolled-back snapshot.
     function _localPass(string memory path)
         internal
         returns (address seederAddr, uint256 minP, uint256 minS, uint256 minSPaired)
     {
         uint256 snap = vm.snapshotState();
+        new FreezeSsv2Harness(false, path).run();
         CutoverAntimatterPoolFloorsHarness h = new CutoverAntimatterPoolFloorsHarness(false, path);
         // The rescue moves LP to OWNER without burning it, so the pair's balances (and the floors) are the same
         // before and after it.
@@ -370,7 +530,23 @@ contract CutoverAntimatterPoolM01RegressionForkTest is Test {
     function test_PoC_M01_frontRunStealsSeededAM() public {
         _scriptA_attackerAcquiresAM(1e18);
 
-        (address predicted, uint256 minP, uint256 minS, uint256 minSPaired) = _localPass(_tmp("attack"));
+        // Story 124 (M-02): with AM outstanding, B's local pass refuses after the freeze, before any transaction.
+        string memory path = _tmp("attack");
+        CutoverAntimatterPoolFloorsHarness h = new CutoverAntimatterPoolFloorsHarness(false, path);
+        uint256 snap = vm.snapshotState();
+        new FreezeSsv2Harness(false, path).run();
+        vm.expectRevert(
+            bytes(
+                "Step 0 (M-02): Antimatter.totalSupply() != 0 while the AM/sUSDS pair does not exist - AM is in hands outside this cutover, so a dust-LP resume spoof is possible. ABORT before any transaction. SSV2 stays FROZEN: investigate, then the human decides (npm run ssv2-unfreeze-after-cutover-abort:broadcast restores SSV2; see docs/SyaAntimatterMainnetCutover.md)."
+            )
+        );
+        h.run();
+        vm.revertToState(snap);
+        if (vm.exists(path)) vm.removeFile(path);
+
+        // Backstop: drive tx1-tx5 by hand with the script's own floors; the on-chain floor still holds.
+        (uint256 minP, uint256 minS, uint256 minSPaired) = h.floors(c, DRY_LP);
+        address predicted = vm.computeCreateAddress(OWNER, vm.getNonce(OWNER));
         assertEq(minP, DRY_MIN_PHUSD, "script minPhUSD == audit dry run");
         assertEq(minS, DRY_MIN_SUSDS, "script minSUSDS == audit dry run");
         assertEq(minSPaired, DRY_MIN_SUSDS, "script minSUSDSPaired == the audit tripwire (2,075.083 sUSDS)");
@@ -407,10 +583,13 @@ contract CutoverAntimatterPoolM01RegressionForkTest is Test {
         assertEq(IERC20(c.antimatter).balanceOf(address(seeder)), 0, "seeder holds no AM");
     }
 
-    /// Control: Script A NOT run - AM supply is 0, nobody can pre-price the pair, and tx5 with the script's floors
-    /// pairs the AM with the full sUSDS.
-    function test_PoC_M01_control_noScriptA_cannotReproduce() public {
+    /// Control (re-justified by story 124): no AM outstanding - the state the SSV2 freeze + B's zero-supply gate
+    /// guarantee for the whole window, whatever the script order - so nobody can pre-price the pair, and tx5 with the
+    /// script's floors pairs the AM with the full sUSDS.
+    function test_PoC_M01_control_noAmOutstanding_cannotReproduce() public {
         assertEq(IERC20(c.antimatter).totalSupply(), 0, "pre-A: AM supply is 0");
+        // The freeze step is mined first (as `antimatter-pool:broadcast` chains it), so tx1's CREATE nonce follows it.
+        new FreezeSsv2Harness(false, _tmp("control-freeze")).run();
         (address predicted, uint256 minP, uint256 minS, uint256 minSPaired) = _localPass(_tmp("control"));
         _tx1to4();
         assertEq(address(seeder), predicted);
