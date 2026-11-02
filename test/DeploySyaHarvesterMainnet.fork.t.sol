@@ -218,10 +218,17 @@ contract DeploySyaHarvesterMainnetRouteTest is Test {
         vm.removeFile(book);
     }
 
-    function test_claimUnblock_liveBookIsZeroUntilBroadcast() public view {
-        // Until the human broadcasts Script A the real address book keeps the placeholder: false stays expected.
-        assertFalse(
-            ClaimUnblockState.bookHasSyaHarvester(ClaimUnblockState.ADDRESS_BOOK), "live SYAHarvester key is zero"
+    function test_claimUnblock_liveBookHasSyaHarvester() public view {
+        // Script A was broadcast (story 122, 2026-10-31) and the patcher filled the real address book from
+        // progress.sya-harvester.1.json, so the live key is non-zero and the claim unblock reads as recorded.
+        assertTrue(
+            ClaimUnblockState.bookHasSyaHarvester(ClaimUnblockState.ADDRESS_BOOK), "live SYAHarvester key is filled"
+        );
+        string memory book = vm.readFile(ClaimUnblockState.ADDRESS_BOOK);
+        assertTrue(
+            vm.indexOf(book, "\n  SYAHarvester: \"0xeE426A950Cb17D559F6391ef0D140715CD46703B\",")
+                != type(uint256).max,
+            "live SYAHarvester is the deployed harvester"
         );
     }
 }

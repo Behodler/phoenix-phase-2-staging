@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Test} from "@forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {IERC1155Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {NFTBonfire} from "@yield-claim-nft/NFTBonfire.sol";
 import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
 import {GatherV2} from "@yield-claim-nft/dispatchers/GatherV2.sol";
@@ -121,7 +122,10 @@ contract NFTBonfireLocalWiringTest is Test {
         assertEq(nftMinter.balanceOf(stranger, NFT_ID), 0);
 
         vm.prank(stranger);
-        vm.expectRevert(); // ERC1155InsufficientBalance from NFTMinterV2._burn
+        // NFTBonfire.burn has no holder check; NFTMinterV2._burn -> OZ ERC1155._update reverts.
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC1155Errors.ERC1155InsufficientBalance.selector, stranger, 0, 1, NFT_ID)
+        );
         bonfire.burn(NFT_ID, 0);
 
         assertEq(antimatter.balanceOf(stranger), 0);

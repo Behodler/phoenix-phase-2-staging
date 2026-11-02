@@ -134,8 +134,9 @@ contract DeployUniswapHelperMainnetConfigTest is Test, Story111Table {
         assertEq(b.bookAddress("USDC"), USDC, "USDC, not AutoUSDC");
         assertEq(b.bookAddress("USDe"), USDE, "USDe, not SUSDe");
         assertEq(b.bookAddress("NoSuchKey"), address(0), "absent key");
-        // Filled by the patcher after the 2026-10-23 mainnet broadcast.
-        assertEq(b.bookAddress("UniswapHelper"), 0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3, "deployed UniswapHelper");
+        // Repointed by story 122 via progress.uniswap-helper-am.1.json. The original 2026-10-23 helper
+        // (0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3) survives only as history in progress.uniswap-helper.1.json.
+        assertEq(b.bookAddress("UniswapHelper"), 0x86CcCD22849e48C197048bE96a3D6049fC8d7078, "deployed UniswapHelper");
     }
 }
 

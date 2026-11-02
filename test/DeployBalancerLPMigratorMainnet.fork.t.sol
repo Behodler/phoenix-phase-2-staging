@@ -80,7 +80,7 @@ abstract contract Story121Table {
 /**
  * @title DeployBalancerLPMigratorMainnetConfigTest  (story 121)
  * @notice No RPC needed: the deploy's inputs (address-book keys plus the Balancer constants) equal story 121's
- *         table, and the book's `BalancerLPMigrator` key exists and is still the zero placeholder.
+ *         table, and the book's `BalancerLPMigrator` key holds the migrator deployed on 2026-10-30.
  */
 contract DeployBalancerLPMigratorMainnetConfigTest is Test, Story121Table {
     function test_expectedConfig_matchesStoryTable() public {
@@ -97,10 +97,13 @@ contract DeployBalancerLPMigratorMainnetConfigTest is Test, Story121Table {
         assertEq(s.PROGRESS_FILE(), "server/deployments/progress.balancer-lp-migrator.1.json", "progress file");
     }
 
-    function test_bookKey_isZeroPlaceholder() public {
+    function test_bookKey_isDeployedMigrator() public {
         BalancerLPMigratorBookHarness b = new BalancerLPMigratorBookHarness();
-        // Absent would revert; present and zero until the human broadcasts and the patcher fills it.
-        assertEq(b.bookMigrator(), address(0), "BalancerLPMigrator is the zero placeholder");
+        // Absent would revert. Filled by the patcher from progress.balancer-lp-migrator.1.json after the
+        // story-121 mainnet broadcast (2026-10-30); the hand-maintained book is the source of truth.
+        assertEq(
+            b.bookMigrator(), 0x94f69b2eB445A8a74400FF3282d861CA0341cBd0, "BalancerLPMigrator is the deployed migrator"
+        );
         assertEq(b.bookAddress("PhusdSusdsPair"), PAIR, "PhusdSusdsPair");
     }
 }
