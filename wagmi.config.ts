@@ -50,6 +50,9 @@ export default defineConfig({
         // NFT Minter infrastructure
         'BurnRecorder.sol/BurnRecorder.json',
         'NFTMinterV2.sol/NFTMinterV2.json',
+        // Story 125: burn one claim NFT for the accrued antimatter pot (key `NFTBonfire`). DeployMocks
+        // Phase 11.15 deploys and wires it; a zero placeholder on Sepolia and mainnet until cutover.
+        'NFTBonfire.sol/NFTBonfire.json',
         // Story 106: BalancerPoolerV2 is DROPPED. DeployMocks no longer deploys it (the cutover
         // rehearsal retired post-cutover), and an ABI ships only if DeployMocks deploys its type.
         // Its `BalancerPooler` address key stays (zero on anvil/Sepolia) until story 107.
