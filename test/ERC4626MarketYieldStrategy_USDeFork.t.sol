@@ -46,10 +46,11 @@ pragma solidity ^0.8.19;
     * It does NOT wire the strategy into StableYieldAccumulator or any other
       live protocol contract. This is a standalone integration test only.
 
+    Skips cleanly when RPC_MAINNET is unset (repo-wide fork-test convention).
+
     Run:
-        source .envrc
-        forge test --fork-url $RPC_MAINNET \
-            --match-contract ERC4626MarketYieldStrategy_USDeFork -vvv
+        ( set -a; source ./.envrc; set +a; \
+          forge test --match-contract ERC4626MarketYieldStrategy_USDeFork -vvv )
 //////////////////////////////////////////////////////////////////////////*/
 
 import "@forge-std/Test.sol";
@@ -89,8 +90,13 @@ contract ERC4626MarketYieldStrategy_USDeFork is Test {
     ERC4626MarketYieldStrategy strategy;
 
     function setUp() public {
+        string memory rpc = vm.envOr("RPC_MAINNET", string(""));
+        if (bytes(rpc).length == 0) {
+            vm.skip(true);
+            return;
+        }
         // Pin the fork block for determinism.
-        vm.createSelectFork(vm.envString("RPC_MAINNET"), FORK_BLOCK);
+        vm.createSelectFork(rpc, FORK_BLOCK);
 
         owner = makeAddr("owner");
         client = makeAddr("client");

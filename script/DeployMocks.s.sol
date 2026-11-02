@@ -106,6 +106,11 @@ import {SyaHarvesterLocalStack} from "./helpers/SyaHarvesterLocalStack.sol";
 import {SYAHarvester} from "sya-harvester/SYAHarvester.sol";
 import {IStableYieldAccumulator} from "@stable-yield-accumulator/interfaces/IStableYieldAccumulator.sol";
 import {SyaHarvesterLocalConfig} from "./helpers/SyaHarvesterLocalConfig.sol";
+// Story 125: NFTBonfire (burn one claim NFT for the accrued antimatter pot), deployed and wired through
+// a library shared with test/NFTBonfireLocalWiring.t.sol. Named import: yield-claim-nft's `IMintable`
+// would otherwise clash with this file's `IMintableMock`.
+import {NFTBonfire} from "@yield-claim-nft/NFTBonfire.sol";
+import {NFTBonfireLocalWiring} from "./helpers/NFTBonfireLocalWiring.sol";
 
 /**
  * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
@@ -1562,6 +1567,14 @@ contract DeployMocks is Script {
         // and 11.10 has created and seeded it by now.
         _antimatterDemoBalances(deployer);
 
+        // ====== PHASE 11.15: NFTBonfire + final SYA discount (story 125) ======
+        // APPENDED after 11.14 and before the terminal sweep, so no existing address moves: deploys
+        // NFTBonfire and wires it in the audit-mandated order (burner, AM minter, pauser + register,
+        // cap, rate LAST), then lowers the SYA discount 20% -> 1%. The discount is lowered HERE, not in
+        // Phase 7.5, because the Phase 11.12 SYAHarvester smoke needs the 20% discount to clear its
+        // profit floor; the chain therefore runs the smoke at 20% and ends at 1%.
+        _deployNFTBonfire(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1641,6 +1654,8 @@ contract DeployMocks is Script {
         _markConfigured("UniswapV4LiquidityRouter", 0);
         // Story 116: SYAHarvester (configured and smoke-harvested inside _deployAndSmokeSyaHarvester).
         _markConfigured("SYAHarvester", 0);
+        // Story 125: NFTBonfire (deployed and wired inside _deployNFTBonfire).
+        _markConfigured("NFTBonfire", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -1677,7 +1692,8 @@ contract DeployMocks is Script {
         console.log("");
         console.log("StableYieldAccumulator Configuration:");
         console.log("  - Reward token: USDC (MockRewardToken)");
-        console.log("  - Discount rate: 20% (2000 basis points)");
+        console.log("  - Discount rate: 1% (100 basis points), set in Phase 11.15 AFTER the Phase 11.12 smoke");
+        console.log("    (Phase 7.5 sets 20% / 2000 bps so the SYAHarvester smoke harvest clears its profit floor)");
         console.log("  - Yield strategies registered: YieldStrategyDola (sDOLA; legacy removed in Phase 9.7), YieldStrategyUSDC");
         console.log("  - Phlimbo set as reward recipient");
         console.log("  - Minter set for yield queries");
@@ -1742,6 +1758,15 @@ contract DeployMocks is Script {
         console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
         console.log("  - NFTMinter registered with Global Pauser");
+        console.log("");
+        console.log("NFTBonfire (story 125, Phase 11.15):");
+        console.log("  - NFTBonfire:", address(nftBonfire));
+        console.log("  - ratePerDay (AM, 18dp):", nftBonfire.ratePerDay());
+        console.log("  - maxPayout (AM, 18dp):", nftBonfire.maxPayout());
+        console.log("  - pauser:", nftBonfire.pauser());
+        console.log("  - Authorized NFTMinterV2 burner + approved Antimatter minter; registered with Global Pauser");
+        console.log("  - NOTE: pausing NFTMinterV2 does NOT stop bonfire burns (NFTMinterV2.burn has no pause");
+        console.log("    check). Stop burns via the Global Pauser, or owner setRatePerDay(0) in one transaction.");
         console.log("");
         console.log("Local toggles + sweeps (script-audit run-26):");
         console.log("  - LOCAL_PROMO_KENDU (Kendu promo armed on PhlimboV3):", armKenduPromo);
@@ -1996,6 +2021,49 @@ contract DeployMocks is Script {
         require(antimatter.balanceOf(deployer) == before + UH_DEMO_18, "story-120: demo AM mint did not land");
         console.log("  UniswapHelper.amPair():", uniswapHelper.amPair());
         console.log("  deployer demo AM minted:", UH_DEMO_18);
+    }
+
+    // =====================================================================
+    // Story 125: NFTBonfire on anvil
+    // =====================================================================
+
+    /// @dev Set by `_deployNFTBonfire`. Tracked as "NFTBonfire" (ContractAddresses key `NFTBonfire`).
+    NFTBonfire public nftBonfire;
+
+    /// @dev The local SYA discount the chain ENDS on: 1% (100 bps), the human's ask. Not the lowest
+    ///      value `setDiscountRate` accepts (0 is accepted; 1 bps is the smallest non-zero step).
+    uint256 internal constant SYA_FINAL_DISCOUNT_BPS = 100;
+
+    /// @dev Phase 11.15 (story 125). Deploys NFTBonfire and wires it through `NFTBonfireLocalWiring`
+    ///      (burner -> AM minter -> pauser + register -> cap -> rate LAST, each read back), then lowers
+    ///      the SYA discount from Phase 7.5's 2000 bps to 100 bps. The deployer owns NFTMinterV2,
+    ///      Antimatter, Pauser and SYA, and stays the bonfire owner, as for every other anvil contract.
+    ///      `_sweepResidualPrivileges` touches only phUSD mint rights and the SYAHarvester end state,
+    ///      so it neither revokes anything this phase relies on nor needs to sweep anything new.
+    function _deployNFTBonfire(address deployer) internal {
+        console.log("\n=== Phase 11.15: NFTBonfire + final SYA discount (story 125) ===");
+
+        uint256 gasBefore = gasleft();
+        nftBonfire = NFTBonfireLocalWiring.deploy(deployer, nftMinterV2, antimatter);
+        _trackDeployment("NFTBonfire", address(nftBonfire), gasBefore - gasleft());
+        require(nftBonfire.owner() == deployer, "story-125: bonfire owner is not the deployer");
+
+        NFTBonfireLocalWiring.wire(nftBonfire, nftMinterV2, antimatter, pauser);
+        require(nftBonfire.pendingPayout() == 0, "story-125: bonfire pot must start empty");
+
+        // Lowered here, after the Phase 11.12 smoke harvest that needs 20% (see SyaHarvesterLocalConfig).
+        require(stableYieldAccumulator.getDiscountRate() == 2000, "story-125: expected the Phase 7.5 2000 bps discount");
+        stableYieldAccumulator.setDiscountRate(SYA_FINAL_DISCOUNT_BPS);
+        require(
+            stableYieldAccumulator.getDiscountRate() == SYA_FINAL_DISCOUNT_BPS,
+            "story-125: SYA discount not lowered to 1%"
+        );
+
+        console.log("  NFTBonfire:", address(nftBonfire));
+        console.log("  ratePerDay:", nftBonfire.ratePerDay());
+        console.log("  maxPayout:", nftBonfire.maxPayout());
+        console.log("  pauser:", nftBonfire.pauser());
+        console.log("  SYA discount rate (bps):", stableYieldAccumulator.getDiscountRate());
     }
 
     function _uhInputs() internal view returns (UniswapHelperLocalStack.Inputs memory) {

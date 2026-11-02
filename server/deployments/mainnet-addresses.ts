@@ -48,6 +48,8 @@
 // Updated 2026-10-31: Antimatter/sUSDS cutover (story 122) — AntimatterPoolSeeder + AntimatterSusdsPair FILLED from progress.antimatter-pool.1.json.
 // Updated 2026-10-31: SYAHarvester deployed (story 122) — SYAHarvester FILLED from progress.sya-harvester.1.json; StableStakerV2 claims enabled.
 // Updated 2026-10-31: UniswapHelper REPOINTED (story 122) — UniswapHelper REPOINTED from 0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3 via progress.uniswap-helper-am.1.json.
+// Updated 2026-11-02: NFTBonfire added as a ZERO placeholder (story 125) so the key-set matches
+// ContractAddresses; deployed on anvil only, a later cutover story deploys it to mainnet and fills it.
 import { ContractAddresses } from './addresses';
 
 
@@ -176,6 +178,10 @@ export const mainnetAddresses: ContractAddresses = {
   // deployed by DeployBalancerLPMigratorMainnet and patched from progress.balancer-lp-migrator.1.json.
   // The BPT has no key: read it from BalancerLPMigrator.pool().
   BalancerLPMigrator: "0x94f69b2eB445A8a74400FF3282d861CA0341cBd0",
+  // Story 125: NFTBonfire (lib/yield-claim-nft) burns one claim NFT for the accrued antimatter pot.
+  // Deployed on anvil only (DeployMocks Phase 11.15). ZERO placeholder until the mainnet cutover story
+  // deploys it; fill by hand then. The UI must gate on a non-zero address.
+  NFTBonfire: "0x0000000000000000000000000000000000000000",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts

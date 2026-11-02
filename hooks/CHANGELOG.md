@@ -5,6 +5,34 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-11-02
+
+Story-125 (nft-bonfire). Adds the ABI of `NFTBonfire` (yield-claim-nft, audited run 23), which lets a
+holder burn one of their own NFTMinterV2 claim NFTs for the antimatter pot that has accrued since the
+last burn. DeployMocks Phase 11.15 deploys and wires it on anvil (10 AM/day, 100 AM cap). Strictly
+additive: no existing export changes or disappears. Not published.
+
+### Added
+- `nftBonfireAbi`
+  - `burn(tokenId, minPayout)` returns `payout`. Always burns ONE unit from `msg.sender` (no holder
+    argument, no ERC1155 approval needed) and mints the whole pot in Antimatter to the caller, then
+    resets the pot to zero. Reverts `NFTBonfire__BurningDisabled` while `ratePerDay == 0`,
+    `NFTBonfire__PayoutBelowMinimum(payout, minPayout)` below the caller's floor, and `EnforcedPause`
+    while paused. The pot can be front-run (audit Q-26): pass a `minPayout` derived from
+    `pendingPayout()`.
+  - `pendingPayout()` (view): the current pot, `accruedStored + elapsed * ratePerDay / 1 days`, capped
+    at `maxPayout` when that is non-zero.
+  - Getters `ratePerDay()`, `maxPayout()`, `accruedStored()`, `lastUpdate()`, `pauser()`, `paused()`,
+    `owner()`, and immutables `nftMinter()` / `antimatter()`.
+  - Owner setters `setRatePerDay`, `setMaxPayout`, `setPauser`; pauser-only `pause` / `unpause`.
+  - Events `Burned(burner, tokenId, payout)`, `RatePerDayUpdated`, `MaxPayoutUpdated`, `PauserChanged`.
+  - Pausing NFTMinterV2 does NOT stop bonfire burns; the bonfire is registered with the global Pauser
+    in its own right.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+New key `NFTBonfire`: deployed on anvil (DeployMocks Phase 11.15); a zero placeholder on Sepolia and
+mainnet until a later cutover story deploys it. Gate the UI on a non-zero address.
+
 ## [0.20.0] - 2026-10-29
 
 Story-121 (balancer-lp-migrator). Adds the ABI of `BalancerLPMigrator`, the user-facing helper that

@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-10-29T18:36:41.492Z",
+  "extractedAt": "2026-11-02T05:44:51.271Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -407,7 +407,7 @@
       "address": "0xD1760AA0FCD9e64bA4ea43399Ad789CFd63C7809",
       "deployed": true,
       "configured": true,
-      "deployGas": 1435522,
+      "deployGas": 1615412,
       "configGas": 0
     },
     "AntimatterSusdsPair": {
@@ -422,6 +422,13 @@
       "deployed": true,
       "configured": true,
       "deployGas": 0,
+      "configGas": 0
+    },
+    "NFTBonfire": {
+      "address": "0x696358bBb1a743052E0E87BeD78AAd9d18f0e1F4",
+      "deployed": true,
+      "configured": true,
+      "deployGas": 716284,
       "configGas": 0
     },
     "BalancerLPMigrator": {
