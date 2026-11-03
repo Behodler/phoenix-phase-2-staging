@@ -105,6 +105,9 @@ export default defineConfig({
         // USDe strategy uses the AMM-market variant (slippage haircut + principalOf/totalBalanceOf)
         'ERC4626MarketYieldStrategy.sol/ERC4626MarketYieldStrategy.json',
         'Pauser.sol/Pauser.json',
+        // Story 127: PauserV2 is the live local global pauser (the `Pauser` address key resolves to it
+        // after DeployMocks Phase 11.16). V1 is kept: it stays deployed, and V2 keeps its surface.
+        'PauserV2.sol/PauserV2.json',
 
         // View contracts for UI polling. Story 078 left ViewRouter as the sole view ADDRESS
         // key; DepositPageViewV3 and MintPageView are still deployed behind it, so their
