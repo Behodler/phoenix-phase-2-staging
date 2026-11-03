@@ -352,6 +352,31 @@ Also check each payload off-chain against the story-052 rules: no non-zero entry
 
 This is guidance for future cutovers, not a request to migrate now. Whenever the USDC YieldStrategy is upgraded, redeployed or otherwise cut over, do not simply redeploy against autoUSD. Seek a different, lower-trust destination and raise the choice with the user before writing the script. Treat the destination vault as a safety-critical parameter under [Configuration Safety](#configuration-safety-non-negotiable): record in a code comment where the choice came from and why it was judged safer.
 
+## Cutovers: Deregister Retired Contracts From Their Global Pauser (REQUIRED)
+
+**Every cutover that leaves the old contract empty or unusable MUST deregister that contract from the global
+Pauser it is registered with.** This covers stakers, minters, YieldStrategies, poolers, NFT contracts and anything
+else that called `Pauser.register`. A cutover script, or its runbook, is not complete until the retired contract
+satisfies `pauser() != Pauser && !Pauser.isRegistered(old)`. Its Verify script must assert that state.
+
+**Why.** The global `Pauser.pause()` loops over every registrant with no try/catch. A retired registrant that is
+already paused reverts `EnforcedPause`, and one whose `pauser()` is no longer the Pauser rejects the call. Either
+way the circuit breaker is bricked for every live contract. A dead contract left registered is a latent outage of
+the protocol's emergency stop.
+
+**Required order** (the established pattern in `FreezeStableStakerV2ForCutover.s.sol` and the StableStaker V1 /
+autoDOLA retirements in `VerifyStableStakerV2Cutover.s.sol`):
+
+1. `old.setPauser(OWNER)`. `Pauser.unregister` reverts while `old.pauser()` is still the Pauser.
+2. `Pauser.unregister(old)` on the Pauser that `old` was registered with. Several Pausers may exist across the
+   stack, so read `old.pauser()` live before step 1 and target that address. Do not assume it is the Phase 2 Pauser.
+3. `old.pause()`, if the contract should also be frozen. Never pause before unregistering, for the reason above.
+
+Keep the window between steps 1 and 2 to adjacent transactions in the same broadcast. Never use `Pauser.pause()`
+itself in a cutover: it burns EYE and pauses every registrant. Each step should be skipped when already done, so
+the script stays re-runnable. If a cutover genuinely leaves the old contract live and usable (a dormant yield
+client, for example), say so explicitly in the script header and keep it registered.
+
 ## Contract Deployment Order
 
 Critical deployment sequence (dependencies must be deployed first):
@@ -945,6 +970,7 @@ Before deploying to Mainnet:
 - [ ] Gas price and limits configured appropriately
 - [ ] Backup plan in place if deployment fails
 - [ ] **Every safety parameter explicitly justified** (slippage/`minAmountOut`, deadlines, oracle staleness, fees, access-control addresses, caps, reward durations) — none left at zero or a default; see [Configuration Safety](#configuration-safety-non-negotiable)
+- [ ] **Cutovers deregister every empty or unusable old contract from its global Pauser** (see [Cutovers: Deregister Retired Contracts](#cutovers-deregister-retired-contracts-from-their-global-pauser-required))
 - [ ] **In-script `require` guards reject unsafe defaults** on real networks (script refuses to broadcast rather than deploy something dangerous)
 
 ### Local Development Only
