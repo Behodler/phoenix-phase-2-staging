@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-11-02T05:44:51.360Z
+// Generated from local.json on 2026-11-03T05:13:12.047Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -16,7 +16,7 @@ export const anvilAddresses: ContractAddresses = {
   Kendu: "0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82",
   Flax: "0x9A676e781A523b5d0C0e43731313A708CB607508",
   WBTC: "0x0B306BF915C4d645ff596e518fAf3F9669b97016",
-  Pauser: "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1",
+  Pauser: "0x6D712CB50297b97b79dE784d10F487C00d7f8c2C",
   AutoDOLA: "0x9A9f2CCfdE556A7E9Ff0848998Aa4a0CFD8863AE",
   YieldStrategyDolaLegacy: "0x68B1D87F95878fE05B998F19b66F4baba5De1aed",
   SDOLA: "0x3Aa5ebB10DC797CAC828524e59A333d0A371443c",

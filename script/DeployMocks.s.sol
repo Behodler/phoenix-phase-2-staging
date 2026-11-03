@@ -29,6 +29,8 @@ import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 import {IPhlimboV3} from "@phlimbo-ea/interfaces/IPhlimboV3.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
 import "@pauser/Pauser.sol";
+import {PauserV2} from "@pauser/PauserV2.sol";
+import {PauserV2LocalMigration} from "./helpers/PauserV2LocalMigration.sol";
 import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import {ERC4626MarketYieldStrategy} from "@vault/concreteYieldStrategies/ERC4626MarketYieldStrategy.sol";
 import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
@@ -264,6 +266,9 @@ contract DeployMocks is Script {
     PhlimboV3 public phlimboV3;
     MockEYE public eyeToken;
     Pauser public pauser;
+    // Story 127: the live local global pauser. Deployed and populated in Phase 11.16; V1 above is
+    // left deployed and orphaned (StableStaker V1 stays on it), mirroring mainnet.
+    PauserV2 public pauserV2;
     StableYieldAccumulator public stableYieldAccumulator;
     ViewRouter public viewRouter;
     // The V3-native deposit page, and the only one the router ever holds. Deliberately KEYLESS —
@@ -1575,6 +1580,14 @@ contract DeployMocks is Script {
         // profit floor; the chain therefore runs the smoke at 20% and ends at 1%.
         _deployNFTBonfire(deployer);
 
+        // ====== PHASE 11.16: PauserV2 + rotation of every live V1 registrant (story 127) ======
+        // APPENDED after 11.15 and before the terminal sweep, so no existing address moves: V1 stays
+        // deployed at its Phase 1.5 address (swapping it in place would shift the deployer nonce and
+        // every later address). Deploys PauserV2, rotates every V1 registrant except the retired
+        // StableStaker V1 onto it (setPauser THEN register), asserts health() and the registrant set,
+        // and re-tracks V2 under the `Pauser` address key. phStaging2:118 appends after this (11.17).
+        _migrateToPauserV2();
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1706,11 +1719,12 @@ contract DeployMocks is Script {
         console.log("  - Phlimbo distributes rewards to stakers");
         console.log("");
         console.log("Global Pauser System:");
-        console.log("  - Pauser contract deployed with MockEYE token");
-        console.log("  - PhusdStableMinter registered with Pauser");
-        console.log("  - PhlimboV3 registered with Pauser");
-        console.log("  - StableYieldAccumulator registered with Pauser");
-        console.log("  - StableStakerV1 (retired), StableStakerV2 and Antimatter registered with Pauser");
+        console.log("  - Pauser V1 deployed with MockEYE token (Phase 1.5), now ORPHANED (story 127)");
+        console.log("  - PauserV2 (live; the `Pauser` address key) deployed in Phase 11.16:", address(pauserV2));
+        console.log("  - PauserV2 registrants:", pauserV2.getPausableContracts().length);
+        console.log("  - Every live V1 registrant rotated to PauserV2 (PhusdStableMinter, PhlimboV3, SYA,");
+        console.log("    NFTMinterV2, NFTStaker, StableStakerV2, Antimatter, Uniboost stakers, batch minters, NFTBonfire)");
+        console.log("  - StableStakerV1 (retired) stays registered with the orphaned V1 only");
         console.log("StableStakerV2: 10% set-aside buffer on all 3 pools (DOLA, USDC, USDe)");
         console.log("");
         console.log("StableStakerV2 Cutover (story 080):");
@@ -1757,16 +1771,16 @@ contract DeployMocks is Script {
         );
         console.log("  - GatherWBTC dispatcher (index 5: accumulates WBTC to deployer)");
         console.log("  - StableYieldAccumulator authorized as NFT burner");
-        console.log("  - NFTMinter registered with Global Pauser");
+        console.log("  - NFTMinter registered with Global Pauser (V1 in Phase 8, rotated to PauserV2 in Phase 11.16)");
         console.log("");
         console.log("NFTBonfire (story 125, Phase 11.15):");
         console.log("  - NFTBonfire:", address(nftBonfire));
         console.log("  - ratePerDay (AM, 18dp):", nftBonfire.ratePerDay());
         console.log("  - maxPayout (AM, 18dp):", nftBonfire.maxPayout());
         console.log("  - pauser:", nftBonfire.pauser());
-        console.log("  - Authorized NFTMinterV2 burner + approved Antimatter minter; registered with Global Pauser");
+        console.log("  - Authorized NFTMinterV2 burner + approved Antimatter minter; on PauserV2 (Phase 11.16)");
         console.log("  - NOTE: pausing NFTMinterV2 does NOT stop bonfire burns (NFTMinterV2.burn has no pause");
-        console.log("    check). Stop burns via the Global Pauser, or owner setRatePerDay(0) in one transaction.");
+        console.log("    check). Stop burns via PauserV2 (global pause), or owner setRatePerDay(0) in one transaction.");
         console.log("");
         console.log("Local toggles + sweeps (script-audit run-26):");
         console.log("  - LOCAL_PROMO_KENDU (Kendu promo armed on PhlimboV3):", armKenduPromo);
@@ -2064,6 +2078,48 @@ contract DeployMocks is Script {
         console.log("  maxPayout:", nftBonfire.maxPayout());
         console.log("  pauser:", nftBonfire.pauser());
         console.log("  SYA discount rate (bps):", stableYieldAccumulator.getDiscountRate());
+    }
+
+    /// @dev Phase 11.16 (story 127). Deploys PauserV2 against the same MockEYE as V1 and rotates every
+    ///      live V1 registrant except the retired StableStaker V1 onto it through
+    ///      `PauserV2LocalMigration` (the SAME library `test/PauserV2LocalMigration.t.sol` drives). The
+    ///      registrant set is derived from `pauser.getPausableContracts()`, so it cannot drift from V1.
+    ///      V1 is left deployed with every registration it had: orphaned, as the mainnet V1 will be.
+    ///      Gated on `_isConfigured("PauserV2Migration")` and step-idempotent (deploy only when unset,
+    ///      setPauser/register only when not already done), so a re-entry is a no-op. The `Pauser`
+    ///      address key is re-pointed at V2 in place (`_retrackDeployment`), so no key is added and no
+    ///      other address moves. `_sweepResidualPrivileges` touches only phUSD mint rights and the
+    ///      SYAHarvester end state, so it neither revokes anything this phase relies on nor needs to
+    ///      sweep anything new: the deployer owns V2, as it owned V1.
+    function _migrateToPauserV2() internal {
+        console.log("\n=== Phase 11.16: PauserV2 + V1 registrant rotation (story 127) ===");
+        if (_isConfigured("PauserV2Migration")) {
+            console.log("  already configured - skipped");
+            return;
+        }
+
+        uint256 gasBefore = gasleft();
+        if (address(pauserV2) == address(0)) {
+            pauserV2 = new PauserV2(address(eyeToken));
+        }
+        require(pauserV2.eyeToken() == address(eyeToken), "story-127: PauserV2 EYE token mismatch");
+        require(pauserV2.eyeBurnAmount() == pauser.eyeBurnAmount(), "story-127: PauserV2 burn != V1 burn");
+        _retrackDeployment("Pauser", address(pauserV2), gasBefore - gasleft());
+
+        uint256 migrated = PauserV2LocalMigration.migrate(pauser, pauserV2, address(stableStaker));
+        uint256 noPausedGetter = PauserV2LocalMigration.requireHealthy(pauserV2);
+        require(
+            pauser.isRegistered(address(stableStaker)) && stableStaker.pauser() == address(pauser),
+            "story-127: retired StableStaker V1 must stay on the orphaned V1"
+        );
+
+        _markConfigured("PauserV2Migration", 0);
+
+        console.log("  PauserV2:", address(pauserV2));
+        console.log("  registrants rotated V1 -> V2:", migrated);
+        console.log("  V1 registrants (incl. retired StableStaker V1):", pauser.getPausableContracts().length);
+        console.log("  health(): notPauser / alreadyPaused / unreachable all empty; noPausedGetter:", noPausedGetter);
+        console.log("  `Pauser` address key now resolves to PauserV2; V1 orphaned at:", address(pauser));
     }
 
     function _uhInputs() internal view returns (UniswapHelperLocalStack.Inputs memory) {
@@ -3494,6 +3550,25 @@ contract DeployMocks is Script {
             name: name, addr: addr, deployed: true, configured: false, deployGas: gas, configGas: 0
         });
         contractNames.push(name);
+    }
+
+    /**
+     * @dev Story 127. Re-point an ALREADY-tracked name at a new address, in place. Unlike
+     *      `_trackDeployment` it does not push the name again, so the progress file keeps one entry
+     *      per key (a second push would serialize a duplicate JSON key).
+     */
+    function _retrackDeployment(string memory name, address addr, uint256 gas) internal {
+        require(deployments[name].deployed, "retrack: name was never tracked");
+        deployments[name] = ContractDeployment({
+            name: name, addr: addr, deployed: true, configured: false, deployGas: gas, configGas: 0
+        });
+    }
+
+    /**
+     * @dev Story 127. True once `_markConfigured(name, ...)` has run for `name`.
+     */
+    function _isConfigured(string memory name) internal view returns (bool) {
+        return deployments[name].configured;
     }
 
     /**

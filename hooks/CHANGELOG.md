@@ -5,6 +5,33 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-11-03
+
+Story-127 (global-pauser-v2). Adds the ABI of `PauserV2` (Behodler/pauser, pauser-RM:003), the
+global emergency pause that tolerates registrants in known-benign states. DeployMocks Phase 11.16
+deploys it on anvil and rotates every live V1 registrant onto it. Strictly additive: `pauserAbi` (V1)
+is kept and no existing export changes or disappears. Not published.
+
+### Added
+- `pauserV2Abi`
+  - Every V1 function and event keeps its signature (`pause()`, owner `unpause()`, `register`,
+    `unregister`, `config`, `getPausableContracts()`, `isRegistered`, `eyeToken()`, `eyeBurnAmount()`),
+    so a V1 consumer works against V2 unchanged.
+  - `pause()` (EYE-burning, permissionless) skips a registrant only on positive evidence of a benign
+    state (no code, another pauser, already paused) and emits `PauseSkipped(c, reason)`; it reverts
+    `"PauserV2: nothing to pause"` when every registrant was skipped.
+  - `unpause()` is per-registrant tolerant: `UnpauseSkipped(c, reason)` and `UnpauseFailed(c, reason)`;
+    re-running it is the recovery path.
+  - `health()` (view) returns `(notPauser, alreadyPaused, noPausedGetter, unreachable)` address arrays:
+    whether a `pause()` would reach every registrant, for a Safety/Admin panel.
+  - `SkipReason` enum: `NO_CODE`, `NOT_PAUSER`, `ALREADY_PAUSED`, `NOT_PAUSED`, `UNREACHABLE`.
+  - `unregister` is unconditional in V2.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+No new key. On anvil the existing `Pauser` key now resolves to the PauserV2 address (DeployMocks
+Phase 11.16); V1 stays deployed, orphaned, at its old address. Sepolia and mainnet are unchanged
+(mainnet: phStaging2:128).
+
 ## [0.21.0] - 2026-11-02
 
 Story-125 (nft-bonfire). Adds the ABI of `NFTBonfire` (yield-claim-nft, audited run 23), which lets a
