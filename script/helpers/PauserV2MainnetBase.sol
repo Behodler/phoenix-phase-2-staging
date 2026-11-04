@@ -6,6 +6,7 @@ import {StdCheats} from "@forge-std/StdCheats.sol";
 import "@forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PauserV2} from "@pauser/PauserV2.sol";
+import {PauserV2Registry} from "./PauserV2Registry.sol";
 
 /// @dev Shape of `IPausableLike` (CutoverStableStakerV2Mainnet.s.sol L2327). Every Phoenix pausable exposes an
 ///      owner-only `setPauser(address)`; `paused()` is NOT universal, so it is always probed low-level.
@@ -41,7 +42,7 @@ interface IOwnedV2 {
  *         the live `V1.getPausableContracts()` and refuses on any drift, so the operator re-classifies instead of
  *         migrating a stale list (e.g. if phStaging2:119 registers a new minter with V1 first).
  */
-abstract contract PauserV2MainnetBase is Script, StdCheats {
+abstract contract PauserV2MainnetBase is Script, StdCheats, PauserV2Registry {
     uint256 internal constant CHAIN_ID = 1;
     string internal constant NETWORK_NAME = "mainnet";
 
@@ -51,8 +52,14 @@ abstract contract PauserV2MainnetBase is Script, StdCheats {
     address internal constant PAUSER_V1 = 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3;
     /// @dev EYE, the V1 Pauser's burn token (`mainnet-addresses.ts` `EYE`, and `V1.eyeToken()`).
     address internal constant EYE = 0x155ff1A85F440EE0A382eA949f24CE4E0b751c65;
-    /// @dev 1000 EYE: V1's live `eyeBurnAmount()` and PauserV2's constructor default. Asserted, never configured.
+    /// @dev 1000 EYE: V1's live `eyeBurnAmount()` and PauserV2's constructor default. The FINAL burn: the migration
+    ///      sets it back as its last transaction, and the verifier requires it.
     uint256 internal constant EYE_BURN_AMOUNT = 1000e18;
+    /// @dev 1,000,000 EYE (product owner, audit 49 L-02): the burn while the rotation window is open. At 1000 EYE
+    ///      anyone could V2.pause() mid-window (~$12), and the paused registrants block the scripted resume while
+    ///      the unrotated ones sit on the bricked V1. 1M EYE is ~10% of EYE's 9.73M supply. Set by the deploy
+    ///      right after the CREATE (or by the migration before its first rotation, if the deploy did not).
+    uint256 internal constant EYE_BURN_AMOUNT_MIGRATION = 1_000_000e18;
     /// @dev StableStakerV2; re-registered with V1 after the story-124 freeze/unfreeze cycle.
     address internal constant STABLE_STAKER_V2 = 0xA6d3fc83C91B8319D219cEB12B46e3dfF064B58F;
 
@@ -132,7 +139,8 @@ abstract contract PauserV2MainnetBase is Script, StdCheats {
         }
     }
 
-    /// @notice The PauserV2 at `v2` is the one this migration expects: code, owner, EYE token, burn amount.
+    /// @notice The PauserV2 at `v2` is the one this migration expects: code, owner, EYE token, and a burn amount
+    ///         that is one of the two states the migration uses (final or rotation-window).
     function _checkPauserV2(address v2) internal view {
         require(v2 != address(0), "PauserV2 address is zero");
         require(v2 != PAUSER_V1, "PauserV2 address is the V1 Pauser");
@@ -140,7 +148,11 @@ abstract contract PauserV2MainnetBase is Script, StdCheats {
         PauserV2 p = PauserV2(v2);
         require(p.owner() == OWNER, "PauserV2.owner() != OWNER");
         require(p.eyeToken() == EYE, "PauserV2.eyeToken() != EYE");
-        require(p.eyeBurnAmount() == EYE_BURN_AMOUNT, "PauserV2.eyeBurnAmount() != 1000e18");
+        uint256 burn = p.eyeBurnAmount();
+        require(
+            burn == EYE_BURN_AMOUNT || burn == EYE_BURN_AMOUNT_MIGRATION,
+            "PauserV2.eyeBurnAmount() is neither 1000e18 (final) nor 1_000_000e18 (rotation window)"
+        );
         // health() exists only on V2: a V1 Pauser at this address fails here.
         p.health();
     }
@@ -190,6 +202,29 @@ abstract contract PauserV2MainnetBase is Script, StdCheats {
         }
     }
 
+    // ============ Broadcast gas price (audit run 49 L-03) ============
+
+    /// @dev The :broadcast keys send LEGACY txs at a fixed `--with-gas-price $PAUSER_V2_GAS_PRICE_WEI` (default
+    ///      0.3 gwei). A legacy tx pays its full gas price, and it cannot be included while block.basefee exceeds
+    ///      that price. It also cannot be replaced by re-running at the same price. Requiring 2x headroom at start
+    ///      means the base fee must more than double during the --slow Ledger session before a tx can stall.
+    ///      `tx.gasprice` inside a forge script does NOT reflect --with-gas-price, so the env var is the source.
+    uint256 internal constant GAS_PRICE_BASEFEE_MULTIPLE = 2;
+
+    function _requireBroadcastGasPriceHeadroom() internal view {
+        _requireGasPriceHeadroom(vm.envOr("PAUSER_V2_GAS_PRICE_WEI", uint256(0)));
+    }
+
+    function _requireGasPriceHeadroom(uint256 gasPriceWei) internal view {
+        require(gasPriceWei > 0, "PAUSER_V2_GAS_PRICE_WEI unset or 0");
+        console.log("Gas price (wei):", gasPriceWei);
+        console.log("block.basefee (wei):", block.basefee);
+        require(
+            gasPriceWei >= block.basefee * GAS_PRICE_BASEFEE_MULTIPLE,
+            "PAUSER_V2_GAS_PRICE_WEI < 2 x block.basefee: raise it (runbook: Gas price)"
+        );
+    }
+
     // ============ Address sources ============
 
     /// @notice The PauserV2 recorded by `DeployPauserV2Mainnet`'s broadcast, or address(0) when none.
@@ -202,6 +237,19 @@ abstract contract PauserV2MainnetBase is Script, StdCheats {
         }
         if (bytes(json).length == 0 || !vm.keyExistsJson(json, ".contracts.PauserV2.address")) return address(0);
         return vm.parseJsonAddress(json, ".contracts.PauserV2.address");
+    }
+
+    /// @notice True when the deploy progress file says `completed` (set by scripts/confirm-pauser-v2-progress.js
+    ///         after a success receipt and live code; audit 49 L-06).
+    function _progressCompleted() internal view virtual returns (bool) {
+        string memory json;
+        try vm.readFile(_progressFile()) returns (string memory j) {
+            json = j;
+        } catch {
+            return false;
+        }
+        if (bytes(json).length == 0 || !vm.keyExistsJson(json, ".deploymentStatus")) return false;
+        return keccak256(bytes(vm.parseJsonString(json, ".deploymentStatus"))) == keccak256("completed");
     }
 
     function _progressFile() internal view virtual returns (string memory) {

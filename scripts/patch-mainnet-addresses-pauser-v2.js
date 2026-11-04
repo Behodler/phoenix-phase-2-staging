@@ -5,9 +5,11 @@
  * REPOINTS the `Pauser` key of `server/deployments/mainnet-addresses.ts` from the retired V1 Pauser
  * 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3 to the PauserV2 deployed by script/DeployPauserV2Mainnet.s.sol.
  *
- * RUN BY THE HUMAN, AFTER BOTH BROADCASTS (`pauser-v2-deploy:broadcast` and `pauser-v2-migrate:broadcast`), and
- * before `npm run pauser-v2-verify`. It is deliberately NOT chained into either broadcast key: the book must keep
- * naming V1 until every live registrant has been rotated (runbook docs/runbooks/pauser-v2-migration.md, step 4).
+ * CHAINED at the end of `pauser-v2-migrate:broadcast`, after the forge run and before `npm run pauser-v2-verify`
+ * (audit 49 L-04: every other mainnet broadcast patches its own book). The book must keep naming V1 until every
+ * live registrant has been rotated, so it refuses (exit 5) unless PauserV2 on-chain shows the finished state:
+ * at least one registrant and the burn restored to 1000e18, which the migration does last. It can also be run by
+ * hand, with the same gate (runbook docs/runbooks/pauser-v2-migration.md).
  *
  * SOURCE OF THE ADDRESS
  *   The deploy broadcast's receipts: broadcast/DeployPauserV2Mainnet.s.sol/1/run-latest.json - the CREATE of
@@ -30,6 +32,7 @@
  *   --progress <path>    progress file     (default server/deployments/progress.pauser-v2.1.json; optional)
  *   --addresses <path>   address book      (default server/deployments/mainnet-addresses.ts)
  *   --no-backup          skip the backup (scratch copies only)
+ *   --skip-chain-check   skip the on-chain "migration finished" gate (scratch copies only)
  *
  * Exit codes:
  *   0 - Success
@@ -37,6 +40,7 @@
  *   2 - run-latest.json missing / unparseable / no successful PauserV2 CREATE / wrong chain
  *   3 - post-patch key-set no longer equals the ContractAddresses interface
  *   4 - progress disagrees with the receipts, the target key is absent, or a collision
+ *   5 - the migration has not finished on-chain (no registrants, or burn not 1000e18), or RPC_MAINNET unset
  */
 
 const fs = require('fs');
@@ -64,11 +68,14 @@ function parseArgs(argv) {
         progress: DEFAULT_PROGRESS_FILE,
         addresses: DEFAULT_ADDRESSES_FILE,
         backup: true,
+        chainCheck: true,
     };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--no-backup') {
             opts.backup = false;
+        } else if (a === '--skip-chain-check') {
+            opts.chainCheck = false;
         } else if ((a === '--run-latest' || a === '--progress' || a === '--addresses') && argv[i + 1]) {
             opts[a.slice(2)] = path.resolve(argv[++i]);
         } else {
@@ -135,11 +142,34 @@ function dataKeys(source) {
     return [...withoutLineComments.matchAll(/^\s*([A-Za-z0-9_]+)\s*:\s*"0x[0-9a-fA-F]{40}"/gm)].map((m) => m[1]);
 }
 
+const FINAL_BURN = 1000n * 10n ** 18n;
+
+/**
+ * Audit 49 L-04: refuse to name PauserV2 in the book before the migration has finished. MigratePauserV2Mainnet
+ * restores the 1000-EYE burn as its LAST transaction, only after every live registrant is on V2 and health() is
+ * clean, so "burn == 1000e18 and at least one registrant" is on-chain proof that the migration completed.
+ * `npm run pauser-v2-verify`, chained after this, checks the full invariant.
+ */
+function requireMigrationComplete(addr) {
+    const rpc = process.env.RPC_MAINNET;
+    if (!rpc) fail(5, 'RPC_MAINNET unset - cannot confirm the migration finished (use --skip-chain-check only on scratch copies)');
+    const call = (sig) => execFileSync('cast', ['call', addr, sig, '--rpc-url', rpc], { encoding: 'utf8' }).trim();
+    const burn = BigInt(call('eyeBurnAmount()(uint256)').split(/\s/)[0]);
+    const regs = call('getPausableContracts()(address[])').replace(/[\[\]\s]/g, '');
+    const count = regs === '' ? 0 : regs.split(',').length;
+    if (count === 0) fail(5, `PauserV2 ${addr} has no registrants - run npm run pauser-v2-migrate:broadcast first`);
+    if (burn !== FINAL_BURN) {
+        fail(5, `PauserV2 ${addr} eyeBurnAmount is ${burn}, not 1000e18 - the migration has not finished (it lowers the burn last)`);
+    }
+    console.log(`  PauserV2 ${addr}: ${count} registrants, burn 1000e18 - migration finished`);
+}
+
 function run() {
     const opts = parseArgs(process.argv.slice(2));
     const addr = pauserV2FromRunLatest(opts['run-latest']);
     if (addr.toLowerCase() === V1_PAUSER.toLowerCase()) fail(2, 'run-latest names the V1 Pauser');
     checkProgress(opts.progress, addr);
+    if (opts.chainCheck) requireMigrationComplete(addr);
     if (!fs.existsSync(opts.addresses)) fail(1, `Target file not found: ${opts.addresses}`);
 
     let source = fs.readFileSync(opts.addresses, 'utf8');
@@ -197,4 +227,6 @@ function run() {
     console.log(`  File written: ${opts.addresses}`);
 }
 
-run();
+if (require.main === module) run();
+
+module.exports = { pauserV2FromRunLatest };

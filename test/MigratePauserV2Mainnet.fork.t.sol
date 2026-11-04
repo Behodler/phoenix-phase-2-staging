@@ -43,11 +43,49 @@ contract MigratePauserV2Harness is MigratePauserV2Mainnet {
     }
 }
 
+/// @dev A minimal pausable whose pauser is settable: stands in for a future registrant (bonfire, new minter).
+contract FreshPausable {
+    address public pauser;
+    address public owner;
+    bool public paused;
+
+    constructor(address p) {
+        pauser = p;
+        owner = msg.sender;
+    }
+
+    function pause() external {
+        paused = true;
+    }
+
+    function unpause() external {
+        paused = false;
+    }
+}
+
 contract VerifyPauserV2Harness is VerifyPauserV2Migration {
     address internal immutable injected;
+    address[] internal additions;
+    address[] internal removals;
 
     constructor(address v2) {
         injected = v2;
+    }
+
+    function addAddition(address a) external {
+        additions.push(a);
+    }
+
+    function addRemoval(address a) external {
+        removals.push(a);
+    }
+
+    function postMigrationAdditions() public view override returns (address[] memory) {
+        return additions;
+    }
+
+    function postMigrationRemovals() public view override returns (address[] memory) {
+        return removals;
     }
 
     function _progressPauserV2() internal view override returns (address) {
@@ -107,7 +145,7 @@ contract MigratePauserV2MainnetForkTest is Test {
         v2 = d.pauserV2();
         assertEq(v2.owner(), OWNER);
         assertEq(v2.eyeToken(), EYE);
-        assertEq(v2.eyeBurnAmount(), 1000e18);
+        assertEq(v2.eyeBurnAmount(), 1_000_000e18, "deploy step 2 raised the burn (audit 49 L-02)");
 
         migrator = new MigratePauserV2Harness(address(v2));
         live = migrator.liveRegistrants();
@@ -147,8 +185,10 @@ contract MigratePauserV2MainnetForkTest is Test {
 
     function test_DeployAndMigrate_EndState() public {
         if (!_fork()) return;
+        assertEq(v2.eyeBurnAmount(), 1_000_000e18, "deploy raised the burn for the rotation window");
         uint256 n = _migrate();
-        assertEq(n, 2 * live.length, "one setPauser + one register per live registrant");
+        assertEq(n, 2 * live.length + 1, "one setPauser + one register per live registrant, then the burn lowered");
+        assertEq(v2.eyeBurnAmount(), 1000e18, "migration lowered the burn last");
 
         assertEq(v2.getPausableContracts().length, live.length, "V2 holds exactly the live set");
         for (uint256 i = 0; i < live.length; i++) {
@@ -193,7 +233,7 @@ contract MigratePauserV2MainnetForkTest is Test {
         vm.stopPrank();
 
         uint256 n = _migrate();
-        assertEq(n, 2 * live.length - 5, "resume sends only the outstanding steps");
+        assertEq(n, 2 * live.length - 5 + 1, "resume sends only the outstanding steps, then lowers the burn");
         assertEq(v2.getPausableContracts().length, live.length);
     }
 
@@ -279,4 +319,97 @@ contract MigratePauserV2MainnetForkTest is Test {
         vm.expectRevert(bytes("verify: live registrant(s) not on PauserV2 - see the log above"));
         verifier.run();
     }
+
+    // ---------------- audit 49 L-02: burn raised for the rotation window ----------------
+
+    /// @dev Mid-window (interrupted after 3 rotations) a 1000-EYE griefer cannot pause V2.
+    function test_Burn_InterruptedWindow_1000EyeCannotPause() public {
+        if (!_fork()) return;
+        vm.startPrank(OWNER);
+        for (uint256 i = 0; i < 3; i++) {
+            IPauserV2Pausable(live[i]).setPauser(address(v2));
+            v2.register(live[i]);
+        }
+        vm.stopPrank();
+        address actor = makeAddr("story128-griefer");
+        deal(EYE, actor, 1000e18, false);
+        vm.startPrank(actor);
+        IERC20(EYE).approve(address(v2), type(uint256).max);
+        vm.expectRevert();
+        v2.pause();
+        vm.stopPrank();
+    }
+
+    /// @dev A PauserV2 left at the final burn (e.g. deployed before this change) is raised before any rotation.
+    function test_Burn_MigrateRaisesFirstIfDeployLeftItFinal() public {
+        if (!_fork()) return;
+        vm.prank(OWNER);
+        v2.config(1000e18, EYE);
+        uint256 n = _migrate();
+        assertEq(n, 1 + 2 * live.length + 1, "raise, rotate every live registrant, lower");
+        assertEq(v2.eyeBurnAmount(), 1000e18);
+    }
+
+    function test_Verify_RefusesHighBurn() public {
+        if (!_fork()) return;
+        _migrate();
+        vm.prank(OWNER);
+        v2.config(1_000_000e18, EYE);
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        vm.expectRevert(bytes("verify: PauserV2.eyeBurnAmount() != 1000e18 - the migration lowers it last"));
+        verifier.run();
+    }
+
+    // ---------------- audit 49 L-07: invariants, not the frozen snapshot ----------------
+
+    function test_Verify_DetectsNewContractRegisteredWithDeadV1() public {
+        if (!_fork()) return;
+        _migrate();
+        vm.startPrank(OWNER);
+        FreshPausable fresh = new FreshPausable(PAUSER_V1);
+        IV1PauserRegister(PAUSER_V1).register(address(fresh));
+        vm.stopPrank();
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        vm.expectRevert(bytes("verify: V1 holds a registrant outside the story-128 snapshot - see the log above"));
+        verifier.run();
+    }
+
+    function test_Verify_UnlistedV2AdditionFails_CommittedAdditionPasses() public {
+        if (!_fork()) return;
+        _migrate();
+        vm.startPrank(OWNER);
+        FreshPausable fresh = new FreshPausable(address(v2));
+        v2.register(address(fresh));
+        vm.stopPrank();
+
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        vm.expectRevert(
+            bytes("verify: PauserV2 holds an address that is neither live nor a committed addition - see the log above")
+        );
+        verifier.run();
+
+        verifier.addAddition(address(fresh));
+        verifier.run();
+    }
+
+    function test_Verify_UnlistedRemovalFails_CommittedRemovalPasses() public {
+        if (!_fork()) return;
+        _migrate();
+        address oldMinter = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
+        vm.startPrank(OWNER);
+        IPauserV2Pausable(oldMinter).setPauser(OWNER);
+        v2.unregister(oldMinter);
+        vm.stopPrank();
+
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        vm.expectRevert(bytes("verify: live registrant(s) not on PauserV2 - see the log above"));
+        verifier.run();
+
+        verifier.addRemoval(oldMinter);
+        verifier.run();
+    }
+}
+
+interface IV1PauserRegister {
+    function register(address c) external;
 }
