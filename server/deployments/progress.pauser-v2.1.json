@@ -1,0 +1,12 @@
+{
+  "chainId": 1,
+  "contracts": {
+    "PauserV2": {
+      "address": "0x669Ebfa5309db66683c199Cfe22516DECBe1a154",
+      "createNonce": 1821,
+      "deployed": true
+    }
+  },
+  "deploymentStatus": "completed",
+  "networkName": "mainnet"
+}

@@ -50,6 +50,7 @@
 // Updated 2026-10-31: UniswapHelper REPOINTED (story 122) — UniswapHelper REPOINTED from 0x564810D5d9D31754C8dbdb8F62Bb429D50Dfa5b3 via progress.uniswap-helper-am.1.json.
 // Updated 2026-11-02: NFTBonfire added as a ZERO placeholder (story 125) so the key-set matches
 // ContractAddresses; deployed on anvil only, a later cutover story deploys it to mainnet and fills it.
+// Updated 2026-11-05: Pauser REPOINTED to PauserV2 (story 128) — was the V1 Pauser 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3.
 import { ContractAddresses } from './addresses';
 
 
@@ -66,7 +67,9 @@ export const mainnetAddresses: ContractAddresses = {
   PhUSD: "0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605",
 
   // Deployed Phase 2 contracts
-  Pauser: "0x7c5A8EeF1d836450C019FB036453ac6eC97885a3",
+  // Story 128: PauserV2 (tolerant global pause). The V1 Pauser 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3 is RETIRED and
+  // bricked by the migration; only the 9 retired registrants remain on it. Never re-register anything with V1.
+  Pauser: "0x669ebfa5309db66683c199cfe22516decbe1a154",
   PhusdStableMinter: "0x94855ACA13952D81507C92D3CdBb2e25D3bbE60C",
   // The `PhlimboEA` key is RETIRED. It named PhlimboV2 (0x6084a02c2ac0127ddf1e617de257c61480a2aee0,
   // deployed by story 049), which still exists on mainnet wound down, mint-revoked and NOT paused
