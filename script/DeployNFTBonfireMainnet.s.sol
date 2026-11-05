@@ -250,7 +250,7 @@ contract DeployNFTBonfireMainnet is NFTBonfireMainnetBase {
         require(INFTMinterV2Bonfire(NFT_MINTER).owner() == OWNER, "NFTMinterV2.owner() != OWNER");
         require(IAntimatterBonfire(ANTIMATTER).owner() == OWNER, "Antimatter.owner() != OWNER");
         require(IPauserV2Bonfire(PAUSER_V2).owner() == OWNER, "PauserV2.owner() != OWNER");
-        // The minter's own pauser is PauserV2 too (story 128 rotation), so the stack shares one emergency stop.
+        // NFTMinterV2's own pauser (expected PauserV2 after the story 128 rotation) is not asserted here; Bonfire wiring does not depend on it.
         console.log("Preflight OK: book == pinned NFTMinterV2 / Antimatter / PauserV2; OWNER owns all three.");
     }
 
