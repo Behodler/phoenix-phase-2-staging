@@ -1241,13 +1241,31 @@ contract DeployMocks is Script {
         // ====== PHASE 7.5: StableYieldAccumulator Configuration ======
         console.log("\n=== Phase 7.5: StableYieldAccumulator Configuration ===");
 
+        // STORY 130 — CONFIGURE FIRST. yield-accumulator:029 (audit-15 M-01) makes the SYA fail
+        // closed on unconfigured tokens: setRewardToken and addYieldStrategy revert
+        // TokenNotConfigured(token) unless setTokenConfig(token, ...) has already run. So both
+        // token configs go at the very top of Phase 7.5. This only permutes non-CREATE owner calls
+        // inside this phase, so no later CREATE address moves (verified against a pre-reorder run).
+        //
+        // Configure USDC token (6 decimals, 1:1 exchange rate)
+        stableYieldAccumulator.setTokenConfig(address(rewardToken), 6, 1e18);
+        console.log("Configured USDC token config (6 decimals, 1:1 rate)");
+
+        // Configure DOLA token (18 decimals, 1:1 exchange rate)
+        stableYieldAccumulator.setTokenConfig(address(dola), 18, 1e18);
+        console.log("Configured DOLA token config (18 decimals, 1:1 rate)");
+
         // Set reward token to USDC (rewardToken is MockRewardToken which is USDC).
         //
-        // STORY 073 — ORDERING IS LOAD-BEARING. yield-accumulator:027 added a conditional guard to
-        // setRewardToken: once the nudge path is live (nudgeSplit != 0 && nudgeStreamer != 0 &&
-        // nudge != 0) it requires the streamer to already hold a registered stream for the NEW
-        // reward token. Calling setRewardToken FIRST — before setNudgeAddress / setNudgeSplit /
-        // setNudgeStreamer below — keeps the guard dormant at deploy time. Do not reorder.
+        // ORDERING IS LOAD-BEARING, in two directions:
+        //   1. AFTER setTokenConfig(rewardToken) above (story 130 / yield-accumulator:029:
+        //      setRewardToken reverts TokenNotConfigured on an unconfigured token).
+        //   2. BEFORE setNudgeAddress / setNudgeSplit / setNudgeStreamer below (STORY 073 /
+        //      yield-accumulator:027: once the nudge path is live (nudgeSplit != 0 &&
+        //      nudgeStreamer != 0 && nudge != 0) setRewardToken requires the streamer to already
+        //      hold a registered stream for the NEW reward token; calling it before the nudge
+        //      setters keeps that guard dormant at deploy time).
+        // Do not reorder.
         stableYieldAccumulator.setRewardToken(address(rewardToken));
         console.log("Set reward token to USDC:", address(rewardToken));
 
@@ -1261,13 +1279,6 @@ contract DeployMocks is Script {
         // yield strategies are registered via addYieldStrategy instead). Call dropped.
         // stableYieldAccumulator.setMinter(address(minter));
 
-        // Configure USDC token (6 decimals, 1:1 exchange rate)
-        stableYieldAccumulator.setTokenConfig(address(rewardToken), 6, 1e18);
-        console.log("Configured USDC token config (6 decimals, 1:1 rate)");
-
-        // Configure DOLA token (18 decimals, 1:1 exchange rate)
-        stableYieldAccumulator.setTokenConfig(address(dola), 18, 1e18);
-        console.log("Configured DOLA token config (18 decimals, 1:1 rate)");
 
         // Add the LEGACY DOLA strategy to the registry (pre-cutover mainnet shape). Story 089:
         // Phase 9.7 swaps it for the sDOLA strategy.

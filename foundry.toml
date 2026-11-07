@@ -83,7 +83,7 @@ remappings = [
     "lib/phUSD-stable-minter/lib/flax-token/=lib/flax-token-v2/",
     "openzeppelin-contracts/=lib/openzeppelin-contracts/",
     # Story 115: `v4-core/` used to point at `lib/stable-yield-accumulator/lib/v4-periphery/lib/v4-core/src/`,
-    # a path that does not exist at SYA pin 6eab35c (SYA vendors no v4-periphery), and nothing in the
+    # a path that does not exist at SYA pin 6eab35c or 105f22b (SYA vendors no v4-periphery), and nothing in the
     # build imported it. It now points at the sya-harvester's own v4-core pin (v4.0.0, e50237c), with
     # the harvester's `v4-core/src/...` import shape, so SYAHarvester, the anvil PoolManager and the
     # liquidity router all compile from ONE physical v4-core.
@@ -148,7 +148,7 @@ remappings = [
     # above to the harvester's v4-core pin) and
     # `stable-yield-accumulator/src/interfaces/IStableYieldAccumulator.sol`. That last prefix is the
     # harvester's spelling of the SAME top-level SYA pin `@stable-yield-accumulator/` reads (both
-    # 6eab35c), so point it at lib/stable-yield-accumulator/ and there is exactly one physical
+    # 105f22b since story 130), so point it at lib/stable-yield-accumulator/ and there is exactly one physical
     # IStableYieldAccumulator.sol. The harvester's own nested SYA / OZ copies are canonicalised onto
     # the top-level pins, mirroring the diamond-dependency block above. `solmate/` is v4-core's
     # nested solmate, which v4-core's test utilities import.

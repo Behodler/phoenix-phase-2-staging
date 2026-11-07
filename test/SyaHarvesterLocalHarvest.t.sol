@@ -137,11 +137,13 @@ contract SyaHarvesterLocalHarvestTest is Test {
 
         phlimbo = new RewardSinkPhlimbo(address(usdc));
         sya = new StableYieldAccumulator();
-        sya.setRewardToken(address(usdc));
-        sya.setPhlimbo(address(phlimbo));
+        // Story 130: configure first. At yield-accumulator:029 setRewardToken / addYieldStrategy
+        // revert TokenNotConfigured on a token setTokenConfig never configured.
         sya.setTokenConfig(address(usdc), 6, 1e18);
         sya.setTokenConfig(address(dola), 18, 1e18);
         sya.setTokenConfig(address(usde), 18, 1e18);
+        sya.setRewardToken(address(usdc));
+        sya.setPhlimbo(address(phlimbo));
         sya.addYieldStrategy(address(ysUsdc), address(usdc));
         sya.addYieldStrategy(address(ysUsde), address(usde));
         sya.addYieldStrategy(address(ysDola), address(dola));
