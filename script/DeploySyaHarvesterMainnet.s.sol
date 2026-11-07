@@ -135,7 +135,8 @@ abstract contract SyaHarvesterMainnetBase is Script, StdCheats {
     // Configuration
     // ------------------------------------------------------------------
 
-    function expectedConfig() public view returns (Config memory c) {
+    /// @dev `virtual` (story 131) so the story-122 fork tests can pin the pre-cutover SYA once the book is repointed.
+    function expectedConfig() public view virtual returns (Config memory c) {
         string memory book = vm.readFile(ADDRESS_BOOK);
         c.sya = _requireBook(book, "StableYieldAccumulator");
         c.usdc = _requireBook(book, "USDC");
