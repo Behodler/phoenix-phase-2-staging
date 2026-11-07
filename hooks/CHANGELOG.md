@@ -5,6 +5,38 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-11-07
+
+Story-130 (nft-bonfire). Regenerates `stableYieldAccumulatorAbi` from yield-accumulator:029
+(audit-15 M-01), which phase-2-staging now pins (`lib/stable-yield-accumulator` `6eab35c` ->
+`105f22b`, which also carries yield-accumulator:028's optional NFT claim gate). The SYA now fails
+closed on tokens that `setTokenConfig` never configured. **Breaking** for anyone who reads
+`tokenConfigs` positionally. Not published.
+
+`0.23.0` is skipped on purpose: it is reserved for phStaging2:118. If 118 lands after this release,
+it takes the next free minor version above this one.
+
+### Changed (breaking)
+- `stableYieldAccumulatorAbi.tokenConfigs(address)` now returns
+  `(uint8 decimals, uint256 normalizedExchangeRate, bool paused, bool configured)`. It returned
+  three values before. Positional consumers must take the 4th field.
+- `stableYieldAccumulatorAbi.getTokenConfig(address)` now returns the 4-field `TokenConfig` struct
+  (`decimals`, `normalizedExchangeRate`, `paused`, `configured`).
+- **Live mainnet SYA**: until phStaging2:131 deploys the gate-free 029 SYA and the human broadcasts
+  it, the mainnet `StableYieldAccumulator` is the pre-029 build. Its `tokenConfigs` / `getTokenConfig`
+  return 3 words, so this ABI cannot decode them there. Every other function is unchanged.
+
+### Added
+- Error `TokenNotConfigured(address token)`. `setRewardToken`, `addYieldStrategy` and the internal
+  normalize/denormalize paths (so `claim` and `calculateClaimAmount` too) revert with it for a token
+  that has no config.
+- Error `InvalidExchangeRate()`. `setTokenConfig` reverts with it when `normalizedExchangeRate == 0`.
+  It also rejects `decimals == 0` with the existing `InvalidDecimals`, so the valid range is 1..18.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+No new key. On anvil, the new terminal DeployMocks Phase 11.17 turns the SYA claim gate off
+(`nftMinter() == address(0)`, so `canClaim` is true for everyone). No address moves.
+
 ## [0.22.0] - 2026-11-03
 
 Story-127 (global-pauser-v2). Adds the ABI of `PauserV2` (Behodler/pauser, pauser-RM:003), the
