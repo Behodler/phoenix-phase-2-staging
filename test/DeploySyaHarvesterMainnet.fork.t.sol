@@ -14,7 +14,22 @@ import {
 import {VerifySyaHarvester} from "../script/VerifySyaHarvester.s.sol";
 import {ClaimUnblockState} from "../script/helpers/ClaimUnblockState.sol";
 
-/// @dev Pins the mode and the progress path (never the process-wide PREVIEW_MODE env, never the real progress file).
+/// @dev The story-122 config at the FORK_BLOCK: the PRE-cutover SYA 0x0cD3...21B6. Story 131 repoints the book's
+///      `StableYieldAccumulator` to the gate-free SYA after its broadcast, which does not exist at this fork block, so
+///      these fork rehearsals pin the config instead of reading the (moving) book.
+library Story122Config {
+    function pinned() internal pure returns (SyaHarvesterMainnetBase.Config memory c) {
+        c.sya = 0x0cD353bfda674D04823B2826ffafB83B560D21B6;
+        c.usdc = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+        c.dola = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
+        c.usde = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
+        c.stableStakerV2 = 0xA6d3fc83C91B8319D219cEB12B46e3dfF064B58F;
+        c.nftMinter = 0x39Af088408e815844c567037C157B31d48d2E10F;
+    }
+}
+
+/// @dev Pins the mode, the progress path and the story-122 config (never the process-wide PREVIEW_MODE env, never
+///      the real progress file, never the post-story-131 book).
 contract DeploySyaHarvesterHarness is DeploySyaHarvesterMainnet {
     bool internal immutable preview;
     string internal progressPath;
@@ -30,6 +45,10 @@ contract DeploySyaHarvesterHarness is DeploySyaHarvesterMainnet {
 
     function _progressFile() internal view override returns (string memory) {
         return progressPath;
+    }
+
+    function expectedConfig() public pure override returns (Config memory) {
+        return Story122Config.pinned();
     }
 }
 
@@ -48,17 +67,16 @@ contract VerifySyaHarvesterHarness is VerifySyaHarvester {
     function _bookHarvester() internal pure override returns (address) {
         return address(0);
     }
+
+    function expectedConfig() public pure override returns (Config memory) {
+        return Story122Config.pinned();
+    }
 }
 
 /// @dev Exposes the pure route helpers and the claim-unblock reader for the no-RPC tests.
 contract SyaHarvesterRouteHarness is SyaHarvesterMainnetBase {
     function cfg() public pure returns (Config memory c) {
-        c.sya = 0x0cD353bfda674D04823B2826ffafB83B560D21B6;
-        c.usdc = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-        c.dola = 0x865377367054516e17014CcdED1e7d814EDC9ce4;
-        c.usde = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
-        c.stableStakerV2 = 0xA6d3fc83C91B8319D219cEB12B46e3dfF064B58F;
-        c.nftMinter = 0x39Af088408e815844c567037C157B31d48d2E10F;
+        c = Story122Config.pinned();
     }
 
     function claimRecordedAt(string memory progress, string memory book) external view returns (bool) {
@@ -81,15 +99,29 @@ contract DeploySyaHarvesterMainnetRouteTest is Test {
         c = h.cfg();
     }
 
+    /// @dev Story 131 updated this: the book's `StableYieldAccumulator` is the story-122 SYA until the story-131
+    ///      patcher repoints it to the gate-free SYA recorded in progress.sya-gate-off.1.json. Either is accepted;
+    ///      nothing else is. The other keys (and NFTMinter, which story 131 does not touch) are still pinned.
     function test_expectedConfig_matchesAddressBook() public {
         DeploySyaHarvesterMainnet s = new DeploySyaHarvesterMainnet();
         SyaHarvesterMainnetBase.Config memory b = s.expectedConfig();
-        assertEq(b.sya, c.sya, "SYA");
+        assertTrue(b.sya == c.sya || b.sya == _gateOffProgress("StableYieldAccumulator"), "SYA: story-122 or story-131");
+        assertTrue(b.sya != address(0), "SYA non-zero");
         assertEq(b.usdc, c.usdc, "USDC");
         assertEq(b.dola, c.dola, "DOLA");
         assertEq(b.usde, c.usde, "USDe");
         assertEq(b.stableStakerV2, c.stableStakerV2, "StableStakerV2");
         assertEq(b.nftMinter, c.nftMinter, "NFTMinter");
+    }
+
+    /// @dev The story-131 progress file's address for `key`, or address(0) before that broadcast.
+    function _gateOffProgress(string memory key) internal view returns (address) {
+        string memory f = "server/deployments/progress.sya-gate-off.1.json";
+        if (!vm.exists(f)) return address(0);
+        string memory json = vm.readFile(f);
+        string memory p = string.concat(".contracts.", key, ".address");
+        if (!vm.keyExistsJson(json, p)) return address(0);
+        return vm.parseJsonAddress(json, p);
     }
 
     function test_shippedPayloads_pass() public view {
@@ -221,15 +253,19 @@ contract DeploySyaHarvesterMainnetRouteTest is Test {
     function test_claimUnblock_liveBookHasSyaHarvester() public view {
         // Script A was broadcast (story 122, 2026-10-31) and the patcher filled the real address book from
         // progress.sya-harvester.1.json, so the live key is non-zero and the claim unblock reads as recorded.
+        // Story 131 updated this: after its broadcast the key is REPOINTED to the redeployed harvester (recorded in
+        // progress.sya-gate-off.1.json), so either harvester is accepted - never zero, never anything else.
         assertTrue(
             ClaimUnblockState.bookHasSyaHarvester(ClaimUnblockState.ADDRESS_BOOK), "live SYAHarvester key is filled"
         );
         string memory book = vm.readFile(ClaimUnblockState.ADDRESS_BOOK);
-        assertTrue(
-            vm.indexOf(book, "\n  SYAHarvester: \"0xeE426A950Cb17D559F6391ef0D140715CD46703B\",")
-                != type(uint256).max,
-            "live SYAHarvester is the deployed harvester"
-        );
+        bool isStory122 =
+            vm.indexOf(book, "\n  SYAHarvester: \"0xeE426A950Cb17D559F6391ef0D140715CD46703B\",") != type(uint256).max;
+        address redeployed = _gateOffProgress("SYAHarvester");
+        bool isStory131 = redeployed != address(0)
+            && vm.indexOf(book, string.concat("\n  SYAHarvester: \"", vm.toString(redeployed), "\","))
+                != type(uint256).max;
+        assertTrue(isStory122 || isStory131, "live SYAHarvester is the story-122 or the story-131 harvester");
     }
 }
 
@@ -273,7 +309,7 @@ contract DeploySyaHarvesterMainnetForkTest is Test {
 
     function test_fork_preview_routeSafety_configures_smokes_enablesClaim() public {
         if (!_fork()) return;
-        SyaHarvesterMainnetBase.Config memory c = new DeploySyaHarvesterMainnet().expectedConfig();
+        SyaHarvesterMainnetBase.Config memory c = Story122Config.pinned();
         assertFalse(IStableStakerV2ClaimGate(c.stableStakerV2).claimEnabled(), "claims closed at fork block");
 
         string memory path = _tmp("preview");

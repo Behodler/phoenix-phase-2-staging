@@ -56,7 +56,7 @@ for LIVE registrants: value at risk first.
 | 23 | `0xE9067f37f6D0bb116233194690fb600Add8fD052` | UniboostStakerEYE (current book) | Holds 378 NFTs (id 1) + 1,900.6 phUSD. Claim on 2026-11-03 | **LIVE** | 15 |
 | 24 | `0x541b912B5451FfE2c04D5Ea8D317081718683242` | UniboostStakerSCX (current book) | Holds 295 NFTs (id 2) + 1,238.3 phUSD | **LIVE** | 16 |
 | 18 | `0x17E25Cca844bC71c1E663E089fF11aFD266B5795` | UniboostStakerFLX (current book) | Holds 20 NFTs (id 3) + 44.8 phUSD | **LIVE** | 17 |
-| 14 | `0x0cD353bfda674D04823B2826ffafB83B560D21B6` | StableYieldAccumulator (current book) | Claims through 2026-10-25. Strategies are the three live ones | **LIVE** | 18 |
+| 14 | `0x0cD353bfda674D04823B2826ffafB83B560D21B6` | StableYieldAccumulator (book until story 131) | Claims through 2026-10-25. Strategies are the three live ones. **Retired by story 131** (`ReplaceSYAGateOffMainnet`): unregistered from PauserV2, `pauser()` moved to OWNER, strategies removed, withdrawer and burner rights revoked, Phlimbo allowance 0, not paused. Listed in `PauserV2Registry.postMigrationRemovals()` once the human broadcasts | **LIVE** at the sweep; retired by story 131 | 18 |
 | 0 | `0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4` | "Old YieldStrategyDola" (book header comment) | `getTotalShares() == 0`, no balances, last tx 2026-03-31 | **RETIRED** | — |
 | 3 | `0xdD9A470dFFa0DF2cE264Ca2ECeA265d30ac1008f` | Not in any book (unverified; selectors `addYieldStrategy` / `removeYieldStrategy`; created 2026-01-24) | A first-generation StableYieldAccumulator. Its strategies (`0x01d3…a20C`, `0x8b4A…3952`) both have 0 shares, it holds nothing, no phUSD mint right, last tx 2026-04-06 | **RETIRED** | — |
 | 5 | `0xdd8cE46ea31d51f38279886a81cFc4c1a90d5E19` | Not in any book (Etherscan `StableYieldAccumulator`; created 2026-03-19) | Strategies `0x01d3…a20C` and `0xf5F9…0E5B` both have 0 shares. Holds nothing, no user activity | **RETIRED** | — |
@@ -66,6 +66,16 @@ for LIVE registrants: value at risk first.
 | 11 | `0xFc629bC5F6339F77635f4F656FBb114A31F7bCB3` | YieldStrategyUSDe (backups; Etherscan `ERC4626MarketYieldStrategy`) | `getTotalShares() == 0`, no balances | **RETIRED** | — |
 | 15 | `0x90ce274b20A2aF4265152B369d09ce6E6Dc177F9` | YieldStrategyDola (backups) | `getTotalShares() == 0`, no balances. Its clients are the old PhusdStableMinter, which cannot mint, and StableStaker V1 | **RETIRED** | — |
 | 16 | `0x90af002Ee537Ad5C2c9817Ebd4EF22B2e8952470` | YieldStrategyUSDC (backups) | `getTotalShares() == 0`, no balances. Same clients as #15 | **RETIRED** | — |
+
+**Post-sweep changes (not part of the 27-address snapshot).** The snapshot above, and
+`liveRegistrants()` in `script/helpers/PauserV2MainnetBase.sol`, are frozen. Later changes live in
+`script/helpers/PauserV2Registry.sol`:
+
+- **Story 131, gate-free SYA.** The new StableYieldAccumulator (NFT claim gate off, 1% discount,
+  address in `server/deployments/progress.sya-gate-off.1.json`) is registered with PauserV2 and
+  appended to `postMigrationAdditions()`. The old SYA `0x0cD3…21B6` (#14 above) is unregistered and
+  appended to `postMigrationRemovals()`. The patcher `scripts/patch-mainnet-addresses-sya-gate-off.js`
+  makes both entries after the human's broadcast.
 
 **Totals:** 18 LIVE (15 from the current book, 1 because of its funds, 2 ambiguous → LIVE) and
 9 RETIRED, for 27 in all.
