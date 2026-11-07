@@ -2,7 +2,7 @@
   "chainId": 31337,
   "networkName": "anvil",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-11-03T10:01:36.811Z",
+  "extractedAt": "2026-11-07T01:20:20.996Z",
   "contracts": {
     "PhUSD": {
       "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
@@ -169,7 +169,7 @@
       "address": "0x8f86403A4DE0BB5791fa46B8e795C547942fE4Cf",
       "deployed": true,
       "configured": true,
-      "deployGas": 2287344,
+      "deployGas": 2350075,
       "configGas": 0
     },
     "BurnRecorder": {
@@ -183,7 +183,7 @@
       "address": "0x5eb3Bc0a489C5A8288765d2336659EbCA68FCd00",
       "deployed": true,
       "configured": true,
-      "deployGas": 2735307,
+      "deployGas": 2735293,
       "configGas": 0
     },
     "UniswapV2Router": {

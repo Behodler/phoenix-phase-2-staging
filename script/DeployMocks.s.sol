@@ -113,6 +113,7 @@ import {SyaHarvesterLocalConfig} from "./helpers/SyaHarvesterLocalConfig.sol";
 // would otherwise clash with this file's `IMintableMock`.
 import {NFTBonfire} from "@yield-claim-nft/NFTBonfire.sol";
 import {NFTBonfireLocalWiring} from "./helpers/NFTBonfireLocalWiring.sol";
+import {SyaGateOffLocal} from "./helpers/SyaGateOffLocal.sol";
 
 /**
  * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
@@ -1596,8 +1597,18 @@ contract DeployMocks is Script {
         // deployed at its Phase 1.5 address (swapping it in place would shift the deployer nonce and
         // every later address). Deploys PauserV2, rotates every V1 registrant except the retired
         // StableStaker V1 onto it (setPauser THEN register), asserts health() and the registrant set,
-        // and re-tracks V2 under the `Pauser` address key. phStaging2:118 appends after this (11.17).
+        // and re-tracks V2 under the `Pauser` address key. Story 130 appends Phase 11.17 after this.
         _migrateToPauserV2();
+
+        // ====== PHASE 11.17: SYA NFT claim gate OFF (story 130) ======
+        // APPENDED after 11.16 and before the terminal sweep: transactions only, no deployments, so no
+        // existing address moves. Phase 8.7's setNFTMinter / setAuthorizedBurner txs are deliberately
+        // KEPT (deleting them would shift the deployer nonce and every later CREATE address), so the
+        // chain gates the SYA, runs the Phase 11.12 SYAHarvester smoke through the gated path, and then
+        // clears the gate here, mirroring the gate-free SYA phStaging2:131 deploys on mainnet
+        // (yield-accumulator:028: nftMinter == 0 means claim() skips the NFT check and burn).
+        // phStaging2:118 appends after this (11.18).
+        _turnSyaGateOff();
 
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
@@ -2089,6 +2100,29 @@ contract DeployMocks is Script {
         console.log("  maxPayout:", nftBonfire.maxPayout());
         console.log("  pauser:", nftBonfire.pauser());
         console.log("  SYA discount rate (bps):", stableYieldAccumulator.getDiscountRate());
+    }
+
+    /// @dev Any EOA that holds no claim NFT; `canClaim` must be true for it once the gate is off.
+    address internal constant SYA_GATE_OFF_PROBE = address(uint160(uint256(keccak256("story-130 SYA gate-off probe"))));
+
+    /// @dev Phase 11.17 (story 130). Clears the SYA NFT claim gate set in Phase 8.7 through
+    ///      `SyaGateOffLocal` (the SAME library `test/SyaGateOffLocal.t.sol` drives): requires the gate
+    ///      currently points at NFTMinterV2, sets `nftMinter` to zero, revokes the SYA's burner right on
+    ///      NFTMinterV2, and requires `canClaim` true for an NFT-less probe. Every step has a read-back.
+    ///      Gated on `_isConfigured("SyaGateOff")`, so a re-entry is a no-op. Transactions only.
+    function _turnSyaGateOff() internal {
+        console.log("\n=== Phase 11.17: SYA NFT claim gate OFF (story 130) ===");
+        if (_isConfigured("SyaGateOff")) {
+            console.log("  already configured - skipped");
+            return;
+        }
+        SyaGateOffLocal.turnGateOff(
+            IStableYieldAccumulator(address(stableYieldAccumulator)), nftMinterV2, SYA_GATE_OFF_PROBE
+        );
+        _markConfigured("SyaGateOff", 0);
+        console.log("  SYA.setNFTMinter(address(0)) - claim gate OFF (read back zero)");
+        console.log("  NFTMinterV2.setAuthorizedBurner(SYA, false) - burner right revoked (read back false)");
+        console.log("  SYA.canClaim(NFT-less probe) == true");
     }
 
     /// @dev Phase 11.16 (story 127). Deploys PauserV2 against the same MockEYE as V1 and rotates every
