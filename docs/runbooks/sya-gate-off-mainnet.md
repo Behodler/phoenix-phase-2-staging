@@ -26,11 +26,12 @@ redeploys SYAHarvester, whose `sya` is immutable (old harvester
 | `nftMinter` | ZERO (claim gate OFF) | The point of the story (yield-accumulator:028) |
 | discount | 100 bps (1%) | Human decision 2026-11-06 (the old SYA runs 3000) |
 | token configs | USDC 6, DOLA 18, USDe 18, each rate `1e18` | **Hard-coded** (human decision 2026-11-07). Each is checked against the token's on-chain `decimals()` |
-| rewardToken, phlimbo, nudge, nudgeSplit, nudgeStreamer, strategy list | Mirrored **live** from the old SYA | So a phStaging2:119 nudge repoint is honoured whichever broadcasts first |
+| rewardToken, phlimbo, nudge, nudgeSplit, nudgeStreamer, strategy list | Mirrored **live** from the old SYA | So a phStaging2:119 nudge repoint is honoured **only if 119 broadcasts before this script**. If this script goes first, 119 must repoint the NEW SYA (see *Overlap with phStaging2:119 and 129*) |
 | pauser | PauserV2 `0x669E…a154` | Live since 2026-11-05. The V1 Pauser `0x7c5A…85a3` is never called |
 | owner | OWNER | `Ownable(msg.sender)`; the Ledger sender is OWNER |
 
-One npm key runs everything. Each step is state-gated and read back with a `require`:
+One npm key runs everything. Each step is state-gated against the values this script wants (the
+old SYA's wiring, discount 100) and read back with a `require`:
 
 | Step | What |
 |---|---|
@@ -42,8 +43,19 @@ One npm key runs everything. Each step is state-gated and read back with a `requ
 | 6 | `SYAHarvester(OWNER, PoolManager, newSYA, Router NG)`, story 122's USDe and DOLA routes, ETH/USDC pool (fee 3000, tickSpacing 60, no hooks) |
 | 7 | Postconditions, then (chained) confirm progress, patch book + `PauserV2Registry`, `sya-gate-off-verify`, `pauser-v2-verify`, ledger |
 
-A first run is 33 OWNER transactions. A re-run sends only what is missing; a finished run sends
-nothing.
+A first run is 33 OWNER transactions. A re-run of an interrupted run sends only what is missing.
+That holds only while nothing has touched the new SYA since this script deployed it. The wiring
+targets are the old SYA's frozen values and the discount target is 100, so after any retune of the
+new SYA a re-run sends setters that roll the retune back.
+
+> **After completion: never re-run the broadcast.** Once `progress.sya-gate-off.1.json` reads
+> `completed`, never run `sya-gate-off:broadcast` again. If the new SYA has since been retuned (a
+> phStaging2:119 nudge repoint, a discount change), a re-run rolls the nudge (20% of each claim
+> payment) back to the retired sink `0x068395556b8c43eDf257DC54D109EA5910aE15c7` and resets the
+> discount to 100 bps. Its output still says `Postconditions OK`. To see what a re-run would send,
+> run `npm run sya-gate-off:preview` and read the planned tx list. After completion, any planned
+> step-3 setter (`setNudgeAddress`, `setNudgeSplit`, `setNudgeStreamer`, `setPhlimbo`,
+> `setDiscountRate`) is a rollback, not a repair.
 
 ## 1. Preview
 
@@ -90,16 +102,27 @@ SYA_GATE_OFF_GAS_PRICE_WEI=<wei> npm run sya-gate-off:broadcast
   nothing; any other value refuses. It appends the new SYA to `postMigrationAdditions()` and the old
   SYA to `postMigrationRemovals()` in `script/helpers/PauserV2Registry.sol`, keeping every
   existing entry, including 129's NFTBonfire. The harvester is not a PauserV2 registrant.
-- The ledger recorder runs even if the tail fails, and the key exits with the tail's status.
+- The ledger recorder runs even if the tail fails, and the key exits with the tail's status. It
+  does **not** run if forge itself exits non-zero (Ctrl+C, RPC drop, Ledger timeout, revert). The
+  `&&` chain stops there, so any transactions that did mine are not in the tax ledger. Record them
+  by hand before any re-run: see *Recording a partial run in the ledger* under Recovery.
 
 ## 3. Verify
 
-Both verifiers run at the end of the broadcast key. Re-run them any time:
+Both verifiers run at the end of the broadcast key. They can be re-run later, with one limit:
 
 ```bash
 npm run sya-gate-off-verify   # new SYA wiring, token configs, gate off, 1%, PauserV2; old SYA retired; harvester; book
 npm run pauser-v2-verify      # registry invariant: new SYA added, old SYA removed, health() clean
 ```
+
+`sya-gate-off-verify` asserts the new SYA's nudge, nudgeSplit, nudgeStreamer and phlimbo equal the
+old SYA's frozen values, and that the discount is 100. It is a valid health check only until the
+first post-cutover retune of the new SYA (a phStaging2:119 nudge repoint, a discount change).
+After that it fails permanently by design: do not "fix" that failure by re-running the broadcast
+(see *After completion: never re-run the broadcast*). Once 119 has broadcast, use 119's own
+`nudge-discount:verify` as the health check instead. `pauser-v2-verify` is unaffected by a retune
+and stays valid.
 
 Optionally run `npm run sya-gate-off:etherscan-sya` and `npm run sya-gate-off:etherscan-harvester`
 for Etherscan source verification. They are not chained, and a failure blocks nothing.
@@ -149,10 +172,38 @@ non-holder's reverts `Invalid index` (index 0) or `NoValidNFT`. It never reaches
 
 ## Recovery
 
+### Recording a partial run in the ledger
+
+When forge exits non-zero the broadcast key never reaches its ledger step. Do this **before** any
+re-run, because the re-run overwrites `broadcast/ReplaceSYAGateOffMainnet.s.sol/1/run-latest.json`:
+
+1. Record what the interrupted run mined from its receipts:
+   ```bash
+   npm run ledger:record -- ReplaceSYAGateOffMainnet.s.sol 1 --note "sya-gate-off partial run"
+   ```
+2. Record anything that step missed (for example, receipts not flushed on Ctrl+C) and any
+   transaction sent outside forge, one `--tx` per hash:
+   ```bash
+   npm run ledger:record -- --tx 0x<hash> --note "sya-gate-off partial run"
+   ```
+   Hashes are in the timestamped `broadcast/ReplaceSYAGateOffMainnet.s.sol/1/run-<ts>.json` files,
+   which a re-run does not overwrite, or on Etherscan in OWNER
+   `0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6`'s nonce range for the run.
+
+Re-recording is safe: rows are de-duplicated on (chain id, tx hash).
+
 ### Interrupted run (RPC drop, Ledger timeout)
 
-Re-run `npm run sya-gate-off:broadcast`. Every step is state-gated. A re-run adopts the new SYA
-and harvester from the progress file and sends only what is missing. Once the old SYA's strategy
+1. Record what mined: *Recording a partial run in the ledger*, above.
+2. Make sure nothing has retuned the new SYA since the interruption. In particular, do not
+   broadcast phStaging2:119 or change the discount between the interruption and the resume. The
+   resume would roll that change back (see *After completion: never re-run the broadcast*).
+3. Run `npm run sya-gate-off:preview` and check that its planned txs are only the missing steps.
+4. Re-run `npm run sya-gate-off:broadcast`.
+
+Every step is state-gated. A re-run adopts the new SYA and harvester from the progress file and
+is designed to send only what is missing, but a resume is not guaranteed to succeed from every
+interruption point. If the preview refuses, stop and investigate before sending anything. Once the old SYA's strategy
 list has been stripped, the re-run takes the strategy list from the adopted new SYA. It requires
 that SYA to hold all three strategies, and every strategy still on the old SYA to be among them.
 The confirm step accepts a resume run with no CREATE in its `run-latest.json`. In that case it
@@ -163,9 +214,12 @@ confirms from live code at the recorded addresses.
 1. Compare `cast nonce 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6 --block pending --rpc-url $RPC_MAINNET`
    with `--block latest`. A difference means a tx is stuck.
 2. Ctrl+C the forge run.
-3. Replace the stuck nonce with a zero-value self-send at a higher price (Ledger), or wait for it
-   to mine.
-4. Re-run the broadcast with a higher `SYA_GATE_OFF_GAS_PRICE_WEI`. It resumes from chain state.
+3. Record what mined: *Recording a partial run in the ledger*, above.
+4. Replace the stuck nonce with a zero-value self-send at a higher price (Ledger), or wait for it
+   to mine. Record a cancel self-send in the ledger:
+   `npm run ledger:record -- --tx 0x<hash> --note "sya-gate-off stuck-nonce cancel"`.
+5. Re-run the broadcast with a higher `SYA_GATE_OFF_GAS_PRICE_WEI`. It resumes from chain state,
+   under the same conditions as *Interrupted run* (no retune in between; preview first).
 
 If a CREATE is stuck, the progress file names a contract with no code. The script refuses to
 redeploy while OWNER has not consumed the recorded create nonce: the CREATE is pending, so wait or
@@ -187,6 +241,16 @@ claim. That is harmless: each pays Phlimbo at its own discount, and neither hold
 
 119 and 129 touch the same files: `mainnet-addresses.ts`, `package.json` and
 `PauserV2Registry.sol`. Whichever lands second rebases and keeps every registry entry; the
-patchers append and never drop an existing entry. If 119 has repointed the old SYA's nudge,
-this script mirrors the new nudge, because the nudge is read live. Broadcast each in its own
-window. Preferably 129 and 119 go first. Re-run the later one's preview and verifier.
+patchers append and never drop an existing entry. Broadcast each in its own window.
+
+- **Preferred order: 129 and 119 first, then this script.** This script reads the old SYA's
+  wiring live, so it mirrors the nudge that 119 set on the old SYA.
+- **If this script broadcasts first**, 119 must target the NEW SYA. It resolves the SYA from the
+  address book, which this script's patcher has already repointed. Once 119 has broadcast, this
+  script's broadcast and `sya-gate-off-verify` are retired. The verifier fails permanently by
+  design, because the new SYA's nudge no longer equals the old SYA's. Use 119's own verifier
+  (`nudge-discount:verify`) as the health check from then on, and never re-run
+  `sya-gate-off:broadcast` (see *After completion: never re-run the broadcast*).
+- Whichever goes second, run **that script's own** preview before and verifier after its
+  broadcast. Never re-run the earlier script's preview, broadcast or verifier to "check" the
+  later one.

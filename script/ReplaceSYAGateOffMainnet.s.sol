@@ -925,7 +925,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         console.log("Gas price (wei):", gasPriceWei, " block.basefee (wei):", block.basefee);
         require(
             gasPriceWei >= block.basefee * 2,
-            "SYA_GATE_OFF_GAS_PRICE_WEI < 2 x block.basefee: raise it (runbook: Gas price)"
+            "SYA_GATE_OFF_GAS_PRICE_WEI < 2 x block.basefee: raise it (runbook: Gas stall)"
         );
     }
 

@@ -25,7 +25,9 @@ interface INewSYAView {
  * @title VerifySyaGateOffMainnet  (story 131, sprint nft-bonfire) - READ-ONLY POST-BROADCAST VERIFIER
  * @notice No --broadcast, no --sender, no prank / deal / snapshot: reads LIVE mainnet and fails `verify: ...` on the
  *         first violated invariant. Chained in `sya-gate-off:broadcast` after the confirm step and the patcher, then
- *         followed by `pauser-v2-verify`. Re-run any time as a health check.
+ *         followed by `pauser-v2-verify`. Valid as a health check only until the first post-cutover retune of the
+ *         new SYA (a phStaging2:119 nudge repoint, a discount change); after that it fails permanently by design and
+ *         119's `nudge-discount:verify` is the health check. Never re-run the broadcast to make it pass (runbook).
  *
  *         The new SYA and the new harvester come from the COMPLETED progress.sya-gate-off.1.json. The NEW SYA is
  *         read through the bumped 029 `IStableYieldAccumulator` (4-field TokenConfig); the OLD SYA through the
