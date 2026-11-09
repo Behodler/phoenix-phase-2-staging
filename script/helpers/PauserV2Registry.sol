@@ -15,7 +15,8 @@ pragma solidity ^0.8.26;
 abstract contract PauserV2Registry {
     /// @notice Contracts registered with PauserV2 after the migration (each with `pauser() == PauserV2`).
     function postMigrationAdditions() public view virtual returns (address[] memory a) {
-        a = new address[](0);
+        a = new address[](1);
+        a[0] = 0xE5983721f009AB57d464e611C9A06B148cEC3Acc; // NFTBonfire (story 129)
     }
 
     /// @notice Migration-set or added contracts later retired with `PauserV2.unregister`.

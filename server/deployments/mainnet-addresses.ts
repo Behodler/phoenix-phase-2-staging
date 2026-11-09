@@ -51,6 +51,7 @@
 // Updated 2026-11-02: NFTBonfire added as a ZERO placeholder (story 125) so the key-set matches
 // ContractAddresses; deployed on anvil only, a later cutover story deploys it to mainnet and fills it.
 // Updated 2026-11-05: Pauser REPOINTED to PauserV2 (story 128) — was the V1 Pauser 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3.
+// Updated 2026-11-09: NFTBonfire deployed (story 129) — NFTBonfire FILLED from progress.nft-bonfire.1.json.
 import { ContractAddresses } from './addresses';
 
 
@@ -181,10 +182,10 @@ export const mainnetAddresses: ContractAddresses = {
   // deployed by DeployBalancerLPMigratorMainnet and patched from progress.balancer-lp-migrator.1.json.
   // The BPT has no key: read it from BalancerLPMigrator.pool().
   BalancerLPMigrator: "0x94f69b2eB445A8a74400FF3282d861CA0341cBd0",
-  // Story 125: NFTBonfire (lib/yield-claim-nft) burns one claim NFT for the accrued antimatter pot.
-  // Deployed on anvil only (DeployMocks Phase 11.15). ZERO placeholder until the mainnet cutover story
-  // deploys it; fill by hand then. The UI must gate on a non-zero address.
-  NFTBonfire: "0x0000000000000000000000000000000000000000",
+  // Story 125/129: NFTBonfire (lib/yield-claim-nft) burns one claim NFT for the accrued antimatter pot
+  // (10 AM/day, capped at 100 AM). Deployed + wired by DeployNFTBonfireMainnet (story 129), registered
+  // with PauserV2, and patched from progress.nft-bonfire.1.json.
+  NFTBonfire: "0xE5983721f009AB57d464e611C9A06B148cEC3Acc",
   GatherWBTC: "0xfd3775f2ccfb94b532b34b2b683e210ba4449880",
   MultiPooler: "0xd1E5774159381915f5579dFd68507E2614f67b51",
   // View contracts
