@@ -52,6 +52,8 @@
 // ContractAddresses; deployed on anvil only, a later cutover story deploys it to mainnet and fills it.
 // Updated 2026-11-05: Pauser REPOINTED to PauserV2 (story 128) — was the V1 Pauser 0x7c5A8EeF1d836450C019FB036453ac6eC97885a3.
 // Updated 2026-11-09: NFTBonfire deployed (story 129) — NFTBonfire FILLED from progress.nft-bonfire.1.json.
+// Updated 2026-11-09: gate-free SYA + SYAHarvester (story 131) — StableYieldAccumulator REPOINTED from 0x0cD353bfda674D04823B2826ffafB83B560D21B6 and SYAHarvester
+// REPOINTED from 0xeE426A950Cb17D559F6391ef0D140715CD46703B, both from progress.sya-gate-off.1.json (NFT claim gate off, 1% discount).
 import { ContractAddresses } from './addresses';
 
 
@@ -81,7 +83,7 @@ export const mainnetAddresses: ContractAddresses = {
   // superseded generation is how a UI silently keeps reading the wrong contract. Anything that
   // still needs V2's address hardcodes it.
   PhlimboV3: "0x8D3A8E3ba43DEb8C7e2110DF437a92243523b6ca",
-  StableYieldAccumulator: "0x0cD353bfda674D04823B2826ffafB83B560D21B6",
+  StableYieldAccumulator: "0x9d69c68F354575B95c1ebf7E87DB85BF3BFF2cE8",
   // Story 055 migration (executed 2026-06-10: MigrateStableStakerMainnet run txs 1-20 +
   // ResumeStableStakerMigration run, all receipts 0x1). DOLA/USDC are plain
   // ERC4626YieldStrategy; USDe is ERC4626MarketYieldStrategy @ 30 bps (sUSDe cooldown
@@ -177,7 +179,7 @@ export const mainnetAddresses: ContractAddresses = {
   // Story 116/122: SYAHarvester (lib/sya-harvester) claims SYA yield with flash-borrowed USDC, sells it
   // through Curve Router NG and pays the profit in ETH. Deployed by DeploySyaHarvesterMainnet (story 122,
   // which also opened StableStakerV2.claim) and patched from progress.sya-harvester.1.json.
-  SYAHarvester: "0xeE426A950Cb17D559F6391ef0D140715CD46703B",
+  SYAHarvester: "0xbB0D5e0C7bb621df8Db65133D3DF625D04F0F7E3",
   // Story 121: user-facing Balancer V3 phUSD/sUSDS BPT -> UniV2 phUSD/sUSDS migrator (BalancerLPMigrator),
   // deployed by DeployBalancerLPMigratorMainnet and patched from progress.balancer-lp-migrator.1.json.
   // The BPT has no key: read it from BalancerLPMigrator.pool().

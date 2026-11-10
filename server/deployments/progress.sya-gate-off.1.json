@@ -1,0 +1,19 @@
+{
+  "chainId": 1,
+  "contracts": {
+    "SYAHarvester": {
+      "address": "0xbB0D5e0C7bb621df8Db65133D3DF625D04F0F7E3",
+      "createNonce": 1900,
+      "deployed": true
+    },
+    "StableYieldAccumulator": {
+      "address": "0x9d69c68F354575B95c1ebf7E87DB85BF3BFF2cE8",
+      "createNonce": 1871,
+      "deployed": true
+    }
+  },
+  "deploymentStatus": "completed",
+  "networkName": "mainnet",
+  "oldSYAHarvester": "0xeE426A950Cb17D559F6391ef0D140715CD46703B",
+  "oldStableYieldAccumulator": "0x0cD353bfda674D04823B2826ffafB83B560D21B6"
+}
