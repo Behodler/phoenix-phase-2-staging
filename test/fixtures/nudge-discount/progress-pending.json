@@ -1,0 +1,10 @@
+{
+  "chainId": 1,
+  "networkName": "mainnet",
+  "deploymentStatus": "pending",
+  "baseline": { "block": 26403500, "tokens": ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605", "0xaa95f26e30001251fb905d264Aa7b00eE9dF6C18"], "balance": [228234407, 0, 0], "buffer": [1075752886, 0, 0] },
+  "configSteps": ["old_pauserV2Unregister", "deploy_BatchNFTMinterNudgeDiscount", "nftMinter_setAuthorizedMinter"],
+  "contracts": {
+    "NudgeDiscountBatchMinter": { "address": "0x1111111111111111111111111111111111111119", "contractName": "BatchNFTMinterNudgeDiscount", "createNonce": 412, "deployed": false }
+  }
+}

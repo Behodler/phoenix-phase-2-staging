@@ -1,0 +1,1 @@
+{ "chain": 1, "transactions": [ { "hash": "0xbb01", "transactionType": "CALL", "contractName": null, "contractAddress": "0x56997ea45091CBc01DB8a09E60DEDB8b3706a3D2" } ], "receipts": [ { "transactionHash": "0xbb01", "status": "0x1" } ] }
