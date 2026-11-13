@@ -80,8 +80,10 @@ interface IPauserV2SyaGateOff {
  *           - nftMinter left ZERO (the gate OFF) - the point of the story (yield-accumulator:028);
  *           - pauser PauserV2 (book `Pauser`, live since 2026-11-05). The V1 Pauser is RETIRED and never called;
  *           - every other wiring value (rewardToken, phlimbo, nudge, nudgeSplit, nudgeStreamer, the strategy list) is
- *             MIRRORED LIVE from the old SYA at run time, so a phStaging2:119 nudge repoint is honoured whichever
- *             story broadcasts first; each mirrored value is `require`d non-zero / in range;
+ *             MIRRORED LIVE from the old SYA at run time; each mirrored value is `require`d non-zero / in range.
+ *             Mirroring does NOT honour a phStaging2:119 nudge repoint: 119 repoints only the NEW (live) SYA and
+ *             leaves the old SYA on the paused old minter (119 Decision 5). On an adopted SYA the step-3 re-run guard
+ *             (story 133, audit pps55m1) refuses to write a mirrored value over a later, different one;
  *           - owner OWNER (the SYA constructor sets `Ownable(msg.sender)`, and the Ledger sender is OWNER).
  *         NO FUNDS TO THE LEDGER (human requirement 2026-11-06): OWNER only pays gas, enforced by
  *         `_snapshotOwnerBalances` / `_assertOwnerBalancesNotIncreased`.

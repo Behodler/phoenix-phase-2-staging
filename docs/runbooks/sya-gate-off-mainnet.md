@@ -26,7 +26,7 @@ redeploys SYAHarvester, whose `sya` is immutable (old harvester
 | `nftMinter` | ZERO (claim gate OFF) | The point of the story (yield-accumulator:028) |
 | discount | 100 bps (1%) | Human decision 2026-11-06 (the old SYA runs 3000) |
 | token configs | USDC 6, DOLA 18, USDe 18, each rate `1e18` | **Hard-coded** (human decision 2026-11-07). Each is checked against the token's on-chain `decimals()` |
-| rewardToken, phlimbo, nudge, nudgeSplit, nudgeStreamer, strategy list | Mirrored **live** from the old SYA | So a phStaging2:119 nudge repoint is honoured **only if 119 broadcasts before this script**. If this script goes first, 119 must repoint the NEW SYA (see *Overlap with phStaging2:119 and 129*) |
+| rewardToken, phlimbo, nudge, nudgeSplit, nudgeStreamer, strategy list | Mirrored **live** from the old SYA | 119 never repoints the retired old SYA (119 Decision 5); it repoints the NEW SYA. Mirroring therefore does **not** carry a 119 repoint. After 119, the old SYA still names the old, paused minter, and the re-run guard (story 133) stops a re-run from writing that value over 119's (see *After completion: a re-run refuses*) |
 | pauser | PauserV2 `0x669E…a154` | Live since 2026-11-05. The V1 Pauser `0x7c5A…85a3` is never called |
 | owner | OWNER | `Ownable(msg.sender)`; the Ledger sender is OWNER |
 
@@ -44,18 +44,25 @@ old SYA's wiring, discount 100) and read back with a `require`:
 | 7 | Postconditions, then (chained) confirm progress, patch book + `PauserV2Registry`, `sya-gate-off-verify`, `pauser-v2-verify`, ledger |
 
 A first run is 33 OWNER transactions. A re-run of an interrupted run sends only what is missing.
-That holds only while nothing has touched the new SYA since this script deployed it. The wiring
-targets are the old SYA's frozen values and the discount target is 100, so after any retune of the
-new SYA a re-run sends setters that roll the retune back.
 
-> **After completion: never re-run the broadcast.** Once `progress.sya-gate-off.1.json` reads
-> `completed`, never run `sya-gate-off:broadcast` again. If the new SYA has since been retuned (a
-> phStaging2:119 nudge repoint, a discount change), a re-run rolls the nudge (20% of each claim
-> payment) back to the retired sink `0x068395556b8c43eDf257DC54D109EA5910aE15c7` and resets the
-> discount to 100 bps. Its output still says `Postconditions OK`. To see what a re-run would send,
-> run `npm run sya-gate-off:preview` and read the planned tx list. After completion, any planned
-> step-3 setter (`setNudgeAddress`, `setNudgeSplit`, `setNudgeStreamer`, `setPhlimbo`,
-> `setDiscountRate`) is a rollback, not a repair.
+> **After completion: a re-run refuses (code guard, story 133, audit pps55m1).** The wiring targets
+> are the old SYA's frozen values and the discount target is 100. A later retune of the new SYA (a
+> phStaging2:119 nudge repoint, a discount change) would make those targets a rollback: the nudge
+> (20% of each claim payment) would go back to the retired sink
+> `0x068395556b8c43eDf257DC54D109EA5910aE15c7`, and the discount would reset to 100 bps. So on an
+> **adopted** SYA (one read from the progress file), step 3 first checks every value it would write:
+> token configs, `rewardToken`, `phlimbo`, `nudge`, `nudgeSplit`, `nudgeStreamer`, discount and
+> `pauser`. If any is already set and differs from its target, the run reverts before step 3 sends
+> anything:
+> `re-run guard: refusing step <step> on the adopted SYA: live <x> != target <y>. sya-gate-off is
+> complete; a re-run must not roll back a later change (pps55m1). See runbook ...`.
+> PREVIEW and broadcast refuse identically. A value still at its default (zero) is one this script
+> has not written yet, so it is filled in as before, and an interrupted run still resumes. A freshly
+> deployed SYA is never refused. With nothing retuned, a re-run after completion is a no-op that
+> sends nothing. There is no reason to re-run the broadcast after completion; the guard exists so
+> that an accidental re-run cannot do harm. The guard does not see a value deliberately reset to
+> zero, step 4's withdrawer grants (a revoked withdrawer looks never-granted) or step 6's harvester
+> routes.
 
 ## 1. Preview
 
@@ -119,8 +126,8 @@ npm run pauser-v2-verify      # registry invariant: new SYA added, old SYA remov
 `sya-gate-off-verify` asserts the new SYA's nudge, nudgeSplit, nudgeStreamer and phlimbo equal the
 old SYA's frozen values, and that the discount is 100. It is a valid health check only until the
 first post-cutover retune of the new SYA (a phStaging2:119 nudge repoint, a discount change).
-After that it fails permanently by design: do not "fix" that failure by re-running the broadcast
-(see *After completion: never re-run the broadcast*). Once 119 has broadcast, use 119's own
+After that it fails permanently by design. Re-running the broadcast does not "fix" that failure: the
+re-run refuses (see *After completion: a re-run refuses*). Once 119 has broadcast, use 119's own
 `nudge-discount:verify` as the health check instead. `pauser-v2-verify` is unaffected by a retune
 and stays valid.
 
@@ -196,8 +203,9 @@ Re-recording is safe: rows are de-duplicated on (chain id, tx hash).
 
 1. Record what mined: *Recording a partial run in the ledger*, above.
 2. Make sure nothing has retuned the new SYA since the interruption. In particular, do not
-   broadcast phStaging2:119 or change the discount between the interruption and the resume. The
-   resume would roll that change back (see *After completion: never re-run the broadcast*).
+   broadcast phStaging2:119 or change the discount between the interruption and the resume. If
+   something has, the resume refuses by name rather than rolling the change back (see *After
+   completion: a re-run refuses*), and the remaining steps must be finished by hand.
 3. Run `npm run sya-gate-off:preview` and check that its planned txs are only the missing steps.
 4. Re-run `npm run sya-gate-off:broadcast`.
 
@@ -243,14 +251,15 @@ claim. That is harmless: each pays Phlimbo at its own discount, and neither hold
 `PauserV2Registry.sol`. Whichever lands second rebases and keeps every registry entry; the
 patchers append and never drop an existing entry. Broadcast each in its own window.
 
-- **Preferred order: 129 and 119 first, then this script.** This script reads the old SYA's
-  wiring live, so it mirrors the nudge that 119 set on the old SYA.
+- **This script broadcast first** (its progress file reads `completed`; 119 had not broadcast). 119 never repoints the old SYA (119 Decision 5),
+  so mirroring the old SYA's wiring never carries 119's nudge. Before this script broadcast, the
+  preferred order was 129 and 119 first; that order no longer applies.
 - **If this script broadcasts first**, 119 must target the NEW SYA. It resolves the SYA from the
   address book, which this script's patcher has already repointed. Once 119 has broadcast, this
   script's broadcast and `sya-gate-off-verify` are retired. The verifier fails permanently by
   design, because the new SYA's nudge no longer equals the old SYA's. Use 119's own verifier
-  (`nudge-discount:verify`) as the health check from then on, and never re-run
-  `sya-gate-off:broadcast` (see *After completion: never re-run the broadcast*).
+  (`nudge-discount:verify`) as the health check from then on. Do not re-run
+  `sya-gate-off:broadcast`: it would refuse at step 3.4 (see *After completion: a re-run refuses*).
 - Whichever goes second, run **that script's own** preview before and verifier after its
   broadcast. Never re-run the earlier script's preview, broadcast or verifier to "check" the
   later one.

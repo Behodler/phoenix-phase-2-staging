@@ -41,6 +41,12 @@ interface ICurvePoolCoins {
  *              `decimals()`; token set check (exactly 3 strategies -> USDC, DOLA, USDe, one each) - all BEFORE any
  *              deploy or config call. The old SYA's `tokenConfigs` / `getTokenConfig` are never read.
  *           2. DEPLOY the new SYA, or adopt it from server/deployments/progress.sya-gate-off.1.json.
+ *           RE-RUN GUARD (story 133, audit pps55m1). On an ADOPTED SYA, step 3 first checks every value it would
+ *              write; one that is already set and differs from its target (a later deliberate change - story 119's
+ *              nudge repoint, a discount retune) makes the run REVERT by name before step 3 sends anything, in
+ *              PREVIEW and broadcast alike. Default (unset) values are still filled in, so a resume works; a freshly
+ *              deployed SYA is never refused. Mirroring the old SYA does NOT carry a 119 repoint: 119 repoints only
+ *              the live SYA and leaves the old one on the paused old minter.
  *           3. CONFIGURE in the 029 order: setTokenConfig x3 (read back configured / decimals / rate) ->
  *              setRewardToken(USDC) (before the nudge setters, story-027 guard) -> setPhlimbo + approvePhlimbo(max)
  *              -> setNudgeAddress / setNudgeSplit / setNudgeStreamer -> addYieldStrategy x3 -> setDiscountRate(100)
@@ -213,7 +219,9 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         _requireOnChainDecimals();
         console.log("Preflight: on-chain decimals() == constants (USDC 6, DOLA 18, USDe 18); rate 1e18 each");
 
-        // Wiring, mirrored LIVE (119 may have repointed the nudge). Zero/default guards on every value.
+        // Wiring, mirrored LIVE from the OLD SYA. Zero/default guards on every value. 119 never repoints the old SYA
+        // (119 Decision 5): after 119 these are NOT the live SYA's values, and the step-3 re-run guard refuses rather
+        // than write them over 119's (story 133, audit pps55m1).
         Wiring memory w = Wiring({
             rewardToken: old.rewardToken(),
             phlimbo: old.phlimbo(),
@@ -410,6 +418,10 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         StableYieldAccumulator s = newSya;
         address[3] memory t = _targetTokens();
 
+        // Re-run guard (story 133, audit pps55m1): on an ADOPTED SYA, refuse - before any transaction of this step is
+        // sent - to overwrite a value that is already set and differs from its target.
+        _refuseRollbacksOnAdoptedSya();
+
         // 3.1 setTokenConfig x3 FIRST, from the hard-coded constants (029: setRewardToken / addYieldStrategy revert
         //     TokenNotConfigured otherwise). Each read back: configured, decimals == constant, rate == 1e18.
         for (uint256 i = 0; i < 3; i++) {
@@ -524,6 +536,81 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
             console.log("3.7 PauserV2.register(newSYA)");
         }
         require(IPauserV2SyaGateOff(PAUSER_V2).isRegistered(address(s)), "3.7: new SYA not registered with PauserV2");
+    }
+
+    // ============================================================
+    // 3.0 Re-run guard (story 133, audit pps55m1)
+    // ============================================================
+
+    string internal constant REFUSE_POINTER =
+        "sya-gate-off is complete; a re-run must not roll back a later change (pps55m1). See runbook docs/runbooks/sya-gate-off-mainnet.md";
+
+    /// @notice Every value step 3 would write is checked here, in one pass, BEFORE the first step-3 transaction.
+    /// @dev Steps 3.1-3.4, 3.6 and 3.7 write either a value mirrored LIVE from the retired SYA or a hard-coded
+    ///      constant. On an ADOPTED SYA (a resume or a post-completion re-run) a value that is still at its default
+    ///      is one this script has not written yet, and is filled in as before (resume keeps working). A value that is
+    ///      SET and differs from the target was written by someone else after this script - story 119's nudge
+    ///      repoint, or a manual retune - and writing the target over it would be a silent rollback. So the run
+    ///      refuses, naming the step, the live value and the target. A freshly deployed SYA is never refused (every
+    ///      value starts at its default). PREVIEW and broadcast take this path identically; nothing is sent first.
+    ///      Not covered (undetectable): a value deliberately reset to its default, step 4's withdrawer grants, step 6's
+    ///      harvester routes, and 3.3 approvePhlimbo (an allowance top-up, never a rollback of a setting).
+    function _refuseRollbacksOnAdoptedSya() internal view {
+        if (deployedSyaThisRun) return;
+        StableYieldAccumulator s = newSya;
+
+        // 3.1 token configs: configured but not the hard-coded (decimals, rate 1e18).
+        address[3] memory t = _targetTokens();
+        for (uint256 i = 0; i < 3; i++) {
+            IStableYieldAccumulator.TokenConfig memory cfg = IStableYieldAccumulator(address(s)).getTokenConfig(t[i]);
+            uint8 dec = _expectedDecimals(t[i]);
+            if (cfg.configured && (cfg.decimals != dec || cfg.normalizedExchangeRate != RATE_1_TO_1)) {
+                _refuse(
+                    string.concat("3.1 setTokenConfig(", _tokenName(t[i]), ")"),
+                    string.concat(
+                        "decimals ",
+                        vm.toString(uint256(cfg.decimals)),
+                        " rate ",
+                        vm.toString(cfg.normalizedExchangeRate)
+                    ),
+                    string.concat("decimals ", vm.toString(uint256(dec)), " rate ", vm.toString(RATE_1_TO_1))
+                );
+            }
+        }
+        _refuseOverwrite("3.2 setRewardToken", s.rewardToken(), USDC);
+        _refuseOverwrite("3.3 setPhlimbo", s.phlimbo(), wiring.phlimbo);
+        _refuseOverwrite("3.4 setNudgeAddress", s.nudge(), wiring.nudge);
+        _refuseOverwrite("3.4 setNudgeSplit", s.nudgeSplit(), wiring.nudgeSplit);
+        _refuseOverwrite("3.4 setNudgeStreamer", s.nudgeStreamer(), wiring.nudgeStreamer);
+        _refuseOverwrite("3.6 setDiscountRate", s.getDiscountRate(), NEW_DISCOUNT_BPS);
+        _refuseOverwrite("3.7 setPauser", s.pauser(), PAUSER_V2);
+    }
+
+    /// @dev Reverts when the adopted SYA's `live` value is set (non-zero) and differs from `target`.
+    function _refuseOverwrite(string memory step, address live, address target) internal view {
+        if (deployedSyaThisRun || live == address(0) || live == target) return;
+        _refuse(step, vm.toString(live), vm.toString(target));
+    }
+
+    /// @dev uint overload of `_refuseOverwrite`.
+    function _refuseOverwrite(string memory step, uint256 live, uint256 target) internal view {
+        if (deployedSyaThisRun || live == 0 || live == target) return;
+        _refuse(step, vm.toString(live), vm.toString(target));
+    }
+
+    function _refuse(string memory step, string memory live, string memory target) internal pure {
+        revert(
+            string.concat(
+                "re-run guard: refusing step ",
+                step,
+                " on the adopted SYA: live ",
+                live,
+                " != target ",
+                target,
+                ". ",
+                REFUSE_POINTER
+            )
+        );
     }
 
     function _tokenConfigured(address token) internal view returns (bool) {
