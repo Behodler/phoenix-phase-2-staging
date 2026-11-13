@@ -1,0 +1,11 @@
+{
+  "chain": 1,
+  "transactions": [
+    { "hash": "0xaa01", "transactionType": "CALL", "contractName": null, "contractAddress": "0x669Ebfa5309db66683c199Cfe22516DECBe1a154" },
+    { "hash": "0xaa02", "transactionType": "CREATE", "contractName": "BatchNFTMinterNudgeDiscount", "contractAddress": "0x2222222222222222222222222222222222222222" }
+  ],
+  "receipts": [
+    { "transactionHash": "0xaa01", "status": "0x1" },
+    { "transactionHash": "0xaa02", "status": "0x1" }
+  ]
+}
