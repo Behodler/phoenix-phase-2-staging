@@ -130,6 +130,8 @@ contract NudgeDiscountBuyAndBurn is NudgeDiscountMainnetBase {
         (uint256 out, uint256 toStaker, uint256 burned) = m.buyAndBurn(usdcIn, minOut, deadline);
         if (isPreview) vm.stopPrank();
         else vm.stopBroadcast();
+        // NO FUNDS TO THE LEDGER: asserted right after the (only) fund-moving transaction, before anything else.
+        _assertOwnerBalancesNotIncreased("after the buyAndBurn tx");
         lastPhusdOut = out;
         lastToStaker = toStaker;
         lastBurned = burned;

@@ -28,6 +28,7 @@ import {
     IDonorRecipientND,
     IDonorNudgeND
 } from "./helpers/NudgeDiscountMainnetBase.sol";
+import {NudgePotForwarder} from "../src/periphery/NudgePotForwarder.sol";
 
 /**
  * @title DeployMainnetNudgeDiscount  (story 119, sprint nudge-discount)
@@ -76,9 +77,21 @@ import {
  *         increasing slot timestamps; an anvil rehearsal must mine with `--block-time` (automine reuses one
  *         timestamp, the second release settles nothing and the rescue reverts). That failure is safe: the
  *         rescue reverts before any value moves and a re-run finishes Phase 4 from chain state (rehearsed).
- *      b. balances held by the old minter: `old.rescueERC20(token, OWNER, bal)` then `forceApprove(streamer, bal)` +
- *         `collectNudge(new, token, bal)` from OWNER. OWNER is a TRANSIT only: its balance is asserted back to the
- *         pre-rescue value after each token, and the end-of-run OWNER balance invariant must hold.
+ *      b. balances held by the old minter (its own pot plus the buffer released in 4a) move CONTRACT TO CONTRACT,
+ *         never through OWNER: `old.rescueERC20(token, forwarder, bal)` to a one-shot `NudgePotForwarder`
+ *         (src/periphery/NudgePotForwarder.sol), then `forwarder.forward(token)`, which approves exactly `bal` to
+ *         NudgeStreamer and calls `collectNudge(new, token, bal)`. So the pot goes old minter -> forwarder -> the new
+ *         minter's stream buffer. The forwarder is deployed by this script through the canonical CREATE2 factory
+ *         (`CREATE2_FACTORY`, salt `POT_FORWARDER_SALT`) and bound at construction to operator OWNER (the only
+ *         caller of `forward`), NudgeStreamer, the new minter and USDC/phUSD/Kendu. It has no setter and no rescue,
+ *         so nobody can redirect what it holds. A resumed run finds it at the same address and first forwards
+ *         anything an interrupted run left on it. Asserted per token: the old minter's balance is zero, the
+ *         forwarder received exactly `bal` and ends at zero, the new minter's stream buffer grew by exactly `bal`
+ *         (net of the settle `collectNudge` performs), and its raw balance rose only by that settle.
+ *      NO FUNDS TO THE LEDGER (the human's ruling, 2026-11-13): no transaction in this script sends, rescues, mints
+ *      or credits anything to OWNER. The OWNER balance invariant (USDC, phUSD, Kendu, USDS, sUSDS, EYE, every
+ *      claim-NFT id unchanged; ETH non-increasing) is asserted after EVERY transaction (`_end`) and after every
+ *      fund-moving call of the preview smoke, so even a credit that a later step reverses fails at its own step.
  *      Late donations that land on chain between the local pass and the repoint stay on the old minter / its
  *      stream (the amounts were fixed in the local pass); the verifier names them and a re-run sweeps them.
  *   5. PREVIEW ONLY, snapshot-reverted (never in a broadcast session): an uncapped discounted 6-arg batchMint, a
@@ -137,7 +150,15 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
     uint256 public smokeBuyBurned;
     bool public smokeRan;
 
+    /// @dev The one-shot pot forwarder used this run (address(0) when there was nothing to migrate).
+    address public potForwarder;
+    /// @dev Set only when the test-only `_haltAfterPotRescue()` stopped Phase 4 between a rescue and its forward.
+    bool public haltedMidPhase4;
+    /// @dev How many times the OWNER balance invariant was asserted this run (read by the fork tests).
+    uint256 public ownerInvariantChecks;
+
     bool internal isPreview;
+    string internal currentStep;
     string[] internal stepsSent;
     string[] internal priorSteps;
 
@@ -194,6 +215,11 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         }
         _phase3_repointDonors();
         _phase4_migratePot();
+        if (haltedMidPhase4) {
+            console.log("HALT mid Phase 4, after a rescue to the forwarder (test harness only).");
+            if (!isPreview) _writeProgress();
+            return;
+        }
 
         _requireCutoverState(minter);
         _requirePotMigrated();
@@ -585,12 +611,17 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
     // Phase 4 - migrate the old pot (through the streamer, never a direct transfer)
     // =====================================================================
 
-    function _phase4_migratePot() internal {
-        console.log("\n=== Phase 4: migrate the old pot ===");
+    /// @dev `virtual` ONLY so a fork test can substitute the rejected OWNER-transit design and prove the per-step
+    ///      OWNER invariant refuses it (test/DeployMainnetNudgeDiscount.fork.t.sol). Production never overrides it.
+    function _phase4_migratePot() internal virtual {
+        console.log("\n=== Phase 4: migrate the old pot (contract to contract, never via OWNER) ===");
         address[3] memory toks = _nudgeTokens();
+        // A forwarder left holding funds by an interrupted run is emptied into the new stream first.
+        _sweepForwarder(toks);
         for (uint256 i = 0; i < 3; i++) {
             _releaseOldBuffer(toks[i]);
-            movedThisRun[i] += _rescueAndRestream(toks[i]);
+            movedThisRun[i] += _rescueAndForward(toks[i]);
+            if (haltedMidPhase4) return;
         }
     }
 
@@ -623,41 +654,80 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         console.log(string.concat("BUFFER_RELEASED|", vm.toString(t)), buffer);
     }
 
-    /// @dev Phase 4b for one token: rescue to OWNER (transit), then collectNudge into the new minter's stream.
-    function _rescueAndRestream(address t) internal returns (uint256 bal) {
+    /// @dev Phase 4b for one token: old minter -> forwarder (rescueERC20) -> NudgeStreamer.collectNudge(new).
+    function _rescueAndForward(address t) internal returns (uint256 bal) {
         bal = IERC20(t).balanceOf(OLD_MINTER);
         if (bal == 0) return 0;
-        uint256 ownerBal0 = IERC20(t).balanceOf(OWNER);
-        _begin(string.concat("old_rescue_", vm.toString(t)));
-        IOldBatchMinterND(OLD_MINTER).rescueERC20(IERC20(t), OWNER, bal);
+        address f = _ensureForwarder();
+        uint256 f0 = IERC20(t).balanceOf(f);
+        require(f0 == 0, "phase 4: forwarder not empty before the rescue (sweep failed)");
+        _begin(string.concat("old_rescueToForwarder_", vm.toString(t)));
+        IOldBatchMinterND(OLD_MINTER).rescueERC20(IERC20(t), f, bal);
         _end();
         require(IERC20(t).balanceOf(OLD_MINTER) == 0, "phase 4: old minter balance not zero after rescue");
-        require(IERC20(t).balanceOf(OWNER) == ownerBal0 + bal, "phase 4: rescue did not reach OWNER exactly");
-        _collectNudgeFromOwner(t, bal);
-        require(IERC20(t).balanceOf(OWNER) == ownerBal0, "phase 4: OWNER transit not closed (balance changed)");
+        require(IERC20(t).balanceOf(f) == bal, "phase 4: rescue did not reach the forwarder exactly");
+        if (_haltAfterPotRescue()) {
+            haltedMidPhase4 = true;
+            return bal;
+        }
+        _forward(f, t, bal);
         console.log(string.concat("POT_MIGRATED|", vm.toString(t)), bal);
     }
 
-    /// @dev Approve EXACTLY `amount`, collectNudge into the new minter, require the buffer grew by exactly `amount`
-    ///      (fee-on-transfer guard), the minter's raw balance rose by no more than the stream it settled, and the
-    ///      allowance is back to zero.
-    function _collectNudgeFromOwner(address token, uint256 amount) internal {
+    /// @dev `forwarder.forward(token)` with the stream-side asserts: the new minter's buffer grew by exactly
+    ///      `amount` (net of the settle collectNudge performs), its raw balance rose by no more than that settle
+    ///      (never a direct transfer), and the forwarder ends with zero balance and zero streamer allowance.
+    function _forward(address f, address token, uint256 amount) internal {
         INudgeStreamerND ns = INudgeStreamerND(NUDGE_STREAMER);
         address n = address(minter);
-        require(IERC20(token).allowance(OWNER, NUDGE_STREAMER) == 0, "collect: OWNER already has a streamer allowance");
         uint256 settle = ns.pendingStream(n, token);
         (, uint256 buf0,,) = ns.streams(n, token);
         uint256 raw0 = IERC20(token).balanceOf(n);
-        _begin(string.concat("collect_approve_", vm.toString(token)));
-        IERC20(token).approve(NUDGE_STREAMER, amount);
+        _begin(string.concat("forwarder_forward_", vm.toString(token)));
+        uint256 sent = NudgePotForwarder(f).forward(token);
         _end();
-        _begin(string.concat("collect_nudge_", vm.toString(token)));
-        ns.collectNudge(n, token, amount);
-        _end();
+        require(sent == amount, "forward: amount forwarded != amount rescued");
         (, uint256 buf1,,) = ns.streams(n, token);
-        require(buf1 == buf0 - settle + amount, "collect: buffer delta != amount (fee-on-transfer?)");
-        require(IERC20(token).balanceOf(n) == raw0 + settle, "collect: new minter raw balance jumped");
-        require(IERC20(token).allowance(OWNER, NUDGE_STREAMER) == 0, "collect: allowance not returned to 0");
+        require(buf1 == buf0 - settle + amount, "forward: buffer delta != amount (fee-on-transfer?)");
+        require(IERC20(token).balanceOf(n) == raw0 + settle, "forward: new minter raw balance jumped");
+        require(IERC20(token).balanceOf(f) == 0, "forward: forwarder not empty");
+        require(IERC20(token).allowance(f, NUDGE_STREAMER) == 0, "forward: forwarder allowance not returned to 0");
+    }
+
+    /// @dev Deploy the bound forwarder through the CREATE2 factory, or adopt it if a previous run already did.
+    function _ensureForwarder() internal returns (address f) {
+        f = _potForwarderAddress(address(minter));
+        if (f.code.length == 0) {
+            _begin("deploy_NudgePotForwarder");
+            (bool ok,) =
+                CREATE2_FACTORY.call(abi.encodePacked(POT_FORWARDER_SALT, _potForwarderInitCode(address(minter))));
+            _end();
+            require(ok && f.code.length > 0, "phase 4: NudgePotForwarder CREATE2 deploy failed");
+            console.log("4.0 NudgePotForwarder deployed (CREATE2):", f);
+        }
+        NudgePotForwarder fw = NudgePotForwarder(f);
+        require(fw.operator() == OWNER, "phase 4: forwarder operator != OWNER");
+        require(fw.streamer() == NUDGE_STREAMER, "phase 4: forwarder streamer != NudgeStreamer");
+        require(fw.recipient() == address(minter), "phase 4: forwarder recipient != new minter");
+        require(
+            fw.isBoundToken(USDC) && fw.isBoundToken(PHUSD) && fw.isBoundToken(KENDU),
+            "phase 4: forwarder not bound to USDC/phUSD/Kendu"
+        );
+        potForwarder = f;
+    }
+
+    /// @dev Resume path: forward whatever an interrupted run left on the forwarder (it can only go to the new
+    ///      minter's stream). Logged, and counted in `movedThisRun` (it left the old minter in an earlier run).
+    function _sweepForwarder(address[3] memory toks) internal {
+        address f = _potForwarderAddress(address(minter));
+        if (f.code.length == 0) return;
+        potForwarder = f;
+        for (uint256 i = 0; i < 3; i++) {
+            uint256 held = IERC20(toks[i]).balanceOf(f);
+            if (held == 0) continue;
+            _forward(f, toks[i], held);
+            console.log(string.concat("FORWARDER_SWEPT|", vm.toString(toks[i])), held);
+        }
     }
 
     /// @dev Local-pass model of the next block (see header, Phase 4a). Signs nothing.
@@ -745,6 +815,7 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         IERC20(USDC).approve(NUDGE_STREAMER, amount);
         INudgeStreamerND(NUDGE_STREAMER).collectNudge(address(minter), USDC, amount);
         vm.stopPrank();
+        _ownerInvariant("smoke: fund USDC stream");
     }
 
     struct BatchBefore {
@@ -783,6 +854,7 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         vm.prank(batcher);
         minter.batchMint(e.total, quotedBoost, batcher, e.paidCost + e.paidCost / 100 + 1, bb.bonusTokens, bb.floors);
         logs = vm.getRecordedLogs();
+        _ownerInvariant("smoke: batchMint");
         _checkBatch(batcher, e, bb);
     }
 
@@ -879,7 +951,7 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         } catch {}
         console.log("SMOKE|PauserV2.pause() paused the new minter; batchMint refused while paused");
 
-        _assertOwnerBalancesNotIncreased("smoke (before revert)");
+        _ownerInvariant("smoke (before revert)");
         uint256 keepUncapped = smokeUncappedFree;
         uint256 keepCapped = smokeCappedFree;
         uint8 keepBoost = smokeCappedBoost;
@@ -905,6 +977,7 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         uint256 owedPending = m.pendingStakerPhUSD();
         vm.prank(OWNER);
         (uint256 out, uint256 toStaker, uint256 burned) = m.buyAndBurn(usdcIn, minOut, vm.getBlockTimestamp() + 1800);
+        _ownerInvariant("smoke: buyAndBurn");
         uint256 toStakerOwed = out < owedPending ? out : owedPending;
         uint256 extra = out - toStakerOwed;
         require(out >= minOut, "smoke: buy output below the floor");
@@ -936,6 +1009,7 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         IERC20(eye).approve(PAUSER_V2, burnAmt);
         vm.prank(actor);
         p.pause();
+        _ownerInvariant(string.concat("PauserV2.pause by ", actorName));
     }
 
     function _proveGlobalPause(string memory stage) internal {
@@ -972,14 +1046,32 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
     // Broadcast plumbing
     // =====================================================================
 
-    function _begin(string memory step) internal virtual {
+    function _begin(string memory step) internal {
         txCount++;
         stepsSent.push(step);
+        currentStep = step;
+        _startTx();
+    }
+
+    /// @notice Closes one transaction and asserts the OWNER balance invariant right after it, so no single step
+    ///         can credit OWNER even if a later step would undo it.
+    function _end() internal {
+        _stopTx();
+        _ownerInvariant(currentStep);
+    }
+
+    function _ownerInvariant(string memory stage) internal {
+        ownerInvariantChecks++;
+        _assertOwnerBalancesNotIncreased(stage);
+    }
+
+    /// @dev Transport only (`virtual` so fork tests can send as an OWNER prank instead of the Ledger).
+    function _startTx() internal virtual {
         if (isPreview) vm.startPrank(OWNER);
         else vm.startBroadcast();
     }
 
-    function _end() internal virtual {
+    function _stopTx() internal virtual {
         if (isPreview) vm.stopPrank();
         else vm.stopBroadcast();
     }
@@ -1093,6 +1185,12 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         vm.serializeString("s119.minter", "contractName", "BatchNFTMinterNudgeDiscount");
         vm.serializeUint("s119.minter", "createNonce", createNonce);
         string memory entry = vm.serializeBool("s119.minter", "deployed", deployed);
+        address fwd = potForwarder != address(0) ? potForwarder : _progressForwarder();
+        if (fwd != address(0)) {
+            vm.serializeString("s119.forwarder", "contractName", "NudgePotForwarder");
+            string memory fEntry = vm.serializeAddress("s119.forwarder", "address", fwd);
+            vm.serializeString("s119.contracts", "NudgePotForwarder", fEntry);
+        }
         string memory contracts = vm.serializeString("s119.contracts", "NudgeDiscountBatchMinter", entry);
 
         uint256[] memory bal = new uint256[](3);
@@ -1156,6 +1254,12 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
     /// @dev Set only by the :broadcast key. `virtual` so tests can pin it (vm.setEnv is process-wide).
     function _progressWriteEnabledFromEnv() internal view virtual returns (bool) {
         return vm.envOr("NUDGE_DISCOUNT_BROADCAST", false);
+    }
+
+    /// @dev Always false in production. `virtual` only so the fork tests can simulate a run interrupted between a
+    ///      Phase 4 rescue to the forwarder and its forward.
+    function _haltAfterPotRescue() internal view virtual returns (bool) {
+        return false;
     }
 
     /// @dev Always false in production. `virtual` only so the fork tests can simulate a run interrupted after Phase 2.

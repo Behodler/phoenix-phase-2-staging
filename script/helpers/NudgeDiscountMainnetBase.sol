@@ -6,6 +6,7 @@ import {StdCheats} from "@forge-std/StdCheats.sol";
 import "@forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BatchNFTMinterNudgeDiscount} from "nft-staking/BatchNFTMinterNudgeDiscount.sol";
+import {NudgePotForwarder} from "../../src/periphery/NudgePotForwarder.sol";
 
 /// @dev The live NFTMinterV2 surface (lib/yield-claim-nft/src/NFTMinterV2.sol).
 interface INFTMinterV2ND {
@@ -321,6 +322,72 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
         return vm.parseJsonAddress(json, ".contracts.NudgeDiscountBatchMinter.address");
     }
 
+    /// @notice The pot forwarder recorded by a broadcast, or address(0) when none.
+    function _progressForwarder() internal view returns (address) {
+        string memory json = _progressJson();
+        if (bytes(json).length == 0 || !vm.keyExistsJson(json, ".contracts.NudgePotForwarder.address")) {
+            return address(0);
+        }
+        return vm.parseJsonAddress(json, ".contracts.NudgePotForwarder.address");
+    }
+
+    // =====================================================================
+    // Pot forwarder (contract-to-contract pot migration; OWNER is never a recipient)
+    // =====================================================================
+
+    /// @dev CREATE2 salt of the one-shot `NudgePotForwarder` (deployed through forge-std's `CREATE2_FACTORY`, the
+    ///      canonical deterministic deployer, so a resumed run finds the same address from chain state alone).
+    bytes32 internal constant POT_FORWARDER_SALT = keccak256("phStaging2.story119.NudgePotForwarder.v1");
+
+    /// @dev Bound at construction: operator OWNER (sole caller of `forward`, receives nothing), NudgeStreamer, the
+    ///      new minter as the only `collectNudge` recipient, and the three nudge tokens.
+    function _potForwarderInitCode(address newMinter) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            type(NudgePotForwarder).creationCode, abi.encode(OWNER, NUDGE_STREAMER, newMinter, USDC, PHUSD, KENDU)
+        );
+    }
+
+    function _potForwarderAddress(address newMinter) internal pure returns (address) {
+        return
+            vm.computeCreate2Address(POT_FORWARDER_SALT, keccak256(_potForwarderInitCode(newMinter)), CREATE2_FACTORY);
+    }
+
+    /// @notice Every pot forwarder this cutover may have used (the CREATE2 address for `newMinter`, and the one the
+    ///         progress file records if it differs) holds no nudge token, has no live streamer allowance, and is
+    ///         bound to OWNER / NudgeStreamer / `newMinter`. OWNER never approved the forwarder. A forwarder that was
+    ///         never deployed (nothing to migrate) passes.
+    function _requirePotForwarderEmpty(address newMinter) internal view {
+        address computed = _potForwarderAddress(newMinter);
+        _requireOneForwarderEmpty(computed, newMinter);
+        address recorded = _progressForwarder();
+        if (recorded != address(0) && recorded != computed) _requireOneForwarderEmpty(recorded, newMinter);
+        address[3] memory toks = _nudgeTokens();
+        for (uint256 i = 0; i < 3; i++) {
+            console.log(
+                string.concat("INFO|OWNER allowance to NudgeStreamer|", vm.toString(toks[i])),
+                IERC20(toks[i]).allowance(OWNER, NUDGE_STREAMER)
+            );
+        }
+    }
+
+    function _requireOneForwarderEmpty(address f, address newMinter) internal view {
+        if (f.code.length == 0) {
+            console.log("POT_FORWARDER|not deployed (nothing was migrated through it):", f);
+            return;
+        }
+        NudgePotForwarder fw = NudgePotForwarder(f);
+        require(fw.operator() == OWNER, "post: pot forwarder operator != OWNER");
+        require(fw.streamer() == NUDGE_STREAMER, "post: pot forwarder streamer != NudgeStreamer");
+        require(fw.recipient() == newMinter, "post: pot forwarder recipient != new minter");
+        address[3] memory toks = _nudgeTokens();
+        for (uint256 i = 0; i < 3; i++) {
+            require(IERC20(toks[i]).balanceOf(f) == 0, "post: pot forwarder still holds a nudge token");
+            require(IERC20(toks[i]).allowance(f, NUDGE_STREAMER) == 0, "post: pot forwarder streamer allowance != 0");
+            require(IERC20(toks[i]).allowance(OWNER, f) == 0, "post: OWNER has an allowance to the pot forwarder");
+        }
+        console.log("POT_FORWARDER|empty|", f);
+    }
+
     /// @notice True when scripts/confirm-nudge-discount-progress.js has marked the progress `completed`.
     function _progressCompleted() internal view returns (bool) {
         string memory json = _progressJson();
@@ -492,9 +559,10 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     }
 
     /// @notice Revert `OwnerBalanceIncreased` if any watched OWNER balance rose since the snapshot (ETH must be
-    ///         non-increasing). The Phase 4 pot migration routes the old minter's tokens THROUGH OWNER
-    ///         (`rescueERC20 -> OWNER`, then `collectNudge` pulls the exact amount back out in the next tx), so the
-    ///         net is zero and this end-of-run check holds; each transit is also closed by its own assertion.
+    ///         non-increasing). NO ASSET MAY BE CREDITED TO OWNER AT ANY STEP, not even transiently (the human's
+    ///         ruling of 2026-11-13). The cutover therefore calls this after EVERY transaction it sends (`_end`),
+    ///         and the smoke and the buy-and-burn script call it after every fund-moving call, so a credit that a
+    ///         later step would undo is still caught at the step that made it.
     function _assertOwnerBalancesNotIncreased(string memory stage) internal view {
         require(ownerBefore.erc20s.length > 0, "OWNER balance snapshot was never taken");
         if (OWNER.balance > ownerBefore.eth) {
@@ -613,6 +681,7 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
         Donor[] memory stale = _donorInventory(OLD_MINTER);
         _printInventory("STALE_DONOR", stale);
         require(stale.length == 0, "post: a donor still targets the old minter");
+        _requirePotForwarderEmpty(address(m));
         Donor[] memory live = _donorInventory(address(m));
         _printInventory("DONOR_NEW", live);
         require(live.length > 0, "post: no donor targets the new minter");

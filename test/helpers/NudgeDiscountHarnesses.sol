@@ -62,14 +62,91 @@ contract DeployNudgeDiscountHarness is DeployMainnetNudgeDiscount {
         return OWNER.balance;
     }
 
-    function _begin(string memory step) internal override {
-        txCount++;
-        stepsSent.push(step);
+    bool public haltAfterPotRescue;
+
+    function setHaltAfterPotRescue(bool v) external {
+        haltAfterPotRescue = v;
+    }
+
+    function _haltAfterPotRescue() internal view override returns (bool) {
+        return haltAfterPotRescue;
+    }
+
+    // ---- independent per-step OWNER watch (the test's own check, separate from the script's invariant) ----
+    bool public ownerWatch;
+    uint256 public stepsWatched;
+    address[] internal watchTokens;
+    uint256[] internal watchBalances;
+    uint256 internal watchEth;
+
+    /// @dev Snapshot OWNER's USDC / phUSD / Kendu / USDS / sUSDS / EYE and ETH now; from then on every transaction
+    ///      this harness closes reverts "TEST: step credited OWNER" if any of them rose.
+    function watchOwner(address[] calldata tokens) external {
+        ownerWatch = true;
+        watchEth = OWNER.balance;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            watchTokens.push(tokens[i]);
+            watchBalances.push(IERC20Balance(tokens[i]).balanceOf(OWNER));
+        }
+    }
+
+    function _startTx() internal override {
         vm.startPrank(OWNER);
     }
 
-    function _end() internal override {
+    function _stopTx() internal override {
         vm.stopPrank();
+        if (!ownerWatch) return;
+        stepsWatched++;
+        require(OWNER.balance <= watchEth, string.concat("TEST: step credited OWNER ETH: ", currentStep));
+        for (uint256 i = 0; i < watchTokens.length; i++) {
+            require(
+                IERC20Balance(watchTokens[i]).balanceOf(OWNER) <= watchBalances[i],
+                string.concat("TEST: step credited OWNER: ", currentStep)
+            );
+        }
+    }
+}
+
+interface IERC20Balance {
+    function balanceOf(address a) external view returns (uint256);
+    function approve(address s, uint256 a) external returns (bool);
+    function allowance(address o, address s) external view returns (uint256);
+}
+
+interface IOldMinterRescue {
+    function rescueERC20(address token, address to, uint256 amount) external;
+}
+
+interface INudgeStreamerCollect {
+    function collectNudge(address recipientBatchMinter, address token, uint256 amount) external;
+}
+
+/// @dev NEGATIVE-TEST ONLY: the REJECTED Phase 4 design (Decision 4, superseded 2026-11-13) - rescue the old pot to
+///      OWNER, then collectNudge it from OWNER in the next tx. Net zero by the end of the run, but OWNER is credited
+///      for one step. The fork tests prove the per-step invariant (and the test's own watch) refuse it.
+contract DeployNudgeDiscountOwnerTransitHarness is DeployNudgeDiscountHarness {
+    constructor(bool preview_, string memory progressPath_, address booked_)
+        DeployNudgeDiscountHarness(preview_, progressPath_, booked_)
+    {}
+
+    function _phase4_migratePot() internal override {
+        address[3] memory toks = _nudgeTokens();
+        for (uint256 i = 0; i < 3; i++) {
+            _releaseOldBuffer(toks[i]);
+            uint256 bal = IERC20Balance(toks[i]).balanceOf(OLD_MINTER);
+            if (bal == 0) continue;
+            _begin("REJECTED_old_rescueToOwner");
+            IOldMinterRescue(OLD_MINTER).rescueERC20(toks[i], OWNER, bal);
+            _end();
+            _begin("REJECTED_owner_approve");
+            IERC20Balance(toks[i]).approve(NUDGE_STREAMER, bal);
+            _end();
+            _begin("REJECTED_owner_collectNudge");
+            INudgeStreamerCollect(NUDGE_STREAMER).collectNudge(address(minter), toks[i], bal);
+            _end();
+            movedThisRun[i] += bal;
+        }
     }
 }
 

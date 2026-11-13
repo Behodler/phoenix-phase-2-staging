@@ -22,6 +22,9 @@ import {NudgeDiscountMainnetBase} from "./helpers/NudgeDiscountMainnetBase.sol";
  *           - every inventoried donor (all NFTMinter dispatchers + the book's SYA) points at the new minter, none at
  *             the old one;
  *           - old minter paused, not registered with PauserV2, pauser() == OWNER, zero balance and zero buffers;
+ *           - the one-shot NudgePotForwarder (its CREATE2 address for the new minter, and the progress file's
+ *             record if different) holds no USDC/phUSD/Kendu, has no streamer allowance, is bound to OWNER /
+ *             NudgeStreamer / the new minter, and OWNER never approved it (OWNER's streamer allowances are logged);
  *           - book Pauser == PauserV2, PauserV2.isRegistered(new), new.pauser() == PauserV2, health() clean;
  *           - pendingBuyUSDC and pendingStakerPhUSD printed (informational).
  *
