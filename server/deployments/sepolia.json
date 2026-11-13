@@ -2,7 +2,7 @@
   "chainId": 11155111,
   "networkName": "sepolia",
   "deploymentStatus": "completed",
-  "extractedAt": "2026-11-02T05:45:55.254Z",
+  "extractedAt": "2026-11-13T02:56:01.549Z",
   "contracts": {
     "PhUSD": {
       "address": "0x461Ab86C95C897a0f08C093c03E630A40720eb80",
@@ -425,6 +425,13 @@
       "configGas": 0
     },
     "NFTBonfire": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "deployed": false,
+      "configured": false,
+      "deployGas": 0,
+      "configGas": 0
+    },
+    "NudgeDiscountBatchMinter": {
       "address": "0x0000000000000000000000000000000000000000",
       "deployed": false,
       "configured": false,
