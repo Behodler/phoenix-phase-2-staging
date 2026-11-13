@@ -88,10 +88,14 @@ export default defineConfig({
         'NFTStaker.sol/NFTStaker.json',
         'NFTStakerDepletionV2.sol/NFTStakerDepletionV2.json',
         'NFTStakerPriceScaled.sol/NFTStakerPriceScaled.json',
-        // Both batch-minter shapes are live locally and on mainnet: the shared minter is the
-        // multi-token one (length-3 minRewards), the four per-dispatcher minters are legacy.
+        // Three batch-minter shapes now exist. BatchNFTMinterNudgeDiscount (story 118,
+        // nft-staking:033/034/035; address key `NudgeDiscountBatchMinter`) is the index-4 donor
+        // sink: the USDC nudge pot buys a pot-sized discount batch. The multi-token minter
+        // (address key `BatchNFTMinter`) stays deployed for the UI until phlimbo-ui:091 but no
+        // longer receives donations; the four per-dispatcher minters are legacy.
         'BatchNFTMinter.sol/BatchNFTMinter.json',
         'BatchNFTMinterMultiToken.sol/BatchNFTMinterMultiToken.json',
+        'BatchNFTMinterNudgeDiscount.sol/BatchNFTMinterNudgeDiscount.json',
         'NudgeStreamer.sol/NudgeStreamer.json',
 
         // Stable Staker (yield farm for stablecoin staking) and the Antimatter reward token
