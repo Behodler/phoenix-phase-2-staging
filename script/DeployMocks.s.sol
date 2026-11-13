@@ -69,6 +69,11 @@ import {INFTSupply} from "nft-staking/INFTSupply.sol";
 // Story 073: the streamer-era contract set (mirrors the mainnet cutover planned in story 072).
 import {NudgeStreamer} from "nft-staking/NudgeStreamer.sol";
 import {BatchNFTMinterMultiToken} from "nft-staking/BatchNFTMinterMultiToken.sol";
+// Story 118: the nudge-discount minter (nft-staking:033/034/035), the new index-4 donor sink.
+import {BatchNFTMinterNudgeDiscount} from "nft-staking/BatchNFTMinterNudgeDiscount.sol";
+import {ISkyPSM as INudgeDiscountPSM} from "nft-staking/interfaces/ISkyPSM.sol";
+import {IMintDebtRatio} from "nft-staking/interfaces/IMintDebtRatio.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {NFTStakerDepletionV2} from "nft-staking/NFTStakerDepletionV2.sol";
 // Story 070: canonical Uniswap V2 (WETH9 + Factory + Router02) deployer + interfaces.
 import {
@@ -375,6 +380,12 @@ contract DeployMocks is Script {
     // Six donors route through it: Uniboost x3, UniPoolerV2 (index 4), the index-7 NudgeRatchet and
     // StableYieldAccumulator.
     NudgeStreamer public nudgeStreamer;
+
+    // Story 118: BatchNFTMinterNudgeDiscount (nft-staking:033, audit-27 fixes 034/035), deployed in
+    // Phase 11.18 and tracked under its own `NudgeDiscountBatchMinter` key. Every local USDC donor is
+    // repointed to it; the multi-token minter above stays deployed under `BatchNFTMinter` for the UI
+    // until phlimbo-ui:091, but receives no donations.
+    BatchNFTMinterNudgeDiscount public nudgeDiscountMinter;
 
     // Stable Staking infrastructure (story 051).
     //
@@ -1610,6 +1621,14 @@ contract DeployMocks is Script {
         // phStaging2:118 appends after this (11.18).
         _turnSyaGateOff();
 
+        // ====== PHASE 11.18: Nudge-discount batch minter (story 118) ======
+        // APPENDED after 11.17 and before the terminal sweep, so no existing address moves (Phase 11.8
+        // convention). Deploys BatchNFTMinterNudgeDiscount, configures it (mintFor authority on
+        // NFTMinterV2, PSM/sUSDS/UniV2 buy route, mint-debt hook, NFTStaker, discount 50 / burn 100,
+        // deployer as buyer), registers it with PauserV2 and its streams, then repoints EVERY local
+        // USDC donor (UniPoolerV2, Uniboost x3, NudgeRatchet, SYA) from the multi-token minter to it.
+        _deployNudgeDiscountMinter(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1691,6 +1710,8 @@ contract DeployMocks is Script {
         _markConfigured("SYAHarvester", 0);
         // Story 125: NFTBonfire (deployed and wired inside _deployNFTBonfire).
         _markConfigured("NFTBonfire", 0);
+        // Story 118: the nudge-discount minter (deployed and wired inside _deployNudgeDiscountMinter).
+        _markConfigured("NudgeDiscountBatchMinter", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -1942,8 +1963,10 @@ contract DeployMocks is Script {
     ///      rather than silently surviving into `local-addresses.ts`.
     ///
     ///      SAFE ONLY AS THE LAST STATEMENT BEFORE `stopBroadcast`. The last deployer-as-minter
-    ///      phUSD mint in the whole run is `_deepenPhusdSusdsSeed`, in Phase 11.9 (story 112), under
-    ///      the grant `_seedNudgeStream` (Phase 3.7) made; everything else mints through
+    ///      phUSD mint in the whole run is the nudge-discount minter's phUSD bonus-stream seed
+    ///      (`_seedNudgeStream` from `_deployNudgeDiscountMinter`, Phase 11.18, story 118, armed
+    ///      leg only), which re-asserts the grant `_seedNudgeStream` first made in Phase 3.7; before
+    ///      story 118 it was `_deepenPhusdSusdsSeed` (Phase 11.9, story 112). Everything else mints through
     ///      `PhusdStableMinter` (its own grant) or through contracts holding their own.
     ///      `_armLocalKenduPromotion` mints MockKendu, whose `mint` is permissionless. A revoke
     ///      placed before the Phase 3.7 stream seeding would break it.
@@ -1975,6 +1998,23 @@ contract DeployMocks is Script {
         );
 
         _requireSyaHarvesterEndState(deployer);
+
+        // Story 118 (Concern 6): `mintFor` authority on NFTMinterV2 is a privileged ACL entry - the
+        // nudge-discount minter can mint index-4 NFTs for free, bounded only by its own logic. Pin
+        // the end state: exactly the new minter holds it, the retired multi-token sink does not.
+        require(
+            nftMinterV2.authorizedMinters(address(nudgeDiscountMinter)),
+            "RESIDUAL PRIVILEGE SWEEP FAILED: NudgeDiscountBatchMinter lacks NFTMinterV2 mintFor authority"
+        );
+        require(
+            !nftMinterV2.authorizedMinters(address(batchNFTMinter)),
+            "RESIDUAL PRIVILEGE SWEEP FAILED: multi-token BatchNFTMinter must not hold NFTMinterV2 mintFor authority"
+        );
+        require(
+            !nftMinterV2.authorizedMinters(deployer),
+            "RESIDUAL PRIVILEGE SWEEP FAILED: deployer must not hold NFTMinterV2 mintFor authority"
+        );
+        console.log("  NFTMinterV2 mintFor ACL asserted: NudgeDiscountBatchMinter IN, multi-token minter + deployer OUT");
     }
 
     /// @dev Asserts one row of the end-state phUSD ACL, using the TWO-FIELD idiom. Checking
@@ -2123,6 +2163,172 @@ contract DeployMocks is Script {
         console.log("  SYA.setNFTMinter(address(0)) - claim gate OFF (read back zero)");
         console.log("  NFTMinterV2.setAuthorizedBurner(SYA, false) - burner right revoked (read back false)");
         console.log("  SYA.canClaim(NFT-less probe) == true");
+    }
+
+    // =====================================================================
+    // Story 118: BatchNFTMinterNudgeDiscount on anvil
+    // =====================================================================
+
+    /// @dev The USDS floor Phase 11.18 requires in MockSkyPSM's `sellGem` reserve. The reserve is
+    ///      seeded (1,000,000 USDS) by `UniswapHelperLocalStack.deploy` in Phase 11.8; without it the
+    ///      first `buyAndBurn` reverts "MockSkyPSM: USDS reserve short".
+    uint256 internal constant NUDGE_DISCOUNT_MIN_PSM_USDS = 100_000e18;
+
+    /// @dev Phase 11.18 (story 118). Deploys BatchNFTMinterNudgeDiscount and wires it in the order its
+    ///      reverts demand, then repoints every local USDC donor to it:
+    ///        1. deploy + track (`NudgeDiscountBatchMinter`);
+    ///        2. tokenMinter + DERIVED dispatcher index (asserted 4, prime token USDS);
+    ///        3. whitelist USDC, phUSD, Kendu (BEFORE setDiscountToken, which requires a whitelisted token);
+    ///        4. discount + buy config: discountToken USDC, discount 50 / burn 100 (asserted, the
+    ///           constructor defaults), NFTStaker, mint-debt hook (ratio 50 + recipient asserted), PSM,
+    ///           sUSDS BEFORE setSwapRoute (which validates the pair against it), deployer as buyer;
+    ///           the audit-27 cap/boost terms keep their nft-staking:034 defaults (cap 50, 3 per point,
+    ///           boost DISABLED), mirroring the mainnet day-one shape;
+    ///        5. MockSkyPSM USDS reserve asserted (seeded in Phase 11.8);
+    ///        6. NFTMinterV2.setAuthorizedMinter(new, true) - without it every batchMint reverts on the
+    ///           first free mint;
+    ///        7. setPauser(PauserV2) THEN PauserV2.register (register validates pauser() == itself);
+    ///        8. streams: USDC always, phUSD + Kendu (registered and seeded) on the armed leg;
+    ///        9. setNudgeStreamer LAST, so batchMint flushes its streams;
+    ///       10. repoint UniPoolerV2, Uniboost EYE/SCX/FLX, NudgeRatchet and SYA, each read back.
+    ///      The deployer owns every donor at this point (DeployMocks never transfers ownership), so the
+    ///      setters can run here rather than before a hand-off.
+    ///
+    ///      The multi-token minter stays deployed, whitelisted, streamed and Pauser-registered under
+    ///      `BatchNFTMinter` so the current UI still renders it, but after this phase no donor feeds it.
+    ///      phlimbo-ui:091 moves the UI to this minter; the old minter holds no mintFor rights.
+    function _deployNudgeDiscountMinter(address deployer) internal {
+        console.log("\n=== Phase 11.18: Nudge-discount batch minter (story 118) ===");
+
+        // 1. Deploy + track.
+        uint256 gasBefore = gasleft();
+        nudgeDiscountMinter = new BatchNFTMinterNudgeDiscount(deployer);
+        _trackDeployment("NudgeDiscountBatchMinter", address(nudgeDiscountMinter), gasBefore - gasleft());
+        BatchNFTMinterNudgeDiscount m = nudgeDiscountMinter;
+        console.log("  BatchNFTMinterNudgeDiscount:", address(m));
+
+        // 2. Pinned NFT minter + DERIVED dispatcher index.
+        uint256 idx = nftMinterV2.dispatcherToIndex(address(uniPoolerV2));
+        require(idx == 4, "story-118: UniPoolerV2 is not NFTMinterV2 index 4");
+        require(uniPoolerV2.primeToken() == address(usds), "story-118: index-4 prime token must be USDS");
+        m.setTokenMinter(ITokenMinterV2(address(nftMinterV2)));
+        m.setDispatcherIndex(idx);
+
+        // 3. Whitelist, in the documented order. USDC must be whitelisted (registerStream requires
+        //    isNudgeToken) and is the discount token, so it is excluded from the bonus set.
+        m.setNudgeTokenWhitelist(address(rewardToken), true); // USDC (6dp) - discount token
+        m.setNudgeTokenWhitelist(address(phUSD), true); // phUSD (18dp) - bonus
+        m.setNudgeTokenWhitelist(address(mockKendu), true); // Kendu (18dp) - bonus
+        require(m.getNudgeTokens().length == 3, "story-118: expected 3 whitelisted nudge tokens");
+
+        // 4. Discount + buy configuration.
+        _configureNudgeDiscountBuy(m, deployer);
+
+        // 5. sellGem pays USDS out of a pre-funded reserve (seeded in Phase 11.8).
+        require(
+            usds.balanceOf(address(mockSkyPSM)) >= NUDGE_DISCOUNT_MIN_PSM_USDS,
+            "story-118: MockSkyPSM USDS reserve too small for buyAndBurn"
+        );
+
+        // 6. Free-mint authority. The deployer owns NFTMinterV2.
+        nftMinterV2.setAuthorizedMinter(address(m), true);
+        require(nftMinterV2.authorizedMinters(address(m)), "story-118: mintFor authority not granted");
+
+        // 7. Pause wiring: PauserV2 (the `Pauser` key resolves to V2 after Phase 11.16), never V1.
+        m.setPauser(address(pauserV2));
+        pauserV2.register(address(m));
+        require(m.pauser() == address(pauserV2) && pauserV2.isRegistered(address(m)), "story-118: PauserV2 wiring");
+
+        // 8. Streams. Must exist before any donor is repointed, or the first donation reverts.
+        nudgeStreamer.registerStream(address(m), address(rewardToken), LOCAL_STREAM_DURATION);
+        if (armKenduPromo) {
+            nudgeStreamer.registerStream(address(m), address(phUSD), LOCAL_STREAM_DURATION);
+            nudgeStreamer.registerStream(address(m), address(mockKendu), LOCAL_STREAM_DURATION);
+            // The bonus tokens have no organic donors; seed them as Phase 3.7 seeds the old minter.
+            _seedNudgeStream(deployer, address(m), address(phUSD), LOCAL_PHUSD_NUDGE_SEED);
+            _seedNudgeStream(deployer, address(m), address(mockKendu), LOCAL_KENDU_NUDGE_SEED);
+            console.log("  streams registered: USDC, phUSD, Kendu (phUSD + Kendu seeded, armed leg)");
+        } else {
+            console.log("  streams registered: USDC only (LOCAL_PROMO_KENDU=false: bonus streams dormant)");
+        }
+
+        // 9. Last: batchMint learns to flush its accrued streams.
+        m.setNudgeStreamer(address(nudgeStreamer));
+
+        // 10. Repoint every USDC donor. The stream still feeds the pot.
+        _repointNudgeDonors(address(m));
+
+        console.log("  NFTMinterV2 mintFor authority: granted");
+        console.log("  PauserV2-registered; donors repointed: UniPoolerV2, Uniboost x3, NudgeRatchet, SYA");
+        console.log("  multi-token BatchNFTMinter kept (UI until phlimbo-ui:091), no longer a donor sink");
+    }
+
+    /// @dev Step 4 of `_deployNudgeDiscountMinter`, split out for the stack. Every setter is read back.
+    function _configureNudgeDiscountBuy(BatchNFTMinterNudgeDiscount m, address deployer) internal {
+        m.setDiscountToken(address(rewardToken));
+        // The constructor defaults ARE the planned values; set them explicitly anyway so a future
+        // default change in nft-staking cannot silently change the anvil chain.
+        m.setDiscountPercent(50);
+        m.setBurnPercent(100);
+        m.setNFTStaker(address(nftStaker));
+
+        require(balancerPoolerHook.ratio() == 50, "story-118: BalancerPoolerMintDebtHook ratio is not 50");
+        require(balancerPoolerHook.recipient() == address(nftStaker), "story-118: hook recipient is not NFTStaker");
+        m.setMintDebtHook(IMintDebtRatio(address(balancerPoolerHook)));
+
+        m.setPSM(INudgeDiscountPSM(address(mockSkyPSM)));
+        require(mockSkyPSM.gem() == address(rewardToken), "story-118: MockSkyPSM gem is not USDC");
+        require(susds.asset() == mockSkyPSM.usds(), "story-118: sUSDS asset is not the PSM's USDS");
+        m.setSUSDS(IERC4626(address(susds)));
+        require(
+            IUniswapV2FactoryLike(uniRouter.factory()).getPair(address(susds), address(phUSD)) == phusdSusdsPair,
+            "story-118: router factory does not resolve the phUSD/sUSDS pair"
+        );
+        m.setSwapRoute(address(uniRouter), phusdSusdsPair, address(phUSD)); // after setSUSDS
+        m.setAuthorizedBuyer(deployer, true);
+
+        require(address(m.discountToken()) == address(rewardToken), "story-118: discountToken");
+        require(m.discountPercent() == 50 && m.burnPercent() == 100, "story-118: discount/burn percent");
+        require(m.nftStaker() == address(nftStaker), "story-118: nftStaker");
+        require(address(m.mintDebtHook()) == address(balancerPoolerHook), "story-118: mintDebtHook");
+        require(address(m.psm()) == address(mockSkyPSM) && address(m.sUSDS()) == address(susds), "story-118: psm/sUSDS");
+        require(
+            m.router() == address(uniRouter) && m.pair() == phusdSusdsPair && m.phUSD() == address(phUSD),
+            "story-118: swap route"
+        );
+        require(m.buyerAuthVersion(deployer) == m.authVersion(), "story-118: deployer is not an authorised buyer");
+        address[] memory bonus = m.getBonusTokens();
+        require(
+            bonus.length == 2 && bonus[0] == address(phUSD) && bonus[1] == address(mockKendu),
+            "story-118: bonus tokens must be [phUSD, Kendu]"
+        );
+
+        // Audit-27 cap/boost terms (nft-staking:034): left at the constructor defaults, which are the
+        // mainnet day-one values, and read back so a default change upstream fails loudly here.
+        require(m.maxFreePerBatch() == 50, "story-118: maxFreePerBatch must be 50");
+        require(m.overflowNFTsPerBoostPoint() == 3, "story-118: overflowNFTsPerBoostPoint must be 3");
+        require(m.maxBoost() == 0, "story-118: maxBoost must be 0 (boost disabled)");
+        // Logged, NOT asserted: its gas basis is mainnet-specific; the gate belongs to phStaging2:119.
+        console.log("  cap/boost defaults asserted: maxFreePerBatch 50, overflowNFTsPerBoostPoint 3, maxBoost 0");
+        console.log("  boostDonationSafe() (informational, not asserted):", m.boostDonationSafe());
+    }
+
+    /// @dev Step 10 of `_deployNudgeDiscountMinter`: every local USDC donor now feeds the new minter.
+    ///      NudgeRatchetDelayRelease and PromotionUniV2_Eth are not deployed on anvil.
+    function _repointNudgeDonors(address newMinter) internal {
+        uniPoolerV2.setBatchMinter(newMinter);
+        uniboostEYE.setRecipient(newMinter);
+        uniboostSCX.setRecipient(newMinter);
+        uniboostFLX.setRecipient(newMinter);
+        nudgeRatchet.setBatchMinter(newMinter);
+        stableYieldAccumulator.setNudgeAddress(newMinter);
+
+        require(uniPoolerV2.batchMinter() == newMinter, "story-118: UniPoolerV2 not repointed");
+        require(uniboostEYE.recipient() == newMinter, "story-118: UniboostEYE not repointed");
+        require(uniboostSCX.recipient() == newMinter, "story-118: UniboostSCX not repointed");
+        require(uniboostFLX.recipient() == newMinter, "story-118: UniboostFLX not repointed");
+        require(nudgeRatchet.batchMinter() == newMinter, "story-118: NudgeRatchet not repointed");
+        require(stableYieldAccumulator.nudge() == newMinter, "story-118: SYA nudge not repointed");
     }
 
     /// @dev Phase 11.16 (story 127). Deploys PauserV2 against the same MockEYE as V1 and rotates every
@@ -3326,8 +3532,8 @@ contract DeployMocks is Script {
             // the pooler, SYA); phUSD and Kendu have none, so without this the UI renders two
             // permanently empty reward slots and the three-stream divergence buys nothing.
             // `collectNudge` requires a registered stream, hence its position after registerStream.
-            _seedNudgeStream(deployer, address(phUSD), LOCAL_PHUSD_NUDGE_SEED);
-            _seedNudgeStream(deployer, address(mockKendu), LOCAL_KENDU_NUDGE_SEED);
+            _seedNudgeStream(deployer, address(batchNFTMinter), address(phUSD), LOCAL_PHUSD_NUDGE_SEED);
+            _seedNudgeStream(deployer, address(batchNFTMinter), address(mockKendu), LOCAL_KENDU_NUDGE_SEED);
         } else {
             // DORMANT leg: phUSD and Kendu stay whitelisted but UNREGISTERED and UNFUNDED, exactly
             // as on day-one mainnet. `batchMint` still quotes them (zero pending), so this is the
@@ -3341,9 +3547,11 @@ contract DeployMocks is Script {
         console.log("BatchNFTMinter.setNudgeStreamer -> NudgeStreamer");
     }
 
-    /// @dev Acts as a DONOR of `token` to `batchNFTMinter`'s stream: mints `amount` to the
+    /// @dev Acts as a DONOR of `token` to `targetMinter`'s stream: mints `amount` to the
     ///      deployer, approves the streamer and calls `collectNudge`. This is the local stand-in
-    ///      for the organic donors USDC has and phUSD/Kendu do not.
+    ///      for the organic donors USDC has and phUSD/Kendu do not. Story 118 generalised the
+    ///      target from the hard-wired multi-token `batchNFTMinter` so Phase 11.18 can seed the
+    ///      nudge-discount minter's bonus streams through the same probe.
     ///
     ///      Doubles as the fee-on-transfer probe. `collectNudge` does
     ///      `safeTransferFrom(donor, streamer, amount)` and then credits `buffer += amount`
@@ -3352,7 +3560,7 @@ contract DeployMocks is Script {
     ///      balance-delta assertion below is load-bearing, not decorative. The delta is exact
     ///      rather than approximate because the stream was registered moments ago with an empty
     ///      buffer, so `collectNudge`'s pre-settle transfers nothing out.
-    function _seedNudgeStream(address deployer, address token, uint256 amount) internal {
+    function _seedNudgeStream(address deployer, address targetMinter, address token, uint256 amount) internal {
         if (token == address(phUSD)) {
             // Local dev only: the deployer needs mint rights to act as a donor of its own.
             phUSD.setMinter(deployer, true);
@@ -3362,18 +3570,18 @@ contract DeployMocks is Script {
         }
 
         uint256 streamerBefore = IERC20(token).balanceOf(address(nudgeStreamer));
-        (, uint256 bufferBefore,,) = nudgeStreamer.streams(address(batchNFTMinter), token);
+        (, uint256 bufferBefore,,) = nudgeStreamer.streams(targetMinter, token);
 
         IERC20(token).approve(address(nudgeStreamer), amount);
-        nudgeStreamer.collectNudge(address(batchNFTMinter), token, amount);
+        nudgeStreamer.collectNudge(targetMinter, token, amount);
 
         uint256 received = IERC20(token).balanceOf(address(nudgeStreamer)) - streamerBefore;
         require(received == amount, "nudge seed token is fee-on-transfer: streamer received < sent");
 
-        (, uint256 bufferAfter,,) = nudgeStreamer.streams(address(batchNFTMinter), token);
+        (, uint256 bufferAfter,,) = nudgeStreamer.streams(targetMinter, token);
         require(bufferAfter - bufferBefore == amount, "nudge seed did not credit the stream buffer");
 
-        console.log("Seeded nudge stream:", token, amount);
+        console.log("Seeded nudge stream:", targetMinter, token, amount);
     }
 
     // =====================================================================

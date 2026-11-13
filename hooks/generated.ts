@@ -1830,6 +1830,1110 @@ export const batchNftMinterMultiTokenAbi = [
 ] as const
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// BatchNFTMinterNudgeDiscount
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const batchNftMinterNudgeDiscountAbi = [
+  {
+    type: 'constructor',
+    inputs: [
+      { name: 'initialOwner', internalType: 'address', type: 'address' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'MAX_DISCOUNT_PERCENT',
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'MIN_DISCOUNT_PERCENT',
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'authVersion',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'availablePotUSDC',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'expectedTotal', internalType: 'uint256', type: 'uint256' },
+      { name: 'quotedBoost', internalType: 'uint8', type: 'uint8' },
+      { name: 'recipient', internalType: 'address', type: 'address' },
+      { name: 'maxPayment', internalType: 'uint256', type: 'uint256' },
+      { name: 'bonusTokens', internalType: 'address[]', type: 'address[]' },
+      { name: 'bonusMinRewards', internalType: 'uint256[]', type: 'uint256[]' },
+    ],
+    name: 'batchMint',
+    outputs: [
+      { name: 'totalPaid', internalType: 'uint256', type: 'uint256' },
+      { name: 'free', internalType: 'uint256', type: 'uint256' },
+      { name: 'paid', internalType: 'uint256', type: 'uint256' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'boostDonationSafe',
+    outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'burnPercent',
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'usdcIn', internalType: 'uint256', type: 'uint256' },
+      { name: 'minPhusdOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'deadline', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'buyAndBurn',
+    outputs: [
+      { name: 'phusdOut', internalType: 'uint256', type: 'uint256' },
+      { name: 'toStaker', internalType: 'uint256', type: 'uint256' },
+      { name: 'burned', internalType: 'uint256', type: 'uint256' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '', internalType: 'address', type: 'address' }],
+    name: 'buyerAuthVersion',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'discountPercent',
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'discountToken',
+    outputs: [{ name: '', internalType: 'contract IERC20', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'dispatcherIndex',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'getBonusTokens',
+    outputs: [{ name: 'bonus', internalType: 'address[]', type: 'address[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'getNudgeTokens',
+    outputs: [{ name: '', internalType: 'address[]', type: 'address[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'incrementAuthVersion',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'isNudgeToken',
+    outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'maxBoost',
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'maxFreePerBatch',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'mintDebtHook',
+    outputs: [
+      { name: '', internalType: 'contract IMintDebtRatio', type: 'address' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'nftStaker',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'nudgeStreamer',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'overflowNFTsPerBoostPoint',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'owner',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pair',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pause',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'paused',
+    outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pauser',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pendingBuyUSDC',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'pendingStakerPhUSD',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'phUSD',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'previewBatch',
+    outputs: [
+      { name: 'free', internalType: 'uint256', type: 'uint256' },
+      { name: 'total', internalType: 'uint256', type: 'uint256' },
+      { name: 'paid', internalType: 'uint256', type: 'uint256' },
+      { name: 'paidCost', internalType: 'uint256', type: 'uint256' },
+      { name: 'owed', internalType: 'uint256', type: 'uint256' },
+      { name: 'potUSD', internalType: 'uint256', type: 'uint256' },
+      { name: 'nextStepUSDC', internalType: 'uint256', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'previewBoost',
+    outputs: [
+      { name: 'overflowFree', internalType: 'uint256', type: 'uint256' },
+      { name: 'boost', internalType: 'uint8', type: 'uint8' },
+      { name: 'effectivePercent', internalType: 'uint8', type: 'uint8' },
+      { name: 'reservedUSDC', internalType: 'uint256', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'psm',
+    outputs: [{ name: '', internalType: 'contract ISkyPSM', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'renounceOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'token', internalType: 'contract IERC20', type: 'address' },
+      { name: 'to', internalType: 'address', type: 'address' },
+      { name: 'amount', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'rescueERC20',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'router',
+    outputs: [{ name: '', internalType: 'address', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'sUSDS',
+    outputs: [{ name: '', internalType: 'contract IERC4626', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'buyer', internalType: 'address', type: 'address' },
+      { name: 'authorized', internalType: 'bool', type: 'bool' },
+    ],
+    name: 'setAuthorizedBuyer',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'percent', internalType: 'uint8', type: 'uint8' }],
+    name: 'setBurnPercent',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'percent', internalType: 'uint8', type: 'uint8' }],
+    name: 'setDiscountPercent',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'setDiscountToken',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newIndex', internalType: 'uint256', type: 'uint256' }],
+    name: 'setDispatcherIndex',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'boost', internalType: 'uint8', type: 'uint8' }],
+    name: 'setMaxBoost',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'cap', internalType: 'uint256', type: 'uint256' }],
+    name: 'setMaxFreePerBatch',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      {
+        name: 'newHook',
+        internalType: 'contract IMintDebtRatio',
+        type: 'address',
+      },
+    ],
+    name: 'setMintDebtHook',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newStaker', internalType: 'address', type: 'address' }],
+    name: 'setNFTStaker',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newStreamer', internalType: 'address', type: 'address' }],
+    name: 'setNudgeStreamer',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'token', internalType: 'address', type: 'address' },
+      { name: 'allowed', internalType: 'bool', type: 'bool' },
+    ],
+    name: 'setNudgeTokenWhitelist',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'perPoint', internalType: 'uint256', type: 'uint256' }],
+    name: 'setOverflowNFTsPerBoostPoint',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'newPsm', internalType: 'contract ISkyPSM', type: 'address' },
+    ],
+    name: 'setPSM',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newPauser', internalType: 'address', type: 'address' }],
+    name: 'setPauser',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'newSUSDS', internalType: 'contract IERC4626', type: 'address' },
+    ],
+    name: 'setSUSDS',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'newRouter', internalType: 'address', type: 'address' },
+      { name: 'newPair', internalType: 'address', type: 'address' },
+      { name: 'newPhUSD', internalType: 'address', type: 'address' },
+    ],
+    name: 'setSwapRoute',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      {
+        name: 'newMinter',
+        internalType: 'contract ITokenMinterV2',
+        type: 'address',
+      },
+    ],
+    name: 'setTokenMinter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'tokenMinter',
+    outputs: [
+      { name: '', internalType: 'contract ITokenMinterV2', type: 'address' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
+    name: 'transferOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'unpause',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newVersion',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'AuthVersionIncremented',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'recipient',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'free',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'paid',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'paidCost',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'potReservedUSDC',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'owedAdded',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'BatchMinted',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'buyer',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'usdcIn',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'phusdOut',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'toStakerOwed',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'toStakerExtra',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'burned',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'owedRemaining',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'BoughtAndBurned',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'percent', internalType: 'uint8', type: 'uint8', indexed: false },
+    ],
+    name: 'BurnPercentSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'buyer',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'version',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'BuyerAuthorized',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'buyer',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'BuyerDeauthorized',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'percent', internalType: 'uint8', type: 'uint8', indexed: false },
+    ],
+    name: 'DiscountPercentSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'token',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'DiscountTokenSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'dispatcherIndex',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: true,
+      },
+    ],
+    name: 'DispatcherIndexSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'maxBoost',
+        internalType: 'uint8',
+        type: 'uint8',
+        indexed: false,
+      },
+    ],
+    name: 'MaxBoostSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'cap', internalType: 'uint256', type: 'uint256', indexed: false },
+    ],
+    name: 'MaxFreePerBatchSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'hook', internalType: 'address', type: 'address', indexed: true },
+    ],
+    name: 'MintDebtHookSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'nftStaker',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'NFTStakerSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'recipient',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'token',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'amount',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'NudgePaid',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'previousStreamer',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newStreamer',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'NudgeStreamerChanged',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'token',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      { name: 'allowed', internalType: 'bool', type: 'bool', indexed: false },
+    ],
+    name: 'NudgeTokenWhitelistChanged',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'overflowNFTsPerBoostPoint',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'OverflowNFTsPerBoostPointSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'previousOwner',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newOwner',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'OwnershipTransferred',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'psm', internalType: 'address', type: 'address', indexed: true },
+    ],
+    name: 'PSMSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'account',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'Paused',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'previousPauser',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      {
+        name: 'newPauser',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'PauserChanged',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'token',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      { name: 'to', internalType: 'address', type: 'address', indexed: true },
+      {
+        name: 'amount',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'Rescued',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'sUSDS',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'SUSDSSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'router',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+      { name: 'pair', internalType: 'address', type: 'address', indexed: true },
+      {
+        name: 'phUSD',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'SwapRouteSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'overflowFree',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      { name: 'boost', internalType: 'uint8', type: 'uint8', indexed: false },
+      {
+        name: 'effectivePercent',
+        internalType: 'uint8',
+        type: 'uint8',
+        indexed: false,
+      },
+    ],
+    name: 'TempDiscountApplied',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newMinter',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'TokenMinterSet',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'account',
+        internalType: 'address',
+        type: 'address',
+        indexed: false,
+      },
+    ],
+    name: 'Unpaused',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'tokensLength', internalType: 'uint256', type: 'uint256' },
+      { name: 'minsLength', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__ArrayLengthMismatch',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'index', internalType: 'uint256', type: 'uint256' },
+      { name: 'expected', internalType: 'address', type: 'address' },
+      { name: 'actual', internalType: 'address', type: 'address' },
+    ],
+    name: 'BatchMint__BonusTokenMismatch',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'quoted', internalType: 'uint8', type: 'uint8' },
+      { name: 'live', internalType: 'uint8', type: 'uint8' },
+    ],
+    name: 'BatchMint__BoostNotAvailable',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'boost', internalType: 'uint8', type: 'uint8' }],
+    name: 'BatchMint__BoostTooHigh',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'usdcIn', internalType: 'uint256', type: 'uint256' },
+      { name: 'reserve', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__BuyExceedsReserve',
+  },
+  { type: 'error', inputs: [], name: 'BatchMint__BuyNotConfigured' },
+  { type: 'error', inputs: [], name: 'BatchMint__DiscountNotConfigured' },
+  {
+    type: 'error',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'BatchMint__DiscountTokenIsActive',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'discount', internalType: 'address', type: 'address' },
+      { name: 'gem', internalType: 'address', type: 'address' },
+    ],
+    name: 'BatchMint__DiscountTokenNotGem',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'BatchMint__DiscountTokenNotWhitelisted',
+  },
+  { type: 'error', inputs: [], name: 'BatchMint__DispatcherNotConfigured' },
+  {
+    type: 'error',
+    inputs: [{ name: 'deadline', internalType: 'uint256', type: 'uint256' }],
+    name: 'BatchMint__Expired',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'paidCost', internalType: 'uint256', type: 'uint256' },
+      { name: 'maxPayment', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__MaxPaymentExceeded',
+  },
+  { type: 'error', inputs: [], name: 'BatchMint__MinterNotConfigured' },
+  { type: 'error', inputs: [], name: 'BatchMint__NoDiscountAvailable' },
+  {
+    type: 'error',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'BatchMint__NudgeTokenAlreadyWhitelisted',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'BatchMint__NudgeTokenNotWhitelisted',
+  },
+  { type: 'error', inputs: [], name: 'BatchMint__PairMismatch' },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'mintIndex', internalType: 'uint256', type: 'uint256' },
+      { name: 'price', internalType: 'uint256', type: 'uint256' },
+      { name: 'remaining', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__PaymentBudgetExhausted',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'percent', internalType: 'uint8', type: 'uint8' }],
+    name: 'BatchMint__PercentTooHigh',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'percent', internalType: 'uint8', type: 'uint8' }],
+    name: 'BatchMint__PercentTooLow',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'pendingBuyUSDC', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__ReservePending',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'token', internalType: 'address', type: 'address' },
+      { name: 'minReward', internalType: 'uint256', type: 'uint256' },
+      { name: 'actualReward', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__RewardBelowMinimum',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'asset', internalType: 'address', type: 'address' },
+      { name: 'usds', internalType: 'address', type: 'address' },
+    ],
+    name: 'BatchMint__SUSDSAssetMismatch',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'total', internalType: 'uint256', type: 'uint256' },
+      { name: 'expectedTotal', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'BatchMint__TotalMismatch',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'caller', internalType: 'address', type: 'address' }],
+    name: 'BatchMint__UnauthorizedBuyer',
+  },
+  { type: 'error', inputs: [], name: 'BatchMint__ZeroBoostDivisor' },
+  { type: 'error', inputs: [], name: 'BatchMint__ZeroBuyer' },
+  { type: 'error', inputs: [], name: 'BatchMint__ZeroCap' },
+  { type: 'error', inputs: [], name: 'BatchMint__ZeroCount' },
+  { type: 'error', inputs: [], name: 'BatchMint__ZeroMinOut' },
+  { type: 'error', inputs: [], name: 'BatchMint__ZeroNudgeToken' },
+  { type: 'error', inputs: [], name: 'BatchMint__ZeroRecipient' },
+  { type: 'error', inputs: [], name: 'EnforcedPause' },
+  { type: 'error', inputs: [], name: 'ExpectedPause' },
+  {
+    type: 'error',
+    inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
+    name: 'OwnableInvalidOwner',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 'account', internalType: 'address', type: 'address' }],
+    name: 'OwnableUnauthorizedAccount',
+  },
+  { type: 'error', inputs: [], name: 'ReentrancyGuardReentrantCall' },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'requested', internalType: 'uint256', type: 'uint256' },
+      { name: 'unreserved', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'Rescue__ReservedFunds',
+  },
+  { type: 'error', inputs: [], name: 'Rescue__ZeroRecipient' },
+  {
+    type: 'error',
+    inputs: [{ name: 'token', internalType: 'address', type: 'address' }],
+    name: 'SafeERC20FailedOperation',
+  },
+] as const
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // BurnRecorder
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

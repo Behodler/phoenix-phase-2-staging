@@ -5,6 +5,59 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-11-12
+
+Story-118 (nudge-discount). Adds the ABI of `BatchNFTMinterNudgeDiscount` (nft-staking:033, with the
+audit-27 fixes nft-staking:034 M-01/L-04 and nft-staking:035 L-01), which phase-2-staging now pins
+(`lib/nft-staking` `9611312` -> `d7eb782`). It replaces the multi-token minter as the index-4 nudge
+donor sink: the USDC nudge pot no longer pays out to a batcher but SETS a pot-sized discount batch,
+and the pot itself is reserved for a later authorised `buyAndBurn`. Strictly additive: no existing
+export changes or disappears. Not published.
+
+`0.23.0` was reserved for this story but phStaging2:130 landed first and released `0.24.0`, so this
+release takes the next free minor above it.
+
+### Added
+- `batchNftMinterNudgeDiscountAbi`
+  - `batchMint(expectedTotal, quotedBoost, recipient, maxPayment, bonusTokens, bonusMinRewards)`
+    returns `(totalPaid, free, paid)`. Pass `expectedTotal = previewBatch().total`,
+    `quotedBoost = previewBoost().boost`, a `maxPayment` of at least `previewBatch().paidCost` (in the
+    index-4 prime token, USDS), and `bonusTokens = getBonusTokens()` with `bonusMinRewards` parallel to
+    it from the SAME read. `free` NFTs come from `NFTMinterV2.mintFor` (no payment, no price growth);
+    `paid` NFTs go through the normal `mint`. The recipient never receives the USDC pot; every bonus
+    token balance (phUSD, Kendu) is paid in full on every batch.
+  - `previewBatch()` (view) returns `(free, total, paid, paidCost, owed, potUSD, nextStepUSDC)`;
+    `previewBoost()` (view) returns `(overflowFree, boost, effectivePercent, reservedUSDC)`. Batch
+    fields read zero when the pot is below one NFT (`nextStepUSDC` is the USDC still needed).
+  - `buyAndBurn(usdcIn, minPhusdOut, deadline)`: authorised buyers only (`setAuthorizedBuyer`,
+    `incrementAuthVersion` kill switch). USDC -> PSM -> USDS -> sUSDS -> UniV2 -> phUSD; the owed share
+    goes to NFTStaker, the extra is split by `burnPercent` between a burn and NFTStaker.
+  - Views `getBonusTokens()`, `getNudgeTokens()`, `isNudgeToken()`, `availablePotUSDC()`,
+    `pendingBuyUSDC()`, `pendingStakerPhUSD()`, `boostDonationSafe()`, and getters for every setting
+    (`discountToken`, `discountPercent`, `burnPercent`, `maxFreePerBatch`, `overflowNFTsPerBoostPoint`,
+    `maxBoost`, `nftStaker`, `mintDebtHook`, `psm`, `sUSDS`, `router`, `pair`, `phUSD`, `authVersion`,
+    `buyerAuthVersion`, `MIN_DISCOUNT_PERCENT` = 50, `MAX_DISCOUNT_PERCENT` = 99).
+  - Owner setters (each emits an event): `setDiscountToken`, `setDiscountPercent` ({0} or 50..99),
+    `setMaxFreePerBatch`, `setOverflowNFTsPerBoostPoint`, `setMaxBoost`, `setBurnPercent`,
+    `setNFTStaker`, `setMintDebtHook`, `setPSM`, `setSUSDS`, `setSwapRoute`, `setAuthorizedBuyer`,
+    `incrementAuthVersion`, plus the inherited `setTokenMinter`, `setDispatcherIndex`,
+    `setNudgeTokenWhitelist`, `setNudgeStreamer`, `setPauser`, `rescueERC20`.
+  - Events `BatchMinted`, `BoughtAndBurned`, `TempDiscountApplied`, `NudgePaid`, and the setter events.
+  - Errors include `BatchMint__TotalMismatch`, `BatchMint__MaxPaymentExceeded`,
+    `BatchMint__NoDiscountAvailable`, `BatchMint__BoostNotAvailable`, `BatchMint__BonusTokenMismatch`
+    (a stale `bonusTokens` read), `BatchMint__ArrayLengthMismatch`, `BatchMint__RewardBelowMinimum`,
+    `BatchMint__UnauthorizedBuyer` and `BatchMint__BuyExceedsReserve`.
+
+### Unchanged
+- `batchNftMinterMultiTokenAbi` is kept. The multi-token minter stays deployed under the
+  `BatchNFTMinter` key and the UI keeps using it until phlimbo-ui:091, but on anvil it no longer
+  receives donations.
+
+### Address keys (phStaging2 `ContractAddresses`, not part of this package)
+New key `NudgeDiscountBatchMinter`: deployed on anvil (DeployMocks Phase 11.18, which also repoints
+every local USDC donor to it); a zero placeholder on Sepolia and mainnet until the phStaging2:119
+cutover. Gate the UI on a non-zero address. The `BatchNFTMinter` key is unchanged.
+
 ## [0.24.0] - 2026-11-07
 
 Story-130 (nft-bonfire). Regenerates `stableYieldAccumulatorAbi` from yield-accumulator:029
