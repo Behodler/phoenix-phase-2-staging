@@ -27,8 +27,10 @@ interface INewSYAView {
  *         first violated invariant. Chained in `sya-gate-off:broadcast` after the confirm step and the patcher, then
  *         followed by `pauser-v2-verify`. Valid as a health check only until the first post-cutover retune of the
  *         new SYA (a phStaging2:119 nudge repoint, a discount change); after that it fails permanently by design and
- *         119's `nudge-discount:verify` is the health check. Re-running the broadcast cannot make it pass: on the adopted
- *         SYA it refuses to roll a retune back (re-run guard, story 133, audit pps55m1; runbook).
+ *         119's `nudge-discount:verify` is the health check. Re-running the broadcast cannot make it pass: after
+ *         completion, any re-run that would send a transaction refuses, naming the step; with nothing to change it
+ *         sends nothing; a pending (interrupted) run resumes, guarded by the value check against later changes
+ *         (completion gate story 134, audits pps56m1/pps56l4; runbook).
  *
  *         The new SYA and the new harvester come from the COMPLETED progress.sya-gate-off.1.json. The NEW SYA is
  *         read through the bumped 029 `IStableYieldAccumulator` (4-field TokenConfig); the OLD SYA through the

@@ -82,8 +82,10 @@ interface IPauserV2SyaGateOff {
  *           - every other wiring value (rewardToken, phlimbo, nudge, nudgeSplit, nudgeStreamer, the strategy list) is
  *             MIRRORED LIVE from the old SYA at run time; each mirrored value is `require`d non-zero / in range.
  *             Mirroring does NOT honour a phStaging2:119 nudge repoint: 119 repoints only the NEW (live) SYA and
- *             leaves the old SYA on the paused old minter (119 Decision 5). On an adopted SYA the step-3 re-run guard
- *             (story 133, audit pps55m1) refuses to write a mirrored value over a later, different one;
+ *             leaves the old SYA on the paused old minter (119 Decision 5). After completion, any re-run that would
+ *             send a transaction refuses, naming the step; with nothing to change it sends nothing; a pending
+ *             (interrupted) run resumes, guarded by the value check against later changes (completion gate story 134,
+ *             audits pps56m1/pps56l4; value check story 133, audit pps55m1);
  *           - owner OWNER (the SYA constructor sets `Ownable(msg.sender)`, and the Ledger sender is OWNER).
  *         NO FUNDS TO THE LEDGER (human requirement 2026-11-06): OWNER only pays gas, enforced by
  *         `_snapshotOwnerBalances` / `_assertOwnerBalancesNotIncreased`.
@@ -256,7 +258,8 @@ abstract contract SyaGateOffMainnetBase is SyaHarvesterMainnetBase {
         return _progressAddress("StableYieldAccumulator");
     }
 
-    /// @notice True when scripts/confirm-sya-gate-off-progress.js has marked the progress `completed`.
+    /// @notice True when scripts/confirm-sya-gate-off-progress.js has marked the progress `completed`. Read by the
+    ///         verifiers and by the replace script's completion gate (`_requireNotCompleted`, story 134).
     function _progressCompleted() internal view returns (bool) {
         string memory json = _progressJson();
         if (bytes(json).length == 0 || !vm.keyExistsJson(json, ".deploymentStatus")) return false;

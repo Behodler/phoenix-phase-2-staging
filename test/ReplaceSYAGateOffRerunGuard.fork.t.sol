@@ -46,7 +46,7 @@ contract ReplaceSYAGateOffRerunGuardForkTest is Test {
     string constant TMP_PREFIX = "server/deployments/progress.sya-gate-off.1.forktest-s133-";
     string constant TMP_NUDGE_PREFIX = "server/deployments/progress.nudge-discount.1.forktest-s133-";
     string constant POINTER =
-        "sya-gate-off is complete; a re-run must not roll back a later change (pps55m1). See runbook docs/runbooks/sya-gate-off-mainnet.md";
+        "value check: a re-run must not roll back a later change (pps55m1). See runbook docs/runbooks/sya-gate-off-mainnet.md";
 
     StableYieldAccumulator sya = StableYieldAccumulator(LIVE_SYA);
     string internal tmpProgress;
