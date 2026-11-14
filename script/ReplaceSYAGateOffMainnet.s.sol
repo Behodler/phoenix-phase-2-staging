@@ -41,12 +41,18 @@ interface ICurvePoolCoins {
  *              `decimals()`; token set check (exactly 3 strategies -> USDC, DOLA, USDe, one each) - all BEFORE any
  *              deploy or config call. The old SYA's `tokenConfigs` / `getTokenConfig` are never read.
  *           2. DEPLOY the new SYA, or adopt it from server/deployments/progress.sya-gate-off.1.json.
- *           RE-RUN GUARD (story 133, audit pps55m1). On an ADOPTED SYA, step 3 first checks every value it would
- *              write; one that is already set and differs from its target (a later deliberate change - story 119's
- *              nudge repoint, a discount retune) makes the run REVERT by name before step 3 sends anything, in
- *              PREVIEW and broadcast alike. Default (unset) values are still filled in, so a resume works; a freshly
- *              deployed SYA is never refused. Mirroring the old SYA does NOT carry a 119 repoint: 119 repoints only
- *              the live SYA and leaves the old one on the paused old minter.
+ *           COMPLETION GATE (story 134, audit pps56m1 / pps56l4). After completion, any re-run that would send a
+ *              transaction refuses, naming the step; with nothing to change it sends nothing; a pending (interrupted)
+ *              run resumes, guarded by the value check against later changes. Every write goes through the non-virtual
+ *              `_send(step)`, which refuses when progress.sya-gate-off.1.json is `completed` and the SYA was adopted,
+ *              before anything is sent, in PREVIEW and broadcast alike.
+ *           VALUE CHECK (story 133, audit pps55m1), the pending-resume guard. On an ADOPTED SYA, step 3 first checks
+ *              every value it would write; one that is already set and differs from its target (a later deliberate
+ *              change landing before an interrupted run is resumed - story 119's nudge repoint, a discount retune)
+ *              makes the run REVERT by name before step 3 sends anything. Default (unset) values are still filled in,
+ *              so a resume works; a freshly deployed SYA is never refused. It cannot see a value reset to its default,
+ *              nor steps 4-6; after completion the gate above covers those. Mirroring the old SYA does NOT carry a
+ *              119 repoint: 119 repoints only the live SYA and leaves the old one on the paused old minter.
  *           3. CONFIGURE in the 029 order: setTokenConfig x3 (read back configured / decimals / rate) ->
  *              setRewardToken(USDC) (before the nudge setters, story-027 guard) -> setPhlimbo + approvePhlimbo(max)
  *              -> setNudgeAddress / setNudgeSplit / setNudgeStreamer -> addYieldStrategy x3 -> setDiscountRate(100)
@@ -399,7 +405,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
             return;
         }
         syaCreateNonce = vm.getNonce(OWNER);
-        _begin();
+        _send("2 new StableYieldAccumulator");
         newSya = new StableYieldAccumulator();
         _end();
         deployedSyaThisRun = true;
@@ -427,7 +433,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         for (uint256 i = 0; i < 3; i++) {
             uint8 dec = _expectedDecimals(t[i]);
             if (!_tokenConfigured(t[i])) {
-                _begin();
+                _send(string.concat("3.1 setTokenConfig(", _tokenName(t[i]), ")"));
                 s.setTokenConfig(t[i], dec, RATE_1_TO_1);
                 _end();
                 console.log(string.concat("3.1 setTokenConfig(", _tokenName(t[i]), ", decimals, 1e18)"), dec);
@@ -440,7 +446,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         // 3.2 setRewardToken(USDC), still BEFORE the nudge setters (story-027 guard; while the nudge rail is unset
         //     the stream check does not fire).
         if (s.rewardToken() != USDC) {
-            _begin();
+            _send("3.2 setRewardToken");
             s.setRewardToken(USDC);
             _end();
             console.log("3.2 setRewardToken(USDC)");
@@ -451,7 +457,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
         // 3.3 setPhlimbo + approvePhlimbo(max). PhlimboV3.collectReward pulls from the SYA.
         if (s.phlimbo() != wiring.phlimbo) {
-            _begin();
+            _send("3.3 setPhlimbo");
             s.setPhlimbo(wiring.phlimbo);
             _end();
             console.log("3.3 setPhlimbo", wiring.phlimbo);
@@ -460,7 +466,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         }
         require(s.phlimbo() == wiring.phlimbo, "3.3: phlimbo != mirrored phlimbo");
         if (IERC20(USDC).allowance(address(s), wiring.phlimbo) < type(uint128).max) {
-            _begin();
+            _send("3.3 approvePhlimbo");
             s.approvePhlimbo(type(uint256).max);
             _end();
             console.log("3.3 approvePhlimbo(max)");
@@ -473,21 +479,21 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
         // 3.4 nudge rail, mirrored.
         if (s.nudge() != wiring.nudge) {
-            _begin();
+            _send("3.4 setNudgeAddress");
             s.setNudgeAddress(wiring.nudge);
             _end();
             console.log("3.4 setNudgeAddress", wiring.nudge);
         }
         require(s.nudge() == wiring.nudge, "3.4: nudge != mirrored nudge");
         if (s.nudgeSplit() != wiring.nudgeSplit) {
-            _begin();
+            _send("3.4 setNudgeSplit");
             s.setNudgeSplit(wiring.nudgeSplit);
             _end();
             console.log("3.4 setNudgeSplit", wiring.nudgeSplit);
         }
         require(s.nudgeSplit() == wiring.nudgeSplit, "3.4: nudgeSplit != mirrored nudgeSplit");
         if (s.nudgeStreamer() != wiring.nudgeStreamer) {
-            _begin();
+            _send("3.4 setNudgeStreamer");
             s.setNudgeStreamer(wiring.nudgeStreamer);
             _end();
             console.log("3.4 setNudgeStreamer", wiring.nudgeStreamer);
@@ -497,7 +503,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         // 3.5 addYieldStrategy x3 from the live-mirrored list that passed the token set check.
         for (uint256 i = 0; i < strategies.length; i++) {
             if (!s.isRegisteredStrategy(strategies[i])) {
-                _begin();
+                _send(string.concat("3.5 addYieldStrategy(", _tokenName(strategyTokenList[i]), ")"));
                 s.addYieldStrategy(strategies[i], strategyTokenList[i]);
                 _end();
                 console.log(
@@ -511,7 +517,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
         // 3.6 discount 100 bps - human decision 2026-11-06.
         if (s.getDiscountRate() != NEW_DISCOUNT_BPS) {
-            _begin();
+            _send("3.6 setDiscountRate");
             s.setDiscountRate(NEW_DISCOUNT_BPS);
             _end();
             console.log("3.6 setDiscountRate(100) - 1%, human decision 2026-11-06");
@@ -523,14 +529,14 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
         // 3.7 Pauser BEFORE register (PauserV2.register requires pauser() == PauserV2).
         if (s.pauser() != PAUSER_V2) {
-            _begin();
+            _send("3.7 setPauser");
             s.setPauser(PAUSER_V2);
             _end();
             console.log("3.7 setPauser(PauserV2)");
         }
         require(s.pauser() == PAUSER_V2, "3.7: pauser != PauserV2");
         if (!IPauserV2SyaGateOff(PAUSER_V2).isRegistered(address(s))) {
-            _begin();
+            _send("3.7 PauserV2.register");
             IPauserV2SyaGateOff(PAUSER_V2).register(address(s));
             _end();
             console.log("3.7 PauserV2.register(newSYA)");
@@ -539,22 +545,27 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
     }
 
     // ============================================================
-    // 3.0 Re-run guard (story 133, audit pps55m1)
+    // 3.0 Value check (story 133, audit pps55m1) - the PENDING-RESUME guard
     // ============================================================
 
     string internal constant REFUSE_POINTER =
-        "sya-gate-off is complete; a re-run must not roll back a later change (pps55m1). See runbook docs/runbooks/sya-gate-off-mainnet.md";
+        "value check: a re-run must not roll back a later change (pps55m1). See runbook docs/runbooks/sya-gate-off-mainnet.md";
 
     /// @notice Every value step 3 would write is checked here, in one pass, BEFORE the first step-3 transaction.
-    /// @dev Steps 3.1-3.4, 3.6 and 3.7 write either a value mirrored LIVE from the retired SYA or a hard-coded
-    ///      constant. On an ADOPTED SYA (a resume or a post-completion re-run) a value that is still at its default
-    ///      is one this script has not written yet, and is filled in as before (resume keeps working). A value that is
-    ///      SET and differs from the target was written by someone else after this script - story 119's nudge
-    ///      repoint, or a manual retune - and writing the target over it would be a silent rollback. So the run
-    ///      refuses, naming the step, the live value and the target. A freshly deployed SYA is never refused (every
-    ///      value starts at its default). PREVIEW and broadcast take this path identically; nothing is sent first.
-    ///      Not covered (undetectable): a value deliberately reset to its default, step 4's withdrawer grants, step 6's
-    ///      harvester routes, and 3.3 approvePhlimbo (an allowance top-up, never a rollback of a setting).
+    /// @dev Scope (story 134): this is the guard for an INTERRUPTED (`pending`) run that is resumed after a later
+    ///      change landed - there it is the only protection. It still runs on every adopted re-run, before step 3's
+    ///      first write; on a `completed` run it is redundant with the completion gate in `_send` (either refuses,
+    ///      naming the step, before anything is sent), and the gate also covers what this check cannot see. Steps 3.1-3.4, 3.6 and 3.7 write either a value mirrored LIVE from
+    ///      the retired SYA or a hard-coded constant. On an ADOPTED SYA a value that is still at its default is one
+    ///      this script has not written yet, and is filled in as before (resume keeps working). A value that is SET and
+    ///      differs from the target was written by someone else after this script - story 119's nudge repoint, or a
+    ///      manual retune - and writing the target over it would be a silent rollback. So the run refuses, naming the
+    ///      step, the live value and the target. A freshly deployed SYA is never refused (every value starts at its
+    ///      default). PREVIEW and broadcast take this path identically; nothing is sent first.
+    ///      Not covered by THIS check (undetectable by value): a value deliberately reset to its default, 3.3
+    ///      approvePhlimbo (an allowance top-up, which can undo an `approvePhlimbo(0)`), step 4's withdrawer grants
+    ///      and step 6's harvester routes and ETH pool. On a pending resume those are written as before; after
+    ///      completion the gate refuses them.
     function _refuseRollbacksOnAdoptedSya() internal view {
         if (deployedSyaThisRun) return;
         StableYieldAccumulator s = newSya;
@@ -626,7 +637,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         for (uint256 i = 0; i < strategies.length; i++) {
             ISyaStrategyAdmin st = ISyaStrategyAdmin(strategies[i]);
             if (!st.authorizedWithdrawers(address(newSya))) {
-                _begin();
+                _send("4 setWithdrawer(newSYA, true)");
                 st.setWithdrawer(address(newSya), true);
                 _end();
                 console.log("4. setWithdrawer(newSYA, true) on", strategies[i]);
@@ -645,14 +656,14 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
         // 5.1 Unregister FIRST so PauserV2.health() stays clean, then move pauser() off PauserV2 (CLAUDE.md).
         if (p.isRegistered(OLD_SYA)) {
-            _begin();
+            _send("5.1 PauserV2.unregister(oldSYA)");
             p.unregister(OLD_SYA);
             _end();
             console.log("5.1 PauserV2.unregister(oldSYA)");
         }
         require(!p.isRegistered(OLD_SYA), "5.1: old SYA still registered with PauserV2");
         if (old.pauser() == PAUSER_V2) {
-            _begin();
+            _send("5.1 oldSYA.setPauser(OWNER)");
             old.setPauser(OWNER);
             _end();
             console.log("5.1 oldSYA.setPauser(OWNER) - pauser() off PauserV2 (CLAUDE.md retirement rule)");
@@ -663,7 +674,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         for (uint256 i = 0; i < strategies.length; i++) {
             ISyaStrategyAdmin st = ISyaStrategyAdmin(strategies[i]);
             if (st.authorizedWithdrawers(OLD_SYA)) {
-                _begin();
+                _send("5.2 setWithdrawer(oldSYA, false)");
                 st.setWithdrawer(OLD_SYA, false);
                 _end();
                 console.log("5.2 setWithdrawer(oldSYA, false) on", strategies[i]);
@@ -675,7 +686,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         address[] memory snap = old.getYieldStrategies();
         for (uint256 i = 0; i < snap.length; i++) {
             if (old.isRegisteredStrategy(snap[i])) {
-                _begin();
+                _send("5.3 oldSYA.removeYieldStrategy");
                 old.removeYieldStrategy(snap[i]);
                 _end();
                 console.log("5.3 oldSYA.removeYieldStrategy", snap[i]);
@@ -685,7 +696,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
         // 5.4 Burner right on NFTMinterV2.
         if (INFTMinterV2SyaGateOff(NFT_MINTER).authorizedBurners(OLD_SYA)) {
-            _begin();
+            _send("5.4 NFTMinterV2.setAuthorizedBurner(oldSYA, false)");
             INFTMinterV2SyaGateOff(NFT_MINTER).setAuthorizedBurner(OLD_SYA, false);
             _end();
             console.log("5.4 NFTMinterV2.setAuthorizedBurner(oldSYA, false)");
@@ -694,7 +705,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
         // 5.5 Phlimbo allowance to zero.
         if (IERC20(USDC).allowance(OLD_SYA, wiring.phlimbo) != 0) {
-            _begin();
+            _send("5.5 oldSYA.approvePhlimbo(0)");
             old.approvePhlimbo(0);
             _end();
             console.log("5.5 oldSYA.approvePhlimbo(0)");
@@ -720,7 +731,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
             return;
         }
         harvesterCreateNonce = vm.getNonce(OWNER);
-        _begin();
+        _send("6 new SYAHarvester");
         harvester = new SYAHarvester(
             OWNER, IPoolManager(POOL_MANAGER), IStableYieldAccumulator(address(newSya)), ICurveRouterNG(CURVE_ROUTER_NG)
         );
@@ -736,7 +747,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
         _setRouteIfNeeded(usdeRoute(c), "USDe");
         _setRouteIfNeeded(dolaRoute(c), "DOLA");
         if (!_ethPoolStored(harvester, c)) {
-            _begin();
+            _send("6 setEthPool");
             harvester.setEthPool(ethPoolKey(c));
             _end();
             console.log("6. setEthPool(ETH/USDC, fee 3000, tickSpacing 60, no hooks)");
@@ -746,7 +757,7 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
 
     function _setRouteIfNeeded(Route memory r, string memory name) internal {
         if (_routeStored(harvester, r)) return;
-        _begin();
+        _send(string.concat("6 setRoute(", name, ")"));
         harvester.setRoute(r.token, r.path, r.swapParams, r.pools);
         _end();
         console.log(string.concat("6. setRoute(", name, ")"));
@@ -986,6 +997,33 @@ contract ReplaceSYAGateOffMainnet is SyaGateOffMainnetBase {
     // ============================================================
     // Broadcast plumbing
     // ============================================================
+
+    /// @dev Completion gate pointer (story 134, audit pps56m1 / pps56l4).
+    string internal constant COMPLETED_POINTER =
+        ": sya-gate-off has completed (progress deploymentStatus == completed), so a re-run must send nothing (pps56m1). To finish a run that was wrongly marked completed, see runbook docs/runbooks/sya-gate-off-mainnet.md";
+
+    /// @notice COMPLETION GATE (story 134, audit pps56m1 / pps56l4). Every broadcastable write in this script goes
+    ///         through `_send`, which calls this first. Once the progress file is `completed` (set only by
+    ///         scripts/confirm-sya-gate-off-progress.js after a forge run exited 0) and the SYA was adopted, ANY write
+    ///         refuses, naming the step, before it is sent - in PREVIEW and broadcast alike. Forge broadcasts nothing
+    ///         when `run()` reverts, so no earlier step leaks either. A completed re-run with nothing to change never
+    ///         reaches a write and stays a quiet 0-tx no-op. A `pending` (interrupted) run is not gated; it resumes,
+    ///         guarded by the story-133 value check (`_refuseRollbacksOnAdoptedSya`).
+    /// @dev NOT virtual, and deliberately not inside `_begin()`: fork-test harnesses override `_begin` without calling
+    ///      super, which would silently bypass a gate placed there. A recorded SYA forces adoption, so `completed`
+    ///      implies `!deployedSyaThisRun`; the flag is checked anyway so a fresh deploy can never be gated.
+    function _requireNotCompleted(string memory step) internal view {
+        if (!deployedSyaThisRun && _progressCompleted()) {
+            revert(string.concat("re-run guard: refusing step ", step, COMPLETED_POINTER));
+        }
+    }
+
+    /// @dev The single entry point for every write: completion gate first, then `_begin()` (gas headroom, prank or
+    ///      broadcast). NOT virtual, so no harness can bypass the gate.
+    function _send(string memory step) internal {
+        _requireNotCompleted(step);
+        _begin();
+    }
 
     function _begin() internal virtual {
         if (!isPreview && txCount == 0) _requireBroadcastGasPriceHeadroom();
