@@ -1629,6 +1629,15 @@ contract DeployMocks is Script {
         // USDC donor (UniPoolerV2, Uniboost x3, NudgeRatchet, SYA) from the multi-token minter to it.
         _deployNudgeDiscountMinter(deployer);
 
+        // ====== PHASE 11.19: Ratchet minting shut down (story 135) ======
+        // APPENDED after 11.18 and before the terminal sweep: transactions only, no deployments, so no
+        // existing CONTRACT address moves (the deployer nonce shifts, so anvil artifacts are regenerated).
+        // Mints RATCHET_PRE_SHUTDOWN_MINTS id-7 NFTs to the deployer (exact per-mint USDC approvals),
+        // so the human can still test RatchetNFTStaker locally, then mirrors the mainnet cutover:
+        // NFTMinterV2.setDispatcherDisabled(7, true). After 11.18, so the mints' USDC streams into the
+        // nudge-discount minter (NudgeRatchet's batchMinter was repointed there).
+        _shutdownRatchetMinting(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -2015,6 +2024,14 @@ contract DeployMocks is Script {
             "RESIDUAL PRIVILEGE SWEEP FAILED: deployer must not hold NFTMinterV2 mintFor authority"
         );
         console.log("  NFTMinterV2 mintFor ACL asserted: NudgeDiscountBatchMinter IN, multi-token minter + deployer OUT");
+
+        // Story 135: ratchet minting must stay disabled at the end of the run (Phase 11.19). The
+        // NudgeRatchetMintDebtHook phUSD grant above stays IN: outstanding debt must remain pullable.
+        (,,, bool ratchetDisabled) = nftMinterV2.configs(RATCHET_INDEX);
+        require(
+            ratchetDisabled, "RESIDUAL PRIVILEGE SWEEP FAILED: ratchet minting (NFTMinterV2 index 7) must be disabled"
+        );
+        console.log("  NFTMinterV2 configs(7).disabled asserted: ratchet minting OFF");
     }
 
     /// @dev Asserts one row of the end-state phUSD ACL, using the TWO-FIELD idiom. Checking
@@ -2403,6 +2420,11 @@ contract DeployMocks is Script {
 
     /// @dev UniPoolerV2 lives at NFTMinterV2 index 4, the slot the Balancer pooler held on mainnet.
     uint256 internal constant UNI_POOLER_INDEX = 4;
+    /// @dev NudgeRatchet's NFTMinterV2 index (asserted at registration, Phase 3.x). Story 135 disables it.
+    uint256 internal constant RATCHET_INDEX = 7;
+    /// @dev Story 135: id-7 NFTs minted to the deployer before the shutdown (about 50 USDC at 10 USDC +0.1%/mint),
+    ///      enough to test RatchetNFTStaker locally and small enough to leave the nudge-discount acceptance pots alone.
+    uint256 internal constant RATCHET_PRE_SHUTDOWN_MINTS = 5;
     /// @dev The INITIAL pair seed (Phase 11.7). Story 112: set at the mainnet post-cutover pair's
     ///      ratio (~18.1k sUSDS / ~23.1k phUSD, i.e. 1.2762 phUSD per sUSDS) rather than story 106's
     ///      5,000 / 6,000, so that the Phase 11.9 deepening (which adds at the prevailing ratio)
@@ -2746,6 +2768,34 @@ contract DeployMocks is Script {
 
     /// @dev Buys one claim NFT at index 4 (UniPoolerV2, priced in USDS) through the normal paid
     ///      mint path and approves the harvester to pull it.
+    /// @notice Phase 11.19 (story 135): mint `RATCHET_PRE_SHUTDOWN_MINTS` id-7 NFTs to the deployer, each with an
+    ///         exact USDC approval reset to 0, then disable new minting at index 7 and read it back. Mirrors the
+    ///         mainnet cutover's `nm_disableRatchet` step (DeployMainnetNudgeDiscount Phase 3b). Existing id-7 NFTs
+    ///         keep staking on RatchetNFTStaker; the NudgeRatchet hook keeps its phUSD minter role so its debt
+    ///         (accrued by these mints) can still be pulled.
+    function _shutdownRatchetMinting(address deployer) internal {
+        console.log("\n=== Phase 11.19: ratchet minting shut down (story 135) ===");
+        (address d7,,,) = nftMinterV2.configs(RATCHET_INDEX);
+        require(d7 == address(nudgeRatchet), "story-135: NFTMinterV2 index 7 is not the NudgeRatchet");
+        uint256 before = nftMinterV2.balanceOf(deployer, RATCHET_INDEX);
+        for (uint256 i = 0; i < RATCHET_PRE_SHUTDOWN_MINTS; ++i) {
+            (, uint256 price,,) = nftMinterV2.configs(RATCHET_INDEX);
+            rewardToken.approve(address(nftMinterV2), price);
+            nftMinterV2.mint(RATCHET_INDEX, deployer);
+            rewardToken.approve(address(nftMinterV2), 0);
+        }
+        require(
+            nftMinterV2.balanceOf(deployer, RATCHET_INDEX) >= before + RATCHET_PRE_SHUTDOWN_MINTS,
+            "story-135: deployer did not receive the pre-shutdown id-7 NFTs"
+        );
+        console.log("  minted pre-shutdown id-7 NFTs to the deployer:", RATCHET_PRE_SHUTDOWN_MINTS);
+
+        nftMinterV2.setDispatcherDisabled(RATCHET_INDEX, true);
+        (,,, bool disabled) = nftMinterV2.configs(RATCHET_INDEX);
+        require(disabled, "story-135: NFTMinterV2 configs(7).disabled did not read back true");
+        console.log("  NFTMinterV2.setDispatcherDisabled(7, true) - ratchet minting OFF");
+    }
+
     function _fundSyaHarvestCaller(address deployer) internal {
         (, uint256 price,,) = nftMinterV2.configs(UNI_POOLER_INDEX);
         usds.approve(address(nftMinterV2), price);

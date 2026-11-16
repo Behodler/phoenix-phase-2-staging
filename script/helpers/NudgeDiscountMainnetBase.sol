@@ -18,7 +18,10 @@ interface INFTMinterV2ND {
         returns (address dispatcher, uint256 price, uint256 growthBasisPoints, bool disabled);
     function authorizedMinters(address minter) external view returns (bool);
     function setAuthorizedMinter(address minter, bool authorized) external;
+    function setDispatcherDisabled(uint256 index, bool disabled) external;
+    function mint(uint256 index, address recipient) external returns (bool);
     function balanceOf(address account, uint256 id) external view returns (uint256);
+    function setApprovalForAll(address operator, bool approved) external;
 }
 
 /// @dev The live OLD minter, `BatchNFTMinterMultiToken` (lib/nft-staking/src/BatchNFTMinterMultiToken.sol).
@@ -64,6 +67,15 @@ interface INudgeStreamerND {
     function registerStream(address batchMinter, address token, uint256 duration) external;
     function collectNudge(address recipientBatchMinter, address token, uint256 amount) external;
     function pendingStream(address batchMinter, address token) external view returns (uint256);
+}
+
+/// @dev The live RatchetNFTStaker (`NFTStakerPriceScaled`, lib/nft-staking/src/NFTStakerPriceScaled.sol).
+interface IRatchetStakerND {
+    function users(address account) external view returns (uint256 amount, uint256 rewardDebt);
+    function stake(uint256 amount) external;
+    function unstake(uint256 amount) external;
+    function claim() external;
+    function pendingReward(address account) external view returns (uint256);
 }
 
 interface IMintDebtHookND {
@@ -144,11 +156,19 @@ interface IDonorNudgeND {
  *         buy route can trust for its PSM, so PSM is a pinned constant only.
  *
  *         CUTOVER GATE (audit-27 M-01; the human's decision of 2026-11-12). `MAX_FREE_PER_BATCH`,
- *         `OVERFLOW_NFTS_PER_BOOST_POINT`, `MAX_BOOST` and `GATE_FMAX` come from the fork gate
+ *         `OVERFLOW_NFTS_PER_BOOST_POINT`, `MAX_BOOST_GAS_CEILING` and `GATE_FMAX` come from the fork gate
  *         `test/fork/NudgeDiscountCutoverGate.t.sol`, measured against this script's own deploy+configure output
  *         (osaka, cold accounts, UniPoolerV2 donation leg ON at max(live batchDonationSize, 10), d = 50). The parameter
  *         table they come from is recorded in the story file (phStaging2:119, Autonomous Decisions, "Gate parameter
  *         table"); re-run the gate and update the table before changing any of them.
+ *
+ *         DAY-1 BOOST 0 (story 135, the human's decision 2026-11-16). The cutover sets `maxBoost = DAY1_MAX_BOOST`
+ *         (0: boost disabled). `MAX_BOOST_GAS_CEILING` (15) is the measured gas-safe ceiling the gate keeps proving,
+ *         so raising the boost later is a plain `setMaxBoost(<= 15)` from OWNER with no new gate run.
+ *
+ *         RATCHET SHUTDOWN (story 135). The cutover also disables NEW minting at NFTMinterV2 index 7 (NudgeRatchet)
+ *         with `setDispatcherDisabled(7, true)`. Existing id-7 NFTs keep staking, claiming and unstaking on
+ *         RatchetNFTStaker; the NudgeRatchet mint-debt hook is untouched so its outstanding debt can still be pulled.
  */
 abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     uint256 internal constant CHAIN_ID = 1;
@@ -174,6 +194,12 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     address internal constant PAUSER_V2 = 0x669Ebfa5309db66683c199Cfe22516DECBe1a154;
     /// @dev Book `BatchNFTMinter`: the live `BatchNFTMinterMultiToken` this cutover retires.
     address internal constant OLD_MINTER = 0x068395556b8c43eDf257DC54D109EA5910aE15c7;
+    /// @dev Book `NudgeRatchet`: the index-7 ratchet dispatcher whose minting story 135 disables.
+    address internal constant NUDGE_RATCHET = 0x7E3fB41FD3E99312FBa8bfc71E79e635d526AA40;
+    /// @dev Book `RatchetNFTStaker`: stakes the existing id-7 NFTs; untouched by the ratchet shutdown.
+    address internal constant RATCHET_NFT_STAKER = 0x299b0071DEf42D35eaf5ea24CC0a71Cf10655A64;
+    /// @dev Book `RatchetBatchNFTMinter`: loops `NFTMinter.mint(7, ...)`, so the index-7 disable stops it too.
+    address internal constant RATCHET_BATCH_MINTER = 0x81896F48a95AbeA255cd38a3010E985b6051A1C7;
 
     // ---- pinned only (no book key) ----
     address internal constant PSM = 0xA188EEC8F81263234dA3622A406892F3D630f98c; // Sky USDS<->USDC PSM
@@ -184,6 +210,8 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     address internal constant RETIRED_SYA = 0x0cD353bfda674D04823B2826ffafB83B560D21B6;
 
     uint256 internal constant DISPATCHER_INDEX = 4;
+    /// @dev NFTMinterV2 index of the NudgeRatchet dispatcher (story 135: new minting disabled at the cutover).
+    uint256 internal constant RATCHET_INDEX = 7;
     uint8 internal constant HOOK_RATIO = 50;
 
     // ---- owner-settable defaults (Concern 3: the human may change them before or after broadcast) ----
@@ -198,8 +226,13 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     uint256 internal constant MAX_FREE_PER_BATCH = 50;
     /// @dev Overflow free-equivalents per boost point. The Safeguard-4 minimum at d = 50 / cap 50 is 3.
     uint256 internal constant OVERFLOW_NFTS_PER_BOOST_POINT = 3;
-    /// @dev Boost ceiling in discount points (contract bound 49). Target band 10-15.
-    uint8 internal constant MAX_BOOST = 15;
+    /// @dev Gas-safe boost ceiling in discount points (contract bound 49; target band 10-15). The value the cutover
+    ///      gate fork test measures the max-boosted cap batch at (119 Decision 7: 52.95% headroom). The owner may
+    ///      later raise `maxBoost` to at most this with `setMaxBoost` without re-running the gate (story 135).
+    uint8 internal constant MAX_BOOST_GAS_CEILING = 15;
+    /// @dev What the cutover sets on day 1 (story 135, the human's decision 2026-11-16): the boost ships DISABLED,
+    ///      so no boost value is given away while demand is healthy without it.
+    uint8 internal constant DAY1_MAX_BOOST = 0;
     /// @dev Largest gas-safe free count measured by the gate (>= 10% headroom under 2^24 - intrinsic, d = 50, leg ON).
     uint256 internal constant GATE_FMAX = 54;
 
@@ -217,13 +250,18 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     // Gate constants
     // =====================================================================
 
-    /// @notice Cutover gate (e): refuse on any zero value, a disabled boost, a boost above the contract bound, or a
-    ///         cap above the measured Fmax. Runs in PREVIEW and broadcast alike.
+    /// @notice Cutover gate (e): refuse on a zero cap / perPoint / Fmax / gas ceiling, a gas ceiling above the
+    ///         contract bound, a day-1 boost above the measured gas ceiling, or a cap above the measured Fmax. Runs in
+    ///         PREVIEW and broadcast alike. Story 135 reversed 119's "never ship the boost disabled" rule: the day-1
+    ///         boost may be 0; the measured ceiling stays a named, non-zero constant.
     function _requireGateConstants() internal pure {
         require(MAX_FREE_PER_BATCH != 0, "gate: MAX_FREE_PER_BATCH is zero");
         require(OVERFLOW_NFTS_PER_BOOST_POINT != 0, "gate: OVERFLOW_NFTS_PER_BOOST_POINT is zero");
-        require(MAX_BOOST != 0, "gate: MAX_BOOST is 0 - the boost must be set from the gate, never left disabled");
-        require(MAX_BOOST <= 49, "gate: MAX_BOOST above the contract bound (49)");
+        require(MAX_BOOST_GAS_CEILING != 0, "gate: MAX_BOOST_GAS_CEILING is zero");
+        require(MAX_BOOST_GAS_CEILING <= 49, "gate: MAX_BOOST_GAS_CEILING above the contract bound (49)");
+        require(
+            DAY1_MAX_BOOST <= MAX_BOOST_GAS_CEILING, "gate: DAY1_MAX_BOOST above MAX_BOOST_GAS_CEILING (not gas-safe)"
+        );
         require(GATE_FMAX != 0, "gate: GATE_FMAX is zero");
         require(MAX_FREE_PER_BATCH <= GATE_FMAX, "gate: MAX_FREE_PER_BATCH > GATE_FMAX (not gas-safe)");
     }
@@ -294,6 +332,12 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
         require(_requireBook(book, "Pauser") == PAUSER_V2, "address book Pauser != PauserV2 (V1 is RETIRED)");
         require(PAUSER_V2 != PAUSER_V1, "PauserV2 constant is the retired V1 Pauser");
         require(_requireBook(book, "BatchNFTMinter") == OLD_MINTER, "address book BatchNFTMinter != the old minter");
+        require(_requireBook(book, "NudgeRatchet") == NUDGE_RATCHET, "address book NudgeRatchet != pinned");
+        require(_requireBook(book, "RatchetNFTStaker") == RATCHET_NFT_STAKER, "address book RatchetNFTStaker != pinned");
+        require(
+            _requireBook(book, "RatchetBatchNFTMinter") == RATCHET_BATCH_MINTER,
+            "address book RatchetBatchNFTMinter != pinned"
+        );
     }
 
     // =====================================================================
@@ -647,7 +691,7 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
             m.overflowNFTsPerBoostPoint() == OVERFLOW_NFTS_PER_BOOST_POINT,
             "post: overflowNFTsPerBoostPoint != OVERFLOW_NFTS_PER_BOOST_POINT"
         );
-        require(m.maxBoost() == MAX_BOOST, "post: maxBoost != MAX_BOOST");
+        require(m.maxBoost() == DAY1_MAX_BOOST, "post: maxBoost != DAY1_MAX_BOOST");
         require(m.boostDonationSafe(), "post: boostDonationSafe() is false");
         require(m.nudgeStreamer() == NUDGE_STREAMER, "post: nudgeStreamer != NudgeStreamer");
         for (uint256 i = 0; i < 3; i++) {
@@ -667,6 +711,7 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     ///         new minter; PauserV2 is healthy.
     function _requireCutoverState(BatchNFTMinterNudgeDiscount m) internal view {
         _requireNewMinterConfigured(m);
+        _requireRatchetMintingDisabled();
         IOldBatchMinterND old = IOldBatchMinterND(OLD_MINTER);
         require(!INFTMinterV2ND(NFT_MINTER).authorizedMinters(OLD_MINTER), "post: authorizedMinters(old) is true");
         require(old.paused(), "post: old minter is not paused");
@@ -692,5 +737,26 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
         console.log("INFO|pendingBuyUSDC", m.pendingBuyUSDC());
         console.log("INFO|pendingStakerPhUSD", m.pendingStakerPhUSD());
         console.log("Cutover state OK.");
+    }
+
+    // =====================================================================
+    // Ratchet shutdown (story 135)
+    // =====================================================================
+
+    /// @notice NFTMinterV2 index 7 is the NudgeRatchet dispatcher. The shutdown step refuses to touch any other
+    ///         dispatcher: a re-registration that moved the ratchet would otherwise disable the wrong index.
+    function _requireRatchetIdentity() internal view {
+        (address d,,,) = INFTMinterV2ND(NFT_MINTER).configs(RATCHET_INDEX);
+        require(d == NUDGE_RATCHET, "ratchet: NFTMinter configs(7).dispatcher != NudgeRatchet - refusing to disable");
+    }
+
+    function _ratchetDisabled() internal view returns (bool disabled) {
+        (,,, disabled) = INFTMinterV2ND(NFT_MINTER).configs(RATCHET_INDEX);
+    }
+
+    /// @notice New ratchet minting is off (`configs(7).disabled`), and index 7 is still the NudgeRatchet.
+    function _requireRatchetMintingDisabled() internal view {
+        _requireRatchetIdentity();
+        require(_ratchetDisabled(), "post: NFTMinter configs(7).disabled is false - ratchet minting is still open");
     }
 }

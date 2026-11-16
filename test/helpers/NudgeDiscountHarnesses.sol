@@ -264,7 +264,17 @@ contract NudgeDiscountConstants is NudgeDiscountMainnetBase {
         return _bookAddress(vm.readFile(BOOK_FILE), key);
     }
 
-    function gate() external pure returns (uint256 cap, uint256 perPoint, uint8 maxBoost, uint256 fmax) {
-        return (MAX_FREE_PER_BATCH, OVERFLOW_NFTS_PER_BOOST_POINT, MAX_BOOST, GATE_FMAX);
+    /// @dev Story 135: `day1MaxBoost` is what the cutover sets (0, boost disabled); `ceiling` is the gas-safe value the
+    ///      gate measures (MAX_BOOST_GAS_CEILING, 15).
+    function gate()
+        external
+        pure
+        returns (uint256 cap, uint256 perPoint, uint8 day1MaxBoost, uint8 ceiling, uint256 fmax)
+    {
+        return (MAX_FREE_PER_BATCH, OVERFLOW_NFTS_PER_BOOST_POINT, DAY1_MAX_BOOST, MAX_BOOST_GAS_CEILING, GATE_FMAX);
+    }
+
+    function ratchet() external pure returns (uint256 index, address nudgeRatchet, address staker, address batchMinter) {
+        return (RATCHET_INDEX, NUDGE_RATCHET, RATCHET_NFT_STAKER, RATCHET_BATCH_MINTER);
     }
 }

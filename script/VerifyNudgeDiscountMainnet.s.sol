@@ -15,8 +15,11 @@ import {NudgeDiscountMainnetBase} from "./helpers/NudgeDiscountMainnetBase.sol";
  *         the book's `NudgeDiscountBatchMinter` must equal it. Asserts (`_requireCutoverState`):
  *           - config: index 4, discountToken USDC, discountPercent 50, burnPercent 100, nftStaker, mintDebtHook, psm,
  *             sUSDS, router, pair/phUSD, OWNER an authorised buyer, nudge tokens USDC/phUSD/Kendu whitelisted;
- *           - the cutover gate: maxFreePerBatch / overflowNFTsPerBoostPoint / maxBoost == the script's gate constants
- *             (all non-zero) and boostDonationSafe() == true;
+ *           - the cutover gate: maxFreePerBatch / overflowNFTsPerBoostPoint == the script's gate constants (both
+ *             non-zero), maxBoost == DAY1_MAX_BOOST (0: story 135 ships the boost disabled; the gas-safe ceiling
+ *             MAX_BOOST_GAS_CEILING = 15 bounds any later setMaxBoost) and boostDonationSafe() == true;
+ *           - story 135: NFTMinter configs(7) is the NudgeRatchet and configs(7).disabled == true (no new ratchet
+ *             minting; existing id-7 NFTs keep staking on RatchetNFTStaker);
  *           - NFTMinter.authorizedMinters(new) == true and authorizedMinters(old) == false;
  *           - streams registered (USDC 10d, phUSD 30d, Kendu 30d) and nudgeStreamer set;
  *           - every inventoried donor (all NFTMinter dispatchers + the book's SYA) points at the new minter, none at
@@ -33,7 +36,7 @@ import {NudgeDiscountMainnetBase} from "./helpers/NudgeDiscountMainnetBase.sol";
 contract VerifyNudgeDiscountMainnet is NudgeDiscountMainnetBase {
     function run() external view {
         console.log("=================================================");
-        console.log("  VERIFY nudge-discount cutover - MAINNET (story 119) - READ-ONLY");
+        console.log("  VERIFY nudge-discount cutover - MAINNET (story 119 + 135) - READ-ONLY");
         console.log("=================================================");
         require(block.chainid == CHAIN_ID, "verify: wrong chain ID - expected Mainnet (1)");
         _requireGateConstants();
