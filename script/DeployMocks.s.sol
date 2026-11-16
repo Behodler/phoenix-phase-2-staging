@@ -2766,8 +2766,6 @@ contract DeployMocks is Script {
         rewardToken.mint(address(mockAutoUSDC), SYA_HARVEST_YIELD_USDC);
     }
 
-    /// @dev Buys one claim NFT at index 4 (UniPoolerV2, priced in USDS) through the normal paid
-    ///      mint path and approves the harvester to pull it.
     /// @notice Phase 11.19 (story 135): mint `RATCHET_PRE_SHUTDOWN_MINTS` id-7 NFTs to the deployer, each with an
     ///         exact USDC approval reset to 0, then disable new minting at index 7 and read it back. Mirrors the
     ///         mainnet cutover's `nm_disableRatchet` step (DeployMainnetNudgeDiscount Phase 3b). Existing id-7 NFTs
@@ -2796,6 +2794,8 @@ contract DeployMocks is Script {
         console.log("  NFTMinterV2.setDispatcherDisabled(7, true) - ratchet minting OFF");
     }
 
+    /// @dev Buys one claim NFT at index 4 (UniPoolerV2, priced in USDS) through the normal paid
+    ///      mint path and approves the harvester to pull it.
     function _fundSyaHarvestCaller(address deployer) internal {
         (, uint256 price,,) = nftMinterV2.configs(UNI_POOLER_INDEX);
         usds.approve(address(nftMinterV2), price);
