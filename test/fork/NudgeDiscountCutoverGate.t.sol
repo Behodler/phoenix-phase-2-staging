@@ -32,7 +32,8 @@ interface INudgeStreamerGate {
  *           - UniPoolerV2 donation leg ON at max(live batchDonationSize, 10) (owner prank on the fork only);
  *           - d = 50 (MIN_DISCOUNT_PERCENT) whatever the operating percent;
  *           - three points: cap 25 / cap 50 at d = 50 (paid == free) and the max-boosted cap batch (effective
- *             50 + MAX_BOOST) give gFree, gPaid and the overhead; Fmax is the largest F with
+ *             50 + MAX_BOOST_GAS_CEILING; story 135: the day-1 maxBoost is 0, so the gate measures at the ceiling)
+ *             give gFree, gPaid and the overhead; Fmax is the largest F with
  *             overhead + F*gFree + paid(F,50)*gPaid <= 0.9 * (2^24 - intrinsic), paid(F,50) = ceil(F*100/50) - F;
  *           - the Safeguard-4 minimum `overflowNFTsPerBoostPoint` (`_minSafePerPoint()` method of nft-staking
  *             `BatchNFTMinterNudgeDiscountBoost.t.sol`) at d = 50 and the chosen cap.
@@ -193,9 +194,12 @@ contract NudgeDiscountCutoverGateForkTest is Test {
 
     function test_Fork_gate_capAndMaxBoostedCap_fit_andDeriveFmax() public {
         if (!forked) vm.skip(true);
-        (uint256 cap, uint256 perPoint, uint8 maxBoost, uint256 gateFmax) = k.gate();
+        // Story 135: the cutover ships maxBoost = day1 (0); the gate measures the max-boosted batch at the gas-safe
+        // CEILING instead, so a later setMaxBoost(<= ceiling) needs no new gate run (and no divide-by-zero at 0).
+        (uint256 cap, uint256 perPoint, uint8 day1MaxBoost, uint8 maxBoost, uint256 gateFmax) = k.gate();
         assertEq(m.maxFreePerBatch(), cap, "script configured the gate cap");
-        assertEq(m.maxBoost(), maxBoost, "script configured the gate maxBoost");
+        assertEq(m.maxBoost(), day1MaxBoost, "script configured the day-1 maxBoost");
+        assertEq(day1MaxBoost, 0, "story 135: day-1 maxBoost is 0");
 
         // (a) three points: cap 25 and cap 50 at d = 50 with no boost; the max-boosted cap batch.
         Point memory p25 = _measureAtCap(25, 0, 3);
@@ -246,8 +250,9 @@ contract NudgeDiscountCutoverGateForkTest is Test {
         assertGe(perPoint, minPP, "overflowNFTsPerBoostPoint >= Safeguard-4 minimum");
         assertTrue(m.boostDonationSafe(), "boostDonationSafe() at the configured values");
 
-        // (d) maxBoost in the 10-15 target band, <= 49.
+        // (d) the gas-safe ceiling in the 10-15 target band, <= 49; the day-1 value within it.
         assertGe(maxBoost, 10);
         assertLe(maxBoost, 15);
+        assertLe(day1MaxBoost, maxBoost);
     }
 }

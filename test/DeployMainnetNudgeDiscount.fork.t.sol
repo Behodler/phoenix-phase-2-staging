@@ -28,6 +28,34 @@ interface IPauserV2Fork {
     function isRegistered(address c) external view returns (bool);
 }
 
+interface INFTMinterRatchetFork {
+    function configs(uint256 index) external view returns (address, uint256, uint256, bool);
+    function mint(uint256 index, address recipient) external returns (bool);
+    function balanceOf(address account, uint256 id) external view returns (uint256);
+    function setApprovalForAll(address operator, bool approved) external;
+    function setDispatcherDisabled(uint256 index, bool disabled) external;
+    function replaceDispatcher(uint256 index, address newDispatcher) external;
+    function nextIndex() external view returns (uint256);
+}
+
+interface IRatchetStakerFork {
+    function users(address account) external view returns (uint256 amount, uint256 rewardDebt);
+    function stake(uint256 amount) external;
+    function unstake(uint256 amount) external;
+    function claim() external;
+    function runwaySeconds() external view returns (uint256);
+}
+
+interface IRatchetBatchMinterFork {
+    function batchMint(uint256 count, address recipient, uint256 paymentAmount, uint256 minReward)
+        external
+        returns (uint256);
+}
+
+interface INudgeStreamerCollectFork {
+    function collectNudge(address m, address t, uint256 amt) external;
+}
+
 interface IOldMinterFork {
     function paused() external view returns (bool);
     function pauser() external view returns (address);
@@ -50,15 +78,28 @@ contract NudgeDiscountMainnetConfigTest is Test {
     function test_gateConstants() public {
         NudgeDiscountConstants c = new NudgeDiscountConstants();
         c.checkGate();
-        (uint256 cap, uint256 perPoint, uint8 maxBoost, uint256 fmax) = c.gate();
+        (uint256 cap, uint256 perPoint, uint8 day1MaxBoost, uint8 ceiling, uint256 fmax) = c.gate();
         assertGt(cap, 0);
         assertGt(perPoint, 0);
-        assertGt(maxBoost, 0, "boost must not ship disabled");
-        assertLe(maxBoost, 49);
+        // Story 135: the boost ships DISABLED on day 1; the measured gas-safe ceiling stays a named constant.
+        assertEq(day1MaxBoost, 0, "story 135: day-1 maxBoost is 0 (boost disabled)");
+        assertLe(day1MaxBoost, ceiling, "day-1 boost within the gas-safe ceiling");
+        assertGt(ceiling, 0, "gas-safe ceiling non-zero");
+        assertLe(ceiling, 49);
         assertLe(cap, fmax, "cap <= GATE_FMAX");
         assertLe(cap, 50, "cap = min(50, Fmax)");
-        assertGe(maxBoost, 10, "maxBoost within the 10-15 point target band");
-        assertLe(maxBoost, 15, "maxBoost within the 10-15 point target band");
+        assertGe(ceiling, 10, "ceiling within the 10-15 point target band");
+        assertLe(ceiling, 15, "ceiling within the 10-15 point target band");
+    }
+
+    function test_ratchetConstants() public {
+        NudgeDiscountConstants c = new NudgeDiscountConstants();
+        (uint256 index, address ratchet, address staker, address batchMinter) = c.ratchet();
+        assertEq(index, 7, "ratchet is NFTMinterV2 index 7");
+        assertEq(ratchet, 0x7E3fB41FD3E99312FBa8bfc71E79e635d526AA40, "NudgeRatchet pinned");
+        assertEq(c.bookKey("NudgeRatchet"), ratchet, "book NudgeRatchet == pinned");
+        assertEq(c.bookKey("RatchetNFTStaker"), staker, "book RatchetNFTStaker == pinned");
+        assertEq(c.bookKey("RatchetBatchNFTMinter"), batchMinter, "book RatchetBatchNFTMinter == pinned");
     }
 }
 
@@ -127,7 +168,10 @@ contract DeployMainnetNudgeDiscountForkTest is Test {
         assertTrue(s.smokeRan(), "preview smoke ran");
         assertGt(s.smokeUncappedFree(), 0, "uncapped batch had free NFTs");
         assertEq(s.smokeCappedFree(), 50, "capped batch free == cap");
-        assertGt(s.smokeCappedBoost(), 0, "capped batch boosted");
+        assertEq(s.smokeCappedBoost(), 0, "story 135: day-1 maxBoost 0 - an overflowing capped batch is not boosted");
+        assertTrue(s.smokeRatchetMintRefused(), "story 135 smoke: mint(7) refused");
+        assertTrue(s.smokeRatchetBatchMintRefused(), "story 135 smoke: RatchetBatchNFTMinter.batchMint refused");
+        assertTrue(s.smokeRatchetStaker() != address(0), "story 135 smoke: a live staker claimed/unstaked/re-staked");
         assertGt(s.smokeBuyPhusdOut(), 0, "buyAndBurn bought phUSD");
         assertFalse(vm.exists(path), "preview must not write the progress file");
         assertEq(IERC20(USDC).balanceOf(OWNER), usdcOwner, "OWNER USDC unchanged");
@@ -232,7 +276,7 @@ contract DeployMainnetNudgeDiscountForkTest is Test {
     // ---------------- resume ----------------
 
     /// @dev Phases 0-2 only, then the whole script again: it adopts the minter, re-sends no Phase 0-2 step, and
-    ///      finishes Phases 3-4. A third run sends nothing.
+    ///      finishes Phases 3, 3b and 4. A third run sends nothing.
     function test_fork_resumeAfterPhase2_isIdempotent() public {
         if (!_fork()) return;
         string memory path = _tmp("resume");
@@ -248,8 +292,9 @@ contract DeployMainnetNudgeDiscountForkTest is Test {
         second.run();
         assertFalse(second.deployedThisRun(), "adopted, not redeployed");
         assertEq(address(second.minter()), address(m));
-        // 6 donor repoints + 2 buffer releases + forwarder CREATE2 deploy + rescue to forwarder + forward.
-        assertEq(second.txCount(), 11, "only Phases 3-4 sent on resume");
+        // 6 donor repoints + story 135's ratchet disable (Phase 3b) + 2 buffer releases + forwarder CREATE2 deploy
+        // + rescue to forwarder + forward.
+        assertEq(second.txCount(), 12, "only Phases 3, 3b and 4 sent on resume");
         assertGt(firstTx, second.txCount());
 
         DeployNudgeDiscountHarness third = new DeployNudgeDiscountHarness(false, path, address(0));
@@ -473,5 +518,180 @@ contract DeployMainnetNudgeDiscountForkTest is Test {
         vm.expectRevert(bytes("post: pot forwarder still holds a nudge token"));
         v.run();
         vm.removeFile(path);
+    }
+    // ---------------- story 135: ratchet shutdown + day-1 maxBoost 0 ----------------
+
+    address constant NUDGE_RATCHET = 0x7E3fB41FD3E99312FBa8bfc71E79e635d526AA40;
+    address constant RATCHET_NFT_STAKER = 0x299b0071DEf42D35eaf5ea24CC0a71Cf10655A64;
+    address constant RATCHET_BATCH_MINTER = 0x81896F48a95AbeA255cd38a3010E985b6051A1C7;
+    /// @dev A live RatchetNFTStaker staker at FORK_BLOCK (1 id-7 NFT staked), a plain EOA, not OWNER.
+    address constant RATCHET_HOLDER = 0xc25cCd4896917E9e31925755cEd674cBD7214E1A;
+
+    struct OwnerSnap {
+        uint256 eth;
+        uint256[6] erc20;
+        uint256[] nft;
+    }
+
+    function _ownerSnap() internal view returns (OwnerSnap memory o) {
+        o.eth = OWNER.balance;
+        address[] memory t = _watched();
+        for (uint256 i = 0; i < 6; i++) {
+            o.erc20[i] = IERC20(t[i]).balanceOf(OWNER);
+        }
+        uint256 next = INFTMinterRatchetFork(NFT_MINTER).nextIndex();
+        o.nft = new uint256[](next + 1);
+        for (uint256 i = 0; i <= next; i++) {
+            o.nft[i] = INFTMinterRatchetFork(NFT_MINTER).balanceOf(OWNER, i);
+        }
+    }
+
+    function _assertOwnerUnchanged(OwnerSnap memory b, string memory stage) internal view {
+        OwnerSnap memory a = _ownerSnap();
+        assertLe(a.eth, b.eth, string.concat(stage, ": OWNER ETH non-increasing"));
+        for (uint256 i = 0; i < 6; i++) {
+            assertEq(a.erc20[i], b.erc20[i], string.concat(stage, ": OWNER ERC20 balance unchanged"));
+        }
+        assertEq(a.nft.length, b.nft.length);
+        for (uint256 i = 0; i < a.nft.length; i++) {
+            assertEq(a.nft[i], b.nft[i], string.concat(stage, ": OWNER ERC1155 balance unchanged"));
+        }
+    }
+
+    function _expectDisabledMint(address actor) internal {
+        (, uint256 p7,,) = INFTMinterRatchetFork(NFT_MINTER).configs(7);
+        deal(USDC, actor, p7 * 4);
+        vm.startPrank(actor);
+        IERC20(USDC).approve(NFT_MINTER, p7 * 2);
+        IERC20(USDC).approve(RATCHET_BATCH_MINTER, p7 * 2);
+        vm.expectRevert(bytes("NFTMinterV2: dispatcher is disabled"));
+        INFTMinterRatchetFork(NFT_MINTER).mint(7, actor);
+        vm.expectRevert(bytes("NFTMinterV2: dispatcher is disabled"));
+        IRatchetBatchMinterFork(RATCHET_BATCH_MINTER).batchMint(2, actor, p7 * 2, 0);
+        vm.stopPrank();
+        assertEq(INFTMinterRatchetFork(NFT_MINTER).balanceOf(actor, 7), 0, "no id-7 NFT minted");
+    }
+
+    /// @dev claim -> unstake everything -> re-stake everything for a live holder; returns the phUSD claimed.
+    function _cycleRatchetHolder(address holder) internal returns (uint256 claimed) {
+        IRatchetStakerFork st = IRatchetStakerFork(RATCHET_NFT_STAKER);
+        (uint256 staked,) = st.users(holder);
+        assertGt(staked, 0, "holder is staked");
+        uint256 nft0 = INFTMinterRatchetFork(NFT_MINTER).balanceOf(holder, 7);
+        uint256 ph0 = IERC20(PHUSD).balanceOf(holder);
+        vm.startPrank(holder);
+        st.claim();
+        claimed = IERC20(PHUSD).balanceOf(holder) - ph0;
+        st.unstake(staked);
+        assertEq(INFTMinterRatchetFork(NFT_MINTER).balanceOf(holder, 7), nft0 + staked, "unstake returned the NFTs");
+        INFTMinterRatchetFork(NFT_MINTER).setApprovalForAll(RATCHET_NFT_STAKER, true);
+        st.stake(staked);
+        vm.stopPrank();
+        (uint256 after_,) = st.users(holder);
+        assertEq(after_, staked, "re-staked");
+        assertEq(INFTMinterRatchetFork(NFT_MINTER).balanceOf(holder, 7), nft0, "re-stake took the NFTs");
+    }
+
+    /// @dev A full broadcast-mode run disables index 7 (state-gated step `nm_disableRatchet`), ships maxBoost 0
+    ///      (previewBoost() 0 even with an overflowing pot), leaves RatchetNFTStaker fully usable for a live holder
+    ///      (also once its reward budget is exhausted), and never changes an OWNER balance.
+    function test_fork_story135_ratchetDisabled_maxBoostZero_stakingIntact() public {
+        if (!_fork()) return;
+        OwnerSnap memory o0 = _ownerSnap();
+        (address d7,,, bool dis0) = INFTMinterRatchetFork(NFT_MINTER).configs(7);
+        assertEq(d7, NUDGE_RATCHET, "fork: index 7 is the NudgeRatchet");
+        assertFalse(dis0, "fork: ratchet minting is open before the cutover");
+
+        string memory path = _tmp("story135");
+        DeployNudgeDiscountHarness s = new DeployNudgeDiscountHarness(false, path, address(0));
+        s.run();
+        BatchNFTMinterNudgeDiscount m = s.minter();
+
+        // index 7 disabled; the step was recorded; price/growth/dispatcher untouched.
+        (address d7b,,, bool dis1) = INFTMinterRatchetFork(NFT_MINTER).configs(7);
+        assertTrue(dis1, "configs(7).disabled after the cutover");
+        assertEq(d7b, NUDGE_RATCHET, "dispatcher untouched");
+        string[] memory steps = vm.parseJsonStringArray(vm.readFile(path), ".configSteps");
+        uint256 seen;
+        for (uint256 i = 0; i < steps.length; i++) {
+            if (keccak256(bytes(steps[i])) == keccak256("nm_disableRatchet")) seen++;
+        }
+        assertEq(seen, 1, "nm_disableRatchet sent exactly once");
+        _assertOwnerUnchanged(o0, "after the cutover");
+
+        // mint(7) and RatchetBatchNFTMinter.batchMint revert.
+        _expectDisabledMint(makeAddr("story135-ratchet-minter"));
+
+        // maxBoost 0: previewBoost() is 0 even with a pot overflowing the cap.
+        assertEq(m.maxBoost(), 0, "day-1 maxBoost 0");
+        (, uint256 p0,,) = INFTMinterRatchetFork(NFT_MINTER).configs(4);
+        uint256 freeEq = m.maxFreePerBatch() + m.overflowNFTsPerBoostPoint() * 20;
+        address donor = makeAddr("story135-donor");
+        uint256 amt = (freeEq * p0 * 101) / 100 / 1e12 + 1;
+        deal(USDC, donor, amt);
+        vm.startPrank(donor);
+        IERC20(USDC).approve(NUDGE_STREAMER, amt);
+        INudgeStreamerCollectFork(NUDGE_STREAMER).collectNudge(address(m), USDC, amt);
+        vm.stopPrank();
+        vm.warp(block.timestamp + 11 days);
+        (uint256 overflowFree, uint8 boost, uint8 eff,) = m.previewBoost();
+        assertGt(overflowFree, 0, "pot overflows the cap");
+        assertEq(boost, 0, "previewBoost() boost 0 with maxBoost 0");
+        assertEq(eff, m.discountPercent(), "effective discount == base discount");
+
+        // RatchetNFTStaker: a live holder claims, unstakes and re-stakes.
+        _cycleRatchetHolder(RATCHET_HOLDER);
+
+        // Budget exhausted (no new hook debt once minting stops): warp far past the runway; exits still work.
+        vm.warp(block.timestamp + IRatchetStakerFork(RATCHET_NFT_STAKER).runwaySeconds() + 3650 days);
+        _cycleRatchetHolder(RATCHET_HOLDER);
+        vm.startPrank(RATCHET_HOLDER);
+        IRatchetStakerFork(RATCHET_NFT_STAKER).claim();
+        (uint256 staked,) = IRatchetStakerFork(RATCHET_NFT_STAKER).users(RATCHET_HOLDER);
+        IRatchetStakerFork(RATCHET_NFT_STAKER).unstake(staked);
+        vm.stopPrank();
+        (uint256 left,) = IRatchetStakerFork(RATCHET_NFT_STAKER).users(RATCHET_HOLDER);
+        assertEq(left, 0, "exhausted budget: unstake still returns the position");
+
+        _assertOwnerUnchanged(o0, "end");
+
+        // The verifier asserts the ratchet disable too.
+        _markCompleted(path);
+        VerifyNudgeDiscountHarness v = new VerifyNudgeDiscountHarness(path, address(m));
+        v.run();
+        vm.prank(OWNER);
+        INFTMinterRatchetFork(NFT_MINTER).setDispatcherDisabled(7, false);
+        vm.expectRevert(bytes("post: NFTMinter configs(7).disabled is false - ratchet minting is still open"));
+        v.run();
+        vm.removeFile(path);
+    }
+
+    /// @dev Index 7 already disabled (e.g. a resumed run): the step is skipped, nothing else changes.
+    function test_fork_story135_alreadyDisabled_skipsStep() public {
+        if (!_fork()) return;
+        vm.prank(OWNER);
+        INFTMinterRatchetFork(NFT_MINTER).setDispatcherDisabled(7, true);
+        string memory path = _tmp("story135-skip");
+        DeployNudgeDiscountHarness s = new DeployNudgeDiscountHarness(false, path, address(0));
+        s.run();
+        string[] memory steps = vm.parseJsonStringArray(vm.readFile(path), ".configSteps");
+        for (uint256 i = 0; i < steps.length; i++) {
+            assertTrue(keccak256(bytes(steps[i])) != keccak256("nm_disableRatchet"), "no disable tx when disabled");
+        }
+        (,,, bool dis) = INFTMinterRatchetFork(NFT_MINTER).configs(7);
+        assertTrue(dis);
+        vm.removeFile(path);
+    }
+
+    /// @dev Refuses (in preflight, before any transaction) when index 7 is not the NudgeRatchet.
+    function test_fork_story135_refuses_index7NotNudgeRatchet() public {
+        if (!_fork()) return;
+        address impostor = makeAddr("story135-impostor-dispatcher");
+        vm.etch(impostor, hex"00");
+        vm.prank(OWNER);
+        INFTMinterRatchetFork(NFT_MINTER).replaceDispatcher(7, impostor);
+        DeployNudgeDiscountHarness s = new DeployNudgeDiscountHarness(true, _tmp("story135-impostor"), address(0));
+        vm.expectRevert(bytes("ratchet: NFTMinter configs(7).dispatcher != NudgeRatchet - refusing to disable"));
+        s.run();
     }
 }

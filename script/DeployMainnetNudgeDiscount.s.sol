@@ -26,12 +26,13 @@ import {
     IUniPoolerV2ND,
     IDonorBatchMinterND,
     IDonorRecipientND,
-    IDonorNudgeND
+    IDonorNudgeND,
+    IRatchetStakerND
 } from "./helpers/NudgeDiscountMainnetBase.sol";
 import {NudgePotForwarder} from "../src/periphery/NudgePotForwarder.sol";
 
 /**
- * @title DeployMainnetNudgeDiscount  (story 119, sprint nudge-discount)
+ * @title DeployMainnetNudgeDiscount  (story 119, sprint nudge-discount; story 135, sprint ratchet-and-boost)
  * @notice MAINNET cutover from the live `BatchNFTMinterMultiToken` (`0x0683...15c7`, book key `BatchNFTMinter`) to
  *         nft-staking 033-035's `BatchNFTMinterNudgeDiscount` (submodule pin d7eb782, set by phStaging2:118; new book
  *         key `NudgeDiscountBatchMinter`). The pot no longer pays a winner-take-all USDC nudge: it sets a capped,
@@ -54,7 +55,9 @@ import {NudgePotForwarder} from "../src/periphery/NudgePotForwarder.sol";
  *   2. Deploy (or adopt from the progress file) and configure, in the pinned contract's revert order: tokenMinter,
  *      index 4; whitelist USDC, phUSD, Kendu (before setDiscountToken, which needs a whitelisted token); discount
  *      USDC / 50%, burn 100%, NFTStaker, mint-debt hook, PSM, sUSDS, then setSwapRoute (validates the pair against
- *      sUSDS); OWNER as authorised buyer; the cap/boost gate constants + require(boostDonationSafe()); setPauser
+ *      sUSDS); OWNER as authorised buyer; the cap/boost gate constants (cap, perPoint, and maxBoost = DAY1_MAX_BOOST
+ *      = 0: story 135 ships the boost disabled; the measured gas-safe ceiling MAX_BOOST_GAS_CEILING = 15 is what a
+ *      later `setMaxBoost` may raise it to without a new gate run) + require(boostDonationSafe()); setPauser
  *      (PauserV2) THEN PauserV2.register (register requires pauser() == PauserV2); streams USDC 10d / phUSD 30d /
  *      Kendu 30d; setNudgeStreamer; and LAST NFTMinter.setAuthorizedMinter(new, true) - after the pause wiring (the
  *      minter's own pause is the only kill switch for free mints: mintFor ignores the NFTMinter pause) and before
@@ -65,6 +68,9 @@ import {NudgePotForwarder} from "../src/periphery/NudgePotForwarder.sol";
  *      gated and lands next.
  *   3. Repoint every inventoried donor (UniPoolerV2/NudgeRatchet `setBatchMinter`, Uniboost `setRecipient`, SYA
  *      `setNudgeAddress`), then require that NO inventoried contract still targets the old minter.
+ *  3b. Story 135: disable NEW ratchet minting, `NFTMinter.setDispatcherDisabled(7, true)` (refuses unless
+ *      configs(7).dispatcher is the NudgeRatchet; sent only while index 7 is enabled). After Phase 3, so the
+ *      NudgeRatchet repoint (kept) has already landed. Existing id-7 NFTs keep staking on RatchetNFTStaker.
  *   4. Migrate the old pot, never as a direct transfer onto a batch minter:
  *      a. stream buffers still on NudgeStreamer for the old minter: `registerStream(old, token, 1)` settles accrued
  *         at the old rate and sets rate = buffer/1s; in a LATER block a second `registerStream(old, token, 1)`
@@ -96,8 +102,9 @@ import {NudgePotForwarder} from "../src/periphery/NudgePotForwarder.sol";
  *      stream (the amounts were fixed in the local pass); the verifier names them and a re-run sweeps them.
  *   5. PREVIEW ONLY, snapshot-reverted (never in a broadcast session): an uncapped discounted 6-arg batchMint, a
  *      capped batch funded through the stream (collectNudge + warp, never a direct transfer), buyAndBurn as OWNER
- *      with a 1% route-quote floor, and PauserV2.pause() pausing the new minter; then the GLOBAL_PAUSE|SUCCEEDED
- *      sweep.
+ *      with a 1% route-quote floor, and PauserV2.pause() pausing the new minter; story 135's ratchet probes (a funded
+ *      `mint(7)` and `RatchetBatchNFTMinter.batchMint` revert "dispatcher is disabled"; a live EOA RatchetNFTStaker
+ *      staker claims, unstakes and re-stakes); then the GLOBAL_PAUSE|SUCCEEDED sweep.
  *
  * RESUME. State-gated: re-run `:broadcast`. If a run died mid-flight, trim nothing - the chain is the source of
  * truth for every step. The progress file only pins the deployed address (with its CREATE nonce) and the write-once
@@ -149,6 +156,11 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
     uint256 public smokeBuyPhusdOut;
     uint256 public smokeBuyBurned;
     bool public smokeRan;
+    /// @dev Story 135 smoke results (read by the fork tests).
+    bool public smokeRatchetMintRefused;
+    bool public smokeRatchetBatchMintRefused;
+    address public smokeRatchetStaker;
+    uint256 public smokeRatchetClaimed;
 
     /// @dev The one-shot pot forwarder used this run (address(0) when there was nothing to migrate).
     address public potForwarder;
@@ -173,7 +185,7 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
 
     function run() external {
         console.log("=================================================");
-        console.log("  NUDGE-DISCOUNT MINTER CUTOVER - MAINNET (story 119)");
+        console.log("  NUDGE-DISCOUNT MINTER CUTOVER - MAINNET (story 119 + 135)");
         console.log("=================================================");
         require(block.chainid == CHAIN_ID, "Wrong chain ID - expected Mainnet (1)");
         isPreview = _previewModeFromEnv();
@@ -214,6 +226,7 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
             return;
         }
         _phase3_repointDonors();
+        _phase3b_disableRatchetMinting();
         _phase4_migratePot();
         if (haltedMidPhase4) {
             console.log("HALT mid Phase 4, after a rescue to the forwarder (test harness only).");
@@ -321,6 +334,10 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         require(IERC4626(SUSDS).asset() == USDS, "preflight: sUSDS asset != USDS");
 
         console.log("DONATION_SIZE|", IUniPoolerV2ND(UNI_POOLER).batchDonationSize());
+
+        // Story 135: index 7 must be the NudgeRatchet before the cutover may disable it.
+        _requireRatchetIdentity();
+        console.log("RATCHET|configs(7).disabled", _ratchetDisabled() ? "true" : "false");
 
         (, uint256 p0, uint256 g,) = nm.configs(DISPATCHER_INDEX);
         console.log("P0|", p0);
@@ -530,14 +547,18 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
             _end();
         }
         require(m.overflowNFTsPerBoostPoint() == OVERFLOW_NFTS_PER_BOOST_POINT, "phase 2: overflowNFTsPerBoostPoint");
-        if (deployedThisRun || m.maxBoost() != MAX_BOOST) {
+        // Story 135: the boost ships DISABLED on day 1 (DAY1_MAX_BOOST = 0). Still sent explicitly on a fresh deploy
+        // (119 Decision 6: never left at a contract default, even when the default is the wanted value), and on any
+        // re-run that finds a different value.
+        if (deployedThisRun || m.maxBoost() != DAY1_MAX_BOOST) {
             _begin("bm_setMaxBoost");
-            m.setMaxBoost(MAX_BOOST);
+            m.setMaxBoost(DAY1_MAX_BOOST);
             _end();
         }
-        require(m.maxBoost() == MAX_BOOST, "phase 2: maxBoost");
+        require(m.maxBoost() == DAY1_MAX_BOOST, "phase 2: maxBoost != DAY1_MAX_BOOST");
         require(m.boostDonationSafe(), "gate: boostDonationSafe() is false after configuration - refusing");
-        console.log("GATE|cap / perPoint / maxBoost:", MAX_FREE_PER_BATCH, OVERFLOW_NFTS_PER_BOOST_POINT, MAX_BOOST);
+        console.log("GATE|cap / perPoint:", MAX_FREE_PER_BATCH, OVERFLOW_NFTS_PER_BOOST_POINT);
+        console.log("GATE|maxBoost day-1 / gas-safe ceiling:", uint256(DAY1_MAX_BOOST), uint256(MAX_BOOST_GAS_CEILING));
 
         // Pauser BEFORE register (PauserV2.register requires pauser() == PauserV2). One-tx coverage gap: see header.
         if (m.pauser() != PAUSER_V2) {
@@ -605,6 +626,32 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         _printInventory("STALE_DONOR", stale);
         require(stale.length == 0, "phase 3: a donor still targets the old minter");
         _printInventory("DONOR_NEW", _donorInventory(n));
+    }
+
+    // =====================================================================
+    // Phase 3b - disable new ratchet minting (story 135)
+    // =====================================================================
+
+    /// @notice `NFTMinterV2.setDispatcherDisabled(7, true)`: blocks direct `mint(7, ...)` and every
+    ///         `RatchetBatchNFTMinter.batchMint` (it loops `mint(7, ...)`), closing the loop in which ratchet stakers'
+    ///         freshly minted phUSD is sold to mint more ratchet NFTs whose USDC deepens the nudge pot. Price, growth,
+    ///         the dispatcher and the token mappings are untouched; existing id-7 NFTs keep staking on
+    ///         RatchetNFTStaker. Ordered AFTER Phase 3, so NudgeRatchet's `batchMinter()` already names the new minter
+    ///         (the donor inventory iterates disabled dispatchers too, and any NudgeStreamer residue for it resolves
+    ///         to the new minter). State-gated: sent only while index 7 is enabled; refuses unless index 7 is the
+    ///         NudgeRatchet. Moves no token; the OWNER invariant is asserted after it by `_end`.
+    function _phase3b_disableRatchetMinting() internal {
+        console.log("\n=== Phase 3b: disable ratchet minting (NFTMinterV2 index 7, story 135) ===");
+        _requireRatchetIdentity();
+        if (!_ratchetDisabled()) {
+            _begin("nm_disableRatchet");
+            INFTMinterV2ND(NFT_MINTER).setDispatcherDisabled(RATCHET_INDEX, true);
+            _end();
+            console.log("3b. NFTMinter.setDispatcherDisabled(7, true)");
+        } else {
+            console.log("3b. index 7 already disabled - skipped");
+        }
+        _requireRatchetMintingDisabled();
     }
 
     // =====================================================================
@@ -940,6 +987,10 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         // ---- 4. buyAndBurn as OWNER (the authorised buyer), floor = route quote - 1% ----
         _smokeBuyAndBurn();
 
+        // ---- 4b. story 135: ratchet minting refused; existing RatchetNFTStaker positions still work. BEFORE the
+        //      PauserV2.pause() below, which also pauses NFTMinterV2 and RatchetNFTStaker. ----
+        _smokeRatchetShutdown();
+
         // ---- 5. PauserV2.pause() pauses the new minter; a paused minter refuses batchMint ----
         _pauseViaPauserV2("story119-smoke-pauser");
         require(m.paused(), "smoke: PauserV2.pause() did not pause the new minter");
@@ -957,7 +1008,15 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         uint8 keepBoost = smokeCappedBoost;
         uint256 keepOut = smokeBuyPhusdOut;
         uint256 keepBurned = smokeBuyBurned;
+        bool keepRatchetMint = smokeRatchetMintRefused;
+        bool keepRatchetBatch = smokeRatchetBatchMintRefused;
+        address keepRatchetStaker = smokeRatchetStaker;
+        uint256 keepRatchetClaimed = smokeRatchetClaimed;
         vm.revertToState(snap); // rolls back this contract's storage too: restore the recorded results after it
+        smokeRatchetMintRefused = keepRatchetMint;
+        smokeRatchetBatchMintRefused = keepRatchetBatch;
+        smokeRatchetStaker = keepRatchetStaker;
+        smokeRatchetClaimed = keepRatchetClaimed;
         smokeUncappedFree = keepUncapped;
         smokeCappedFree = keepCapped;
         smokeCappedBoost = keepBoost;
@@ -965,6 +1024,93 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         smokeBuyBurned = keepBurned;
         smokeRan = true;
         console.log("Smoke OK (reverted).");
+    }
+
+    /// @dev Live RatchetNFTStaker stakers that are plain EOAs (no code, so the ERC1155 return transfer on `unstake`
+    ///      needs no receiver hook) and never OWNER. Found from `Staked` logs at block 26,403,500; the smoke uses
+    ///      the first one still staked when it runs.
+    function _ratchetSmokeStakerCandidates() internal pure returns (address[2] memory) {
+        return [0xc25cCd4896917E9e31925755cEd674cBD7214E1A, 0x64d3CbAB6100782a7839fC1af791027a2f1908D2];
+    }
+
+    function _liveRatchetStaker() internal view returns (address) {
+        address[2] memory c = _ratchetSmokeStakerCandidates();
+        for (uint256 i = 0; i < c.length; i++) {
+            if (c[i] == OWNER || c[i].code.length != 0) continue;
+            (bool ok, bytes memory d) = RATCHET_NFT_STAKER.staticcall(abi.encodeWithSignature("users(address)", c[i]));
+            if (ok && d.length >= 64) {
+                (uint256 amount,) = abi.decode(d, (uint256, uint256));
+                if (amount > 0) return c[i];
+            }
+        }
+        return address(0);
+    }
+
+    function _requireDisabledRevert(bool ok, bytes memory ret, string memory what) internal pure {
+        require(!ok, string.concat("smoke: ", what, " succeeded after the ratchet disable"));
+        require(ret.length >= 68, string.concat("smoke: ", what, " reverted without a reason string"));
+        bytes memory body = new bytes(ret.length - 4);
+        for (uint256 i = 0; i < body.length; i++) {
+            body[i] = ret[i + 4];
+        }
+        require(
+            keccak256(bytes(abi.decode(body, (string)))) == keccak256("NFTMinterV2: dispatcher is disabled"),
+            string.concat("smoke: ", what, " did not revert with 'NFTMinterV2: dispatcher is disabled'")
+        );
+    }
+
+    /// @notice Story 135 preview probes, inside the Phase 5 snapshot (third parties only, never OWNER):
+    ///         a funded `mint(7)` and a funded `RatchetBatchNFTMinter.batchMint` both revert "dispatcher is disabled";
+    ///         a live RatchetNFTStaker staker can still claim, unstake and re-stake its id-7 NFT.
+    function _smokeRatchetShutdown() internal {
+        INFTMinterV2ND nm = INFTMinterV2ND(NFT_MINTER);
+        address actor = makeAddr("story135-smoke-ratchet-minter");
+        require(actor != OWNER, "smoke actors must never be OWNER");
+        (, uint256 p7,,) = nm.configs(RATCHET_INDEX);
+        deal(USDC, actor, p7 * 4);
+        vm.startPrank(actor);
+        IERC20(USDC).approve(NFT_MINTER, p7 * 2);
+        IERC20(USDC).approve(RATCHET_BATCH_MINTER, p7 * 2);
+        (bool ok, bytes memory ret) =
+            NFT_MINTER.call(abi.encodeWithSignature("mint(uint256,address)", RATCHET_INDEX, actor));
+        _requireDisabledRevert(ok, ret, "NFTMinter.mint(7)");
+        (ok, ret) = RATCHET_BATCH_MINTER.call(
+            abi.encodeWithSignature("batchMint(uint256,address,uint256,uint256)", 2, actor, p7 * 2, 0)
+        );
+        _requireDisabledRevert(ok, ret, "RatchetBatchNFTMinter.batchMint");
+        vm.stopPrank();
+        require(nm.balanceOf(actor, RATCHET_INDEX) == 0, "smoke: ratchet actor received an id-7 NFT");
+        smokeRatchetMintRefused = true;
+        smokeRatchetBatchMintRefused = true;
+        console.log("SMOKE|RATCHET|mint(7) and RatchetBatchNFTMinter.batchMint refused: dispatcher is disabled");
+        _ownerInvariant("smoke: ratchet mint probes");
+
+        address holder = _liveRatchetStaker();
+        if (holder == address(0)) {
+            console.log("SMOKE|RATCHET_STAKER|SKIPPED: no candidate EOA staker is still staked");
+            return;
+        }
+        IRatchetStakerND st = IRatchetStakerND(RATCHET_NFT_STAKER);
+        (uint256 staked,) = st.users(holder);
+        uint256 nftBefore = nm.balanceOf(holder, RATCHET_INDEX);
+        uint256 phBefore = IERC20(PHUSD).balanceOf(holder);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        vm.startPrank(holder);
+        st.claim();
+        uint256 claimed = IERC20(PHUSD).balanceOf(holder) - phBefore;
+        st.unstake(staked);
+        require(nm.balanceOf(holder, RATCHET_INDEX) == nftBefore + staked, "smoke: unstake did not return the NFTs");
+        nm.setApprovalForAll(RATCHET_NFT_STAKER, true);
+        st.stake(staked);
+        vm.stopPrank();
+        (uint256 restaked,) = st.users(holder);
+        require(restaked == staked, "smoke: re-stake did not restore the position");
+        require(nm.balanceOf(holder, RATCHET_INDEX) == nftBefore, "smoke: re-stake did not take the NFTs");
+        smokeRatchetStaker = holder;
+        smokeRatchetClaimed = claimed;
+        console.log("SMOKE|RATCHET_STAKER|claim -> unstake -> stake OK for", holder);
+        console.log("SMOKE|RATCHET_STAKER|staked / phUSD claimed (1 day):", staked, claimed);
+        _ownerInvariant("smoke: ratchet staker");
     }
 
     function _smokeBuyAndBurn() internal {
