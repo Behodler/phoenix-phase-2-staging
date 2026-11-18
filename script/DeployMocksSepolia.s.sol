@@ -257,9 +257,10 @@ interface IPhlimboAPYLike {
  *      ever re-enabled); its type is irrelevant, only the index it consumes matters.
  *      `NFTMinterV2.registerDispatcher` is append-only and tokenId == dispatcher index, so without
  *      the placeholder NudgeRatchet would land at 6, `require(ratchetIndex == 7)` would revert,
- *      MintPageView (hard-codes 7) would break and RatchetNFTStaker would pin the wrong id. It is a rehearsal only in name: it is what makes dispatcher indices and
- *      ERC-1155 ids mirror mainnet (Uniboost EYE/SCX/FLX 1/2/3, UniPooler 4, GatherWBTC 5,
- *      placeholder 6 disabled, NudgeRatchet 7).
+ *      MintPageView (hard-codes 7) would break and RatchetNFTStaker would pin the wrong id. It is
+ *      a rehearsal only in name: it is what makes dispatcher indices and ERC-1155 ids mirror
+ *      mainnet (Uniboost EYE/SCX/FLX 1/2/3, UniPooler 4, GatherWBTC 5, placeholder 6 disabled,
+ *      NudgeRatchet 7).
  *
  *      OWNERSHIP EXCEPTION. Every contract is owned by the single deployer EOA. The repo
  *      CLAUDE.md "Required Behavior" rules 4-5 gate such relaxations on chainId 31337; this mock
