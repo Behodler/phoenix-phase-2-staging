@@ -28,7 +28,10 @@ import "../src/mocks/MockMarketAMMAdapter.sol";
 import {PhlimboV3} from "@phlimbo-ea/PhlimboV3.sol";
 import {IPhlimboV3} from "@phlimbo-ea/interfaces/IPhlimboV3.sol";
 import {PhusdStableMinter} from "@phUSD-stable-minter/PhusdStableMinter.sol";
-import "@pauser/Pauser.sol";
+// Story 136: PauserV2 is the ONLY pauser on this chain (DeployMocks Phase 11.16 end state, constructed
+// directly). Pauser V1 is never deployed here, so its import is gone.
+import {PauserV2} from "@pauser/PauserV2.sol";
+import {PauserV2LocalMigration} from "./helpers/PauserV2LocalMigration.sol";
 import {ERC4626YieldStrategy} from "@vault/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import {ERC4626MarketYieldStrategy} from "@vault/concreteYieldStrategies/ERC4626MarketYieldStrategy.sol";
 import {AYieldStrategy} from "@vault/AYieldStrategy.sol";
@@ -87,6 +90,10 @@ import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
 import {IYieldStrategy} from "reflax-yield-vault/interfaces/IYieldStrategy.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+// Story 136: NFTBonfire (DeployMocks Phase 11.15), deployed and wired through the SAME library
+// DeployMocks and test/NFTBonfireLocalWiring.t.sol use.
+import {NFTBonfire} from "@yield-claim-nft/NFTBonfire.sol";
+import {NFTBonfireLocalWiring} from "./helpers/NFTBonfireLocalWiring.sol";
 
 /**
  * @notice Phlimbo's two-step APY admin surface. Byte-identical to the shim in
@@ -102,6 +109,11 @@ interface ISepoliaUniV2PairLike {
     function token0() external view returns (address);
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
     function balanceOf(address account) external view returns (uint256);
+}
+
+/// @notice Story 136: the one getter every Phoenix pausable exposes, for the PauserV2 end-state sweep.
+interface IPausableSepoliaLike {
+    function pauser() external view returns (address);
 }
 
 interface IPhlimboAPYLike {
@@ -188,6 +200,24 @@ interface IPhlimboAPYLike {
  *          script's addresses are unchanged. It creates `AntimatterPoolSeeder` and
  *          `AntimatterSusdsPair` and mints the deployer 10k demo Antimatter.
  *
+ *        - STORY 136 (sepolia-catch-up): re-derived against DeployMocks at phStaging2 master
+ *          `14bdf56` for Phases 11.15, 11.16 and 11.17. This chain now INCLUDES all three, each
+ *          constructed as the END STATE DeployMocks reaches rather than replayed as a migration:
+ *          * 11.15 NFTBonfire (story 125): deployed and wired through `NFTBonfireLocalWiring` (its
+ *            PauserV2 overload) in the appended Phase 11.15, mainnet params (10 AM/day, 100 AM cap).
+ *            The 1% SYA discount is set directly in Phase 7.5; DeployMocks only passes through 20%
+ *            for its Phase 11.12 smoke harvest, which this chain does not run.
+ *          * 11.16 PauserV2 (story 127): no V1 -> V2 rotation. PauserV2 is deployed in Phase 1.5 in
+ *            V1's place under the `Pauser` key, so every registrant lands on V2 from the start and
+ *            no Pauser V1 exists. The exact registrant set and `health()` are asserted at the end.
+ *          * 11.17 SYA gate OFF (story 130): Phase 8.7 no longer gates the SYA (no setNFTMinter, no
+ *            SYA burner grant), so the gate is never on; read-backs assert nftMinter == 0, no burner
+ *            right and canClaim for an NFT-less probe, in Phase 8.7 and again in the terminal sweep.
+ *          DeployMocks Phases 11.18 (nudge-discount minter, story 118) and 11.19 (ratchet shutdown,
+ *          story 135) are NOT yet ported (phStaging2:137). The add-on scripts deploy nothing
+ *          pausable, so none of them registers on a pauser.
+ *        - The deployer must never be the mainnet owner Ledger (asserted beside the chain gate).
+ *
  *      SEPOLIA-ONLY ADDITION — MockSUSDS is priced at 1.1 USDS (Phase 1, `SEPOLIA_SUSDS_PREMIUM_BPS`)
  *      so code that assumes 1 sUSDS == 1 USDS misbehaves visibly here, and the phUSD/sUSDS pair is
  *      seeded at phUSD par to match. DeployMocks keeps sUSDS at 1:1.
@@ -250,6 +280,19 @@ contract DeployMocksSepolia is Script {
     // UniPoolerV2 lives at NFTMinterV2 index 4, the slot the Balancer pooler held on mainnet.
     uint256 constant UNI_POOLER_INDEX = 4;
 
+    // ---- Story 136: DeployMocks Phases 11.15-11.17 end state ----
+    // The mainnet owner Ledger. Never the Sepolia deployer (checked beside the chain gate).
+    address constant SEPOLIA_FORBIDDEN_DEPLOYER = 0xCad1a7864a108DBFF67F4b8af71fAB0C7A86D0B6;
+    // The SYA discount the chain ENDS on: 1% (100 bps), DeployMocks' SYA_FINAL_DISCOUNT_BPS and the
+    // live mainnet SYA (story 131). Set directly in Phase 7.5: DeployMocks only passes through 2000
+    // bps because its Phase 11.12 smoke harvest needs 20%, and this chain runs no smoke harvest.
+    uint256 constant SYA_FINAL_DISCOUNT_BPS = 100;
+    // Any EOA that holds no claim NFT; `canClaim` must be true for it with the SYA gate off.
+    // Same derivation as DeployMocks' SYA_GATE_OFF_PROBE.
+    address constant SYA_GATE_OFF_PROBE = address(uint160(uint256(keccak256("story-130 SYA gate-off probe"))));
+    // Every pausable contract this script registers on PauserV2 (asserted exactly at the end).
+    uint256 constant EXPECTED_PAUSER_REGISTRANTS = 12;
+
     // Deployment addresses
     MockPhUSD public phUSD;
     MockRewardToken public rewardToken; // USDC - the consolidated reward token
@@ -277,7 +320,9 @@ contract DeployMocksSepolia is Script {
     // Tracked under its own `PhlimboV3` key; the legacy `PhlimboEA` key retired with V2.
     PhlimboV3 public phlimboV3;
     MockEYE public eyeToken;
-    Pauser public pauser;
+    // Story 136: PauserV2, tracked under the `Pauser` address key exactly as DeployMocks re-tracks it
+    // after Phase 11.16. Every pausable contract on this chain registers here from the start.
+    PauserV2 public pauser;
     StableYieldAccumulator public stableYieldAccumulator;
     ViewRouter public viewRouter;
     // The V3-native deposit page, and the only one the router ever holds. Deliberately KEYLESS —
@@ -425,6 +470,11 @@ contract DeployMocksSepolia is Script {
         // Story 098: Sepolia only. DeployMocks' fresh-anvil nonce gate is dropped on purpose — the
         // Sepolia deployer key has history, and forge's `--resume` is the recovery path.
         require(block.chainid == 11155111, "DeployMocksSepolia: sepolia only");
+        // Story 136: the deployer owns every contract on this chain and must never be the mainnet
+        // owner Ledger, which receives nothing, not even mock tokens on a testnet.
+        require(
+            deployer != SEPOLIA_FORBIDDEN_DEPLOYER, "DeployMocksSepolia: deployer must not be the mainnet Ledger owner"
+        );
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -517,10 +567,18 @@ contract DeployMocksSepolia is Script {
         _trackDeployment("MockWBTC", address(mockWBTC), gasBefore - gasleft());
         console.log("MockWBTC deployed at:", address(mockWBTC));
 
+        // Story 136: DeployMocks Phase 11.16 (story 127) deploys V1 here and later rotates every V1
+        // registrant except the retired StableStaker V1 onto a PauserV2 it re-tracks under the
+        // `Pauser` key. A fresh Sepolia deploy constructs that END STATE directly: PauserV2 in V1's
+        // slot, so every `setPauser` / `register` below lands on V2 and no V1 ever exists. Same EYE
+        // token; the 1000-EYE burn is V2's constructor default, which equals V1's (DeployMocks
+        // asserts V2 burn == V1 burn).
         gasBefore = gasleft();
-        pauser = new Pauser(address(eyeToken));
+        pauser = new PauserV2(address(eyeToken));
         _trackDeployment("Pauser", address(pauser), gasBefore - gasleft());
-        console.log("Pauser deployed at:", address(pauser));
+        require(pauser.eyeToken() == address(eyeToken), "story-136: PauserV2 EYE token mismatch");
+        require(pauser.eyeBurnAmount() == 1000e18, "story-136: PauserV2 burn amount is not the 1000 EYE default");
+        console.log("PauserV2 deployed at (tracked as `Pauser`):", address(pauser));
 
         // ====== PHASE 2: Yield Strategy Deployment ======
         console.log("\n=== Phase 2: Deploying Yield Strategies ===");
@@ -1197,7 +1255,6 @@ contract DeployMocksSepolia is Script {
         // yield strategies are registered via addYieldStrategy instead). Call dropped.
         // stableYieldAccumulator.setMinter(address(minter));
 
-
         // Story 098: the sDOLA strategy is registered directly (DeployMocks' post-repoint shape).
         stableYieldAccumulator.addYieldStrategy(address(yieldStrategyDola), address(dola));
         console.log("Added YieldStrategyDola (sDOLA) to yield strategy registry");
@@ -1213,9 +1270,10 @@ contract DeployMocksSepolia is Script {
         stableYieldAccumulator.addYieldStrategy(address(yieldStrategyUSDe), address(usde));
         console.log("Configured USDe token config (18 decimals, 1:1) and added YieldStrategyUSDe (story 116)");
 
-        // Set discount rate (20% = 2000 basis points)
-        stableYieldAccumulator.setDiscountRate(2000);
-        console.log("Set discount rate to 2000 basis points (20%)");
+        // Story 136: the FINAL discount, 1% (100 bps), set directly (see SYA_FINAL_DISCOUNT_BPS).
+        stableYieldAccumulator.setDiscountRate(SYA_FINAL_DISCOUNT_BPS);
+        require(stableYieldAccumulator.getDiscountRate() == SYA_FINAL_DISCOUNT_BPS, "story-136: SYA discount is not 1%");
+        console.log("Set discount rate to 100 basis points (1%) - DeployMocks Phase 11.15 end state");
 
         // Approve Phlimbo to spend reward tokens with max approval
         stableYieldAccumulator.approvePhlimbo(type(uint256).max);
@@ -1313,16 +1371,14 @@ contract DeployMocksSepolia is Script {
 
         console.log("All protocol contracts registered with Pauser");
 
-        // ====== PHASE 8.7: SYA Integration — V2 NFTMinter ======
-        console.log("\n=== Phase 8.7: SYA Integration - V2 NFTMinter ===");
-
-        // Set V2 NFTMinter on StableYieldAccumulator
-        stableYieldAccumulator.setNFTMinter(address(nftMinterV2));
-        console.log("StableYieldAccumulator.setNFTMinter -> NFTMinterV2");
-
-        // Set StableYieldAccumulator as authorized burner on V2 NFTMinter
-        nftMinterV2.setAuthorizedBurner(address(stableYieldAccumulator), true);
-        console.log("NFTMinterV2.setAuthorizedBurner(StableYieldAccumulator, true)");
+        // ====== PHASE 8.7: SYA NFT claim gate — OFF (story 136) ======
+        // DeployMocks gates the SYA here (setNFTMinter(NFTMinterV2) + SYA as an NFTMinterV2 burner)
+        // and clears both in Phase 11.17 (story 130), mirroring the gate-free SYA phStaging2:131
+        // deployed on mainnet. This fresh chain constructs that end state directly: the gate is
+        // never set, so neither transaction is sent. Read-backs prove the end state.
+        console.log("\n=== Phase 8.7: SYA NFT claim gate OFF (never set; DeployMocks 11.17 end state) ===");
+        _requireSyaGateOff();
+        console.log("  SYA.nftMinter() == 0, SYA not an NFTMinterV2 burner, canClaim(NFT-less probe) == true");
 
         // ====== PHASE 9: Seed YieldStrategyDola (sDOLA) with PhUSD Minting ======
         console.log("\n=== Phase 9: Seed YieldStrategyDola (sDOLA) with PhUSD Minting ===");
@@ -1449,6 +1505,11 @@ contract DeployMocksSepolia is Script {
         );
         console.log("ViewRouter deposit page -> DepositPageViewV3");
 
+        // ====== PHASE 11.15: NFTBonfire (story 136, ports DeployMocks Phase 11.15 / story 125) ======
+        // After every phase DeployMocks' 11.15 depends on (NFTMinterV2, Antimatter, PauserV2 all
+        // deployed and owned by the deployer). The SYA discount half of 11.15 is already in Phase 7.5.
+        _deployNFTBonfire(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1510,6 +1571,8 @@ contract DeployMocksSepolia is Script {
         _markConfigured("StableStakerV2", 0);
         _markConfigured("ViewRouter", 0);
         _markConfigured("MintPageView", 0);
+        // Story 136: NFTBonfire (deployed and wired inside _deployNFTBonfire).
+        _markConfigured("NFTBonfire", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -1547,18 +1610,22 @@ contract DeployMocksSepolia is Script {
         );
         console.log("  - Legacy Balancer keys emitted as zero-address placeholders by extract:sepolia");
         console.log("  - KEPT: index-6 disabled placeholder, so NudgeRatchet occupies index 7 as on mainnet");
+        console.log("  - Story 136: PauserV2 / SYA gate-off / 1% discount constructed directly, not migrated");
         console.log("");
         console.log("Architecture Summary:");
         console.log("  - DOLA -> YieldStrategyDola (ERC4626YieldStrategy over MockSDOLA) -> PhusdStableMinter");
         console.log("  - USDC -> YieldStrategyUSDC (ERC4626YieldStrategy over MockAutoUSDC) -> PhusdStableMinter");
         console.log("  - USDe -> YieldStrategyUSDe (ERC4626MarketYieldStrategy) -> StableStakerV2");
         console.log(
-            "  - SYA: reward USDC, 20% discount, strategies YieldStrategyDola + YieldStrategyUSDC + YieldStrategyUSDe"
+            "  - SYA: reward USDC, 1% discount, NFT claim gate OFF, strategies YieldStrategyDola + YieldStrategyUSDC + YieldStrategyUSDe"
         );
         console.log("  - SYAHarvester: deployed by the sya-harvester:sepolia add-on (needs the UniswapHelper venues)");
         console.log("  - MockSUSDS share price 1.1 USDS; phUSD/sUSDS pair seeded at phUSD par");
         console.log("  - StableStakerV2 claimEnabled TRUE (DeployMocks Phase 11.13 end state)");
-        console.log("  - Global Pauser: minter, PhlimboV3, SYA, NFTMinterV2, NFTStaker, stakers, V2, Antimatter");
+        console.log(
+            "  - Global PauserV2 (`Pauser` key; no V1): minter, PhlimboV3, SYA, NFTMinterV2, NFTStaker, stakers, V2, Antimatter, NFTBonfire"
+        );
+        console.log("  - NFTBonfire: 10 AM/day, 100 AM cap (DeployMocks Phase 11.15)");
         console.log("  - Terminal sweep: deployer phUSD mint authority REVOKED, end-state ACL asserted");
         console.log("  - Owner of every contract: the deployer EOA (mock-stack exception, story 098)");
     }
@@ -1790,6 +1857,94 @@ contract DeployMocksSepolia is Script {
     // Script-audit run-26, L-04: terminal residual-privilege sweep
     // =====================================================================
 
+    // =====================================================================
+    // Story 136: DeployMocks Phases 11.15-11.17 on Sepolia (end state, constructed directly)
+    // =====================================================================
+
+    /// @dev Set by `_deployNFTBonfire`. Tracked as "NFTBonfire" (ContractAddresses key `NFTBonfire`).
+    NFTBonfire public nftBonfire;
+
+    /// @dev Phase 11.15 (DeployMocks story 125). Deploys NFTBonfire and wires it through
+    ///      `NFTBonfireLocalWiring` (burner -> AM minter -> pauser + register -> cap -> rate LAST, each
+    ///      read back), using the library's PauserV2 overload because this chain has no V1. Mainnet
+    ///      params, which are DeployMocks' params: ratePerDay 10 AM, maxPayout 100 AM (library
+    ///      constants). The deployer owns NFTMinterV2, Antimatter and PauserV2 and stays bonfire owner.
+    function _deployNFTBonfire(address deployer) internal {
+        console.log("\n=== Phase 11.15: NFTBonfire (story 136, DeployMocks story 125) ===");
+
+        uint256 gasBefore = gasleft();
+        nftBonfire = NFTBonfireLocalWiring.deploy(deployer, nftMinterV2, antimatter);
+        _trackDeployment("NFTBonfire", address(nftBonfire), gasBefore - gasleft());
+        require(nftBonfire.owner() == deployer, "story-136: bonfire owner is not the deployer");
+
+        NFTBonfireLocalWiring.wire(nftBonfire, nftMinterV2, antimatter, pauser);
+        require(nftBonfire.pendingPayout() == 0, "story-136: bonfire pot must start empty");
+
+        console.log("  NFTBonfire:", address(nftBonfire));
+        console.log("  ratePerDay:", nftBonfire.ratePerDay());
+        console.log("  maxPayout:", nftBonfire.maxPayout());
+        console.log("  pauser (PauserV2):", nftBonfire.pauser());
+    }
+
+    /// @dev The SYA NFT claim gate is OFF: no NFT minter, no SYA burner right on NFTMinterV2, and an
+    ///      NFT-less address can claim. The same three read-backs `SyaGateOffLocal.turnGateOff` ends on.
+    function _requireSyaGateOff() internal view {
+        require(stableYieldAccumulator.nftMinter() == address(0), "story-136: SYA NFT claim gate is not off");
+        require(
+            !nftMinterV2.authorizedBurners(address(stableYieldAccumulator)),
+            "story-136: SYA must not be an NFTMinterV2 burner with the gate off"
+        );
+        require(
+            stableYieldAccumulator.canClaim(SYA_GATE_OFF_PROBE),
+            "story-136: canClaim(probe) must be true with the gate off"
+        );
+    }
+
+    /// @dev Terminal end-state assertions for the story-136 ports, called from the sweep:
+    ///        - PauserV2 holds EXACTLY the expected registrant set, each with pauser() == PauserV2,
+    ///          and `health()` reports nothing that would make pause() miss or revert;
+    ///        - the SYA gate is still off and the discount is still 1%;
+    ///        - the bonfire is still wired (burner, AM minter, pauser, cap, rate) and owned by the deployer.
+    function _requireStory136EndState() internal view {
+        address[] memory expected = new address[](EXPECTED_PAUSER_REGISTRANTS);
+        expected[0] = address(phlimboV3);
+        expected[1] = address(uniboostStakerEYE);
+        expected[2] = address(uniboostStakerSCX);
+        expected[3] = address(uniboostStakerFLX);
+        expected[4] = address(batchNFTMinter);
+        expected[5] = address(minter);
+        expected[6] = address(stableYieldAccumulator);
+        expected[7] = address(nftMinterV2);
+        expected[8] = address(nftStaker);
+        expected[9] = address(stableStakerV2);
+        expected[10] = address(antimatter);
+        expected[11] = address(nftBonfire);
+
+        address[] memory registered = pauser.getPausableContracts();
+        require(registered.length == EXPECTED_PAUSER_REGISTRANTS, "story-136: PauserV2 registrant count mismatch");
+        for (uint256 i = 0; i < expected.length; i++) {
+            require(expected[i] != address(0), "story-136: expected PauserV2 registrant not deployed");
+            require(pauser.isRegistered(expected[i]), "story-136: contract not registered on PauserV2");
+            require(
+                IPausableSepoliaLike(expected[i]).pauser() == address(pauser),
+                "story-136: registrant pauser() is not PauserV2"
+            );
+        }
+        PauserV2LocalMigration.requireHealthy(pauser);
+
+        _requireSyaGateOff();
+        require(stableYieldAccumulator.getDiscountRate() == SYA_FINAL_DISCOUNT_BPS, "story-136: SYA discount is not 1%");
+
+        require(nftMinterV2.authorizedBurners(address(nftBonfire)), "story-136: bonfire is not an NFTMinterV2 burner");
+        require(antimatter.isApprovedMinter(address(nftBonfire)), "story-136: bonfire is not an AM minter");
+        require(nftBonfire.pauser() == address(pauser), "story-136: bonfire pauser is not PauserV2");
+        require(nftBonfire.maxPayout() == NFTBonfireLocalWiring.MAX_PAYOUT, "story-136: bonfire maxPayout");
+        require(nftBonfire.ratePerDay() == NFTBonfireLocalWiring.RATE_PER_DAY, "story-136: bonfire ratePerDay");
+
+        console.log("  story-136 end state asserted: PauserV2 registrants (exact set):", registered.length);
+        console.log("  SYA gate off + 1% discount; NFTBonfire wired (burner, AM minter, PauserV2, cap, rate)");
+    }
+
     /// @dev Revokes the deployer's phUSD mint authority and then asserts the WHOLE expected
     ///      end-state ACL declaratively, so a future grant that forgets to clean up fails the run.
     ///
@@ -1817,6 +1972,12 @@ contract DeployMocksSepolia is Script {
         _requireLiveMinter(address(uniboostHookEYE), true, "UniboostHookEYE");
         _requireLiveMinter(address(uniboostHookSCX), true, "UniboostHookSCX");
         _requireLiveMinter(address(uniboostHookFLX), true, "UniboostHookFLX");
+
+        // Story 136: Antimatter mint rights - the deployer never holds one on this chain.
+        require(
+            !antimatter.isApprovedMinter(deployer), "RESIDUAL PRIVILEGE SWEEP FAILED: deployer is an Antimatter minter"
+        );
+        _requireStory136EndState();
 
         console.log(
             "  end-state phUSD ACL asserted: deployer OUT, PhlimboV3 + minter + StableStakerV2 + Antimatter + 5 hooks IN"

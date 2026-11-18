@@ -5,6 +5,13 @@ import {NFTBonfire} from "@yield-claim-nft/NFTBonfire.sol";
 import {NFTMinterV2} from "@yield-claim-nft/NFTMinterV2.sol";
 import {Antimatter} from "antimatter/Antimatter.sol";
 import {Pauser} from "@pauser/Pauser.sol";
+import {PauserV2} from "@pauser/PauserV2.sol";
+
+/// @dev The two calls `wire` makes on the global pauser, shared by `Pauser` (V1) and `PauserV2`.
+interface INFTBonfirePauserRegistry {
+    function register(address pausableContract) external;
+    function isRegistered(address pausableContract) external view returns (bool);
+}
 
 /// @title  NFTBonfireLocalWiring
 /// @notice Story 125. Deploys `NFTBonfire` (lib/yield-claim-nft, pin c5ad56d) and wires it in the
@@ -19,8 +26,9 @@ import {Pauser} from "@pauser/Pauser.sol";
 ///         the bonfire is registered with the global Pauser in its own right, and `setRatePerDay(0)`
 ///         is the owner's one-transaction stop.
 ///
-///         Shared by `DeployMocks` (Phase 11.15, inside its broadcast) and
-///         `test/NFTBonfireLocalWiring.t.sol`, so the forge test drives exactly the anvil wiring.
+///         Shared by `DeployMocks` (Phase 11.15, inside its broadcast),
+///         `DeployMocksSepolia` (story 136, PauserV2 overload) and `test/NFTBonfireLocalWiring.t.sol`,
+///         so the forge test drives exactly the anvil wiring.
 /// @dev    Internal functions, inlined into the caller like `SyaHarvesterLocalConfig`: every `new` and
 ///         every call is made by the calling contract (the broadcasting deployer in the script), so the
 ///         caller must own NFTMinterV2, Antimatter, Pauser, and is made owner of the bonfire.
@@ -41,7 +49,21 @@ library NFTBonfireLocalWiring {
     }
 
     /// @notice Grants and configures in the audit-mandated order. Burning goes live on the last call.
+    ///         V1 overload: DeployMocks (Phase 11.15 wires to V1, rotated to V2 in Phase 11.16).
     function wire(NFTBonfire bonfire, NFTMinterV2 nftMinter, Antimatter antimatter, Pauser pauser) internal {
+        _wire(bonfire, nftMinter, antimatter, INFTBonfirePauserRegistry(address(pauser)));
+    }
+
+    /// @notice Same sequence, registering on PauserV2 directly. Story 136: DeployMocksSepolia has no
+    ///         Pauser V1 (it constructs DeployMocks' post-11.16 end state), so the bonfire goes
+    ///         straight onto V2. `PauserV2.register` makes the same `pauser() == this` check as V1.
+    function wire(NFTBonfire bonfire, NFTMinterV2 nftMinter, Antimatter antimatter, PauserV2 pauser) internal {
+        _wire(bonfire, nftMinter, antimatter, INFTBonfirePauserRegistry(address(pauser)));
+    }
+
+    function _wire(NFTBonfire bonfire, NFTMinterV2 nftMinter, Antimatter antimatter, INFTBonfirePauserRegistry pauser)
+        private
+    {
         // 1. Burner grant: NFTMinterV2 checks no holder approval, so the bonfire always burns from msg.sender.
         nftMinter.setAuthorizedBurner(address(bonfire), true);
         require(nftMinter.authorizedBurners(address(bonfire)), "story-125: bonfire is not an NFTMinterV2 burner");
