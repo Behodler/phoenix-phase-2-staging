@@ -9,9 +9,10 @@
  *     eval "$(node scripts/quote-nudge-discount-buy-and-burn.js all 50)"
  *     # -> export USDC_IN_WEI=...   export MIN_PHUSD_OUT_WEI=...
  *
- * Re-quote IMMEDIATELY before :preview and :broadcast, in the SAME shell, so both use identical floors. A trade on the
- * pair between quoting and broadcasting can push the live quote below the floor; the simulation then reverts and you
- * re-quote.
+ * The npm keys nudge-discount:buy-and-burn:preview and :broadcast run this helper themselves, immediately before forge
+ * (inputs BUY_AND_BURN_USDC, default `all`, and BUY_AND_BURN_TOLERANCE_BPS, default 50), and stop if it exits non-zero.
+ * A trade on the pair between quoting and broadcasting can still push the live quote below the floor; the run then
+ * reverts and you simply run the key again.
  *
  * WHAT IT QUOTES. The pinned contract (nft-staking d7eb782) has no quote view, so this is the route quote, via
  * `cast call` (eth_call), read from the minter's own configured route:

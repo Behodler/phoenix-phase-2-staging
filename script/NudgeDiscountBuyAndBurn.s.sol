@@ -26,8 +26,8 @@ import {NudgeDiscountMainnetBase} from "./helpers/NudgeDiscountMainnetBase.sol";
  *           USDC_IN_WEI        USDC (6dp) to spend; non-zero and <= pendingBuyUSDC
  *           MIN_PHUSD_OUT_WEI  floor on the phUSD bought; non-zero
  *           DEADLINE_SECS      optional, default 1800; added to the block timestamp
- *         Quote them in the SAME shell immediately before :preview and :broadcast, so both use identical floors:
- *             eval "$(node scripts/quote-nudge-discount-buy-and-burn.js all 50)"
+ *         The npm keys :preview and :broadcast quote them themselves (scripts/quote-nudge-discount-buy-and-burn.js,
+ *         inputs BUY_AND_BURN_USDC default `all` and BUY_AND_BURN_TOLERANCE_BPS default 50) immediately before forge.
  *         The script re-quotes the route live and requires the floor in [quote * (1 - 1%), quote]: above the quote
  *         the swap would revert anyway, and further below it no longer protects against a sandwich.
  *

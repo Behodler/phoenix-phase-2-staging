@@ -224,3 +224,86 @@ test('quote: a non-zero book entry with no RPC configured fails closed', () => {
     assert.equal(r.stdout, '');
     assert.match(r.stderr, /RPC_MAINNET/);
 });
+
+// ---- Self-quoting buy-and-burn npm keys ---------------------------------------------------------------------------
+// Each key runs the quote helper itself, immediately before forge, so the floor is fresh and no manual `eval` is
+// needed. Run the real key strings under `sh` with stub `node` / `forge` on PATH: nothing reaches an RPC or a Ledger.
+
+function runKeyWithStubs(key, { quoteFails = false, env = {} } = {}) {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const cmd = pkg.scripts[key];
+    assert.ok(cmd, `missing npm key ${key}`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buy-and-burn-key-'));
+    const log = path.join(dir, 'calls.log');
+    fs.writeFileSync(
+        path.join(dir, 'node'),
+        `#!/bin/sh
+echo "node $*" >> "${log}"
+case "$1" in
+  scripts/quote-nudge-discount-buy-and-burn.js)
+    if [ -n "$QUOTE_FAILS" ]; then echo "quote failed" >&2; exit 3; fi
+    echo "export USDC_IN_WEI=1054071716"
+    echo "export MIN_PHUSD_OUT_WEI=999" ;;
+esac
+exit 0
+`,
+        { mode: 0o755 }
+    );
+    fs.writeFileSync(
+        path.join(dir, 'forge'),
+        `#!/bin/sh
+echo "forge USDC_IN_WEI=$USDC_IN_WEI MIN_PHUSD_OUT_WEI=$MIN_PHUSD_OUT_WEI PREVIEW_MODE=$PREVIEW_MODE $*" >> "${log}"
+exit 0
+`,
+        { mode: 0o755 }
+    );
+    const r = spawnSync('sh', ['-c', cmd], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: {
+            PATH: `${dir}:/usr/bin:/bin`,
+            RPC_MAINNET: 'http://stub.invalid',
+            ...(quoteFails ? { QUOTE_FAILS: '1' } : {}),
+            ...env,
+        },
+    });
+    const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
+    return { r, calls };
+}
+
+for (const key of ['nudge-discount:buy-and-burn:preview', 'nudge-discount:buy-and-burn:broadcast']) {
+    test(`${key}: quotes all at 50 bps by default and hands the floor to forge`, () => {
+        const { r, calls } = runKeyWithStubs(key);
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(calls[0], 'node scripts/quote-nudge-discount-buy-and-burn.js all 50');
+        assert.match(calls[1], /^forge USDC_IN_WEI=1054071716 MIN_PHUSD_OUT_WEI=999 /);
+        assert.match(calls[1], /NudgeDiscountBuyAndBurn\.s\.sol:NudgeDiscountBuyAndBurn/);
+    });
+
+    test(`${key}: BUY_AND_BURN_USDC / BUY_AND_BURN_TOLERANCE_BPS override the quote inputs`, () => {
+        const { r, calls } = runKeyWithStubs(key, {
+            env: { BUY_AND_BURN_USDC: '500000000', BUY_AND_BURN_TOLERANCE_BPS: '80' },
+        });
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(calls[0], 'node scripts/quote-nudge-discount-buy-and-burn.js 500000000 80');
+    });
+
+    test(`${key}: a failed quote stops the key before forge runs`, () => {
+        const { r, calls } = runKeyWithStubs(key, { quoteFails: true });
+        assert.notEqual(r.status, 0);
+        assert.ok(!calls.some((c) => c.startsWith('forge')), `forge ran after a failed quote: ${calls.join(' | ')}`);
+    });
+}
+
+test('nudge-discount:buy-and-burn:preview: simulation only, never the ledger recorder', () => {
+    const { calls } = runKeyWithStubs('nudge-discount:buy-and-burn:preview');
+    assert.match(calls[1], /PREVIEW_MODE=true/);
+    assert.doesNotMatch(calls[1], /--broadcast/);
+    assert.ok(!calls.some((c) => c.includes('ledger-record')));
+});
+
+test('nudge-discount:buy-and-burn:broadcast: broadcasts, then records the tax ledger last', () => {
+    const { calls } = runKeyWithStubs('nudge-discount:buy-and-burn:broadcast');
+    assert.match(calls[1], /--broadcast/);
+    assert.equal(calls[calls.length - 1], 'node scripts/ledger-record.js NudgeDiscountBuyAndBurn.s.sol 1');
+});
