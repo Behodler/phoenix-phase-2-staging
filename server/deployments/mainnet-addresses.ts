@@ -56,6 +56,7 @@
 // REPOINTED from 0xeE426A950Cb17D559F6391ef0D140715CD46703B, both from progress.sya-gate-off.1.json (NFT claim gate off, 1% discount).
 // Updated 2026-11-12: NudgeDiscountBatchMinter added as a ZERO placeholder (story 118) so the key-set matches
 // ContractAddresses; the phStaging2:119 cutover deploys BatchNFTMinterNudgeDiscount and its patcher fills it.
+// Updated 2026-11-18: nudge-discount minter cutover (story 119) — NudgeDiscountBatchMinter FILLED from progress.nudge-discount.1.json; BatchNFTMinter (old, paused) kept.
 import { ContractAddresses } from './addresses';
 
 
@@ -202,9 +203,10 @@ export const mainnetAddresses: ContractAddresses = {
   WaUSDC: "0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
   NudgeStreamer: "0xF7e26179D6971985107AF66b078932D6484eBEAA",
   BatchNFTMinter: "0x068395556b8c43eDf257DC54D109EA5910aE15c7",
-  // Story 118: BatchNFTMinterNudgeDiscount (nft-staking:033-035), the new index-4 nudge sink. Zero
-  // placeholder until the phStaging2:119 cutover broadcast fills it via its patcher.
-  NudgeDiscountBatchMinter: "0x0000000000000000000000000000000000000000",
+  // Story 118/119: BatchNFTMinterNudgeDiscount (nft-staking:033-035), the index-4 nudge sink. Deployed
+  // by DeployMainnetNudgeDiscount (story 119), registered with PauserV2, patched from progress.nudge-discount.1.json.
+  // BatchNFTMinter above is the OLD minter, paused by the same cutover (kept for the UI until phlimbo-ui:091).
+  NudgeDiscountBatchMinter: "0xD41235bC400BAEDD23aA416Db1F62c944981C42a",
   // Stable Staking. Story 080 RETIRED the `StableStaker` key and replaced it with
   // `StableStakerV2`, deliberately dropping the live V1 address
   // (0xbce8ABC09BaEDCabE93419bF875f6186e182079A, deployed 2026-06-10 by
