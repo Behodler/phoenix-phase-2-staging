@@ -58,7 +58,7 @@ import {NudgePotForwarder} from "../src/periphery/NudgePotForwarder.sol";
  *      sUSDS); OWNER as authorised buyer; the cap/boost gate constants (cap, perPoint, and maxBoost = DAY1_MAX_BOOST
  *      = 0: story 135 ships the boost disabled; the measured gas-safe ceiling MAX_BOOST_GAS_CEILING = 15 is what a
  *      later `setMaxBoost` may raise it to without a new gate run) + require(boostDonationSafe()); setPauser
- *      (PauserV2) THEN PauserV2.register (register requires pauser() == PauserV2); streams USDC 10d / phUSD 30d /
+ *      (PauserV2) THEN PauserV2.register (register requires pauser() == PauserV2); streams USDC 30d / phUSD 30d /
  *      Kendu 30d; setNudgeStreamer; and LAST NFTMinter.setAuthorizedMinter(new, true) - after the pause wiring (the
  *      minter's own pause is the only kill switch for free mints: mintFor ignores the NFTMinter pause) and before
  *      any donor is repointed (the first donation must never reach a minter that cannot mint).

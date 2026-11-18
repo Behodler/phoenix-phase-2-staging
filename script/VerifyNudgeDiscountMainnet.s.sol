@@ -21,7 +21,7 @@ import {NudgeDiscountMainnetBase} from "./helpers/NudgeDiscountMainnetBase.sol";
  *           - story 135: NFTMinter configs(7) is the NudgeRatchet and configs(7).disabled == true (no new ratchet
  *             minting; existing id-7 NFTs keep staking on RatchetNFTStaker);
  *           - NFTMinter.authorizedMinters(new) == true and authorizedMinters(old) == false;
- *           - streams registered (USDC 10d, phUSD 30d, Kendu 30d) and nudgeStreamer set;
+ *           - streams registered (USDC 30d, phUSD 30d, Kendu 30d) and nudgeStreamer set;
  *           - every inventoried donor (all NFTMinter dispatchers + the book's SYA) points at the new minter, none at
  *             the old one;
  *           - old minter paused, not registered with PauserV2, pauser() == OWNER, zero balance and zero buffers;

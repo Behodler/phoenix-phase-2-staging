@@ -217,7 +217,9 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     // ---- owner-settable defaults (Concern 3: the human may change them before or after broadcast) ----
     uint8 internal constant DISCOUNT_PERCENT = 50;
     uint8 internal constant BURN_PERCENT = 100;
-    uint256 internal constant USDC_STREAM_DURATION = 10 days;
+    /// @dev 30 days like phUSD/Kendu (human decision 2026-11-18): the migrated old pot (~957 USDC with 28 days left
+    ///      on its old stream) drips into the new minter at roughly its old pace instead of 3x faster over 10 days.
+    uint256 internal constant USDC_STREAM_DURATION = 30 days;
     uint256 internal constant PHUSD_STREAM_DURATION = 30 days;
     uint256 internal constant KENDU_STREAM_DURATION = 30 days;
 

@@ -198,6 +198,12 @@ contract DeployMainnetNudgeDiscountForkTest is Test {
         // Whole old pot (balance + buffer) now sits in the new minter's USDC stream; old side is empty.
         (, uint256 newBuf,,) = INudgeStreamerFork(NUDGE_STREAMER).streams(address(m), USDC);
         assertEq(newBuf, oldUsdcPot, "new USDC stream buffer == old balance + old buffer");
+        // Every nudge stream, USDC included, depletes over 30 days (human decision 2026-11-18).
+        address[3] memory streamToks = [USDC, PHUSD, KENDU];
+        for (uint256 i = 0; i < 3; i++) {
+            (uint256 dur,,,) = INudgeStreamerFork(NUDGE_STREAMER).streams(address(m), streamToks[i]);
+            assertEq(dur, 30 days, "new minter stream duration == 30 days");
+        }
         assertEq(_oldPot(USDC), 0, "old USDC pot empty");
         assertEq(IERC20(USDC).balanceOf(address(m)), 0, "nothing transferred straight onto the new minter");
         address f = s.potForwarder();
@@ -633,7 +639,7 @@ contract DeployMainnetNudgeDiscountForkTest is Test {
         IERC20(USDC).approve(NUDGE_STREAMER, amt);
         INudgeStreamerCollectFork(NUDGE_STREAMER).collectNudge(address(m), USDC, amt);
         vm.stopPrank();
-        vm.warp(block.timestamp + 11 days);
+        vm.warp(block.timestamp + 31 days); // past the 30-day USDC stream window
         (uint256 overflowFree, uint8 boost, uint8 eff,) = m.previewBoost();
         assertGt(overflowFree, 0, "pot overflows the cap");
         assertEq(boost, 0, "previewBoost() boost 0 with maxBoost 0");
