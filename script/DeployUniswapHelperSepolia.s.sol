@@ -6,6 +6,15 @@ import {UniswapHelperLocalStack} from "./helpers/UniswapHelperLocalStack.sol";
 import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 import {MockSkyPSM} from "../src/mocks/MockSkyPSM.sol";
 
+/// @dev Story 137: the two reads the PSM-reserve gate needs off the nudge-discount minter.
+interface INudgeDiscountPsmLike {
+    function psm() external view returns (address);
+}
+
+interface IERC20BalanceLike {
+    function balanceOf(address) external view returns (uint256);
+}
+
 /**
  * @title DeployUniswapHelperSepolia
  * @notice Add-on to `DeployMocksSepolia`: deploys `UniswapHelper` (story 109) and the four venue mocks it
@@ -28,6 +37,11 @@ import {MockSkyPSM} from "../src/mocks/MockSkyPSM.sol";
  *      OWNERSHIP EXCEPTION. Same as DeployMocksSepolia (story 098): every token here is a mock with an
  *      unrestricted mint; UniswapHelper itself has no owner or admin.
  *
+ *      STORY 137: this add-on is where MockSkyPSM's USDS reserve is seeded on Sepolia, so it is also where
+ *      the nudge-discount minter's `buyAndBurn` precondition is asserted: after seeding, the PSM recorded
+ *      in the progress file must hold at least `NUDGE_DISCOUNT_MIN_PSM_USDS` (DeployMocks' floor) and be
+ *      the PSM the recorded `NudgeDiscountBatchMinter` sells into. User discount mints do not need it.
+ *
  *      HOW TO RUN (env from .envrc: RPC_SEPOLIA, DEPLOYER_SEPOLIA_pk; optional SEPOLIA_WETH_SEED):
  *        npm run uniswap-helper:sepolia-preview   # simulation only, no broadcast, progress file untouched
  *        npm run uniswap-helper:sepolia           # broadcast, then extract + generate sepolia-addresses.ts
@@ -39,6 +53,9 @@ contract DeployUniswapHelperSepolia is Script {
     /// @dev Same demo top-up as DeployMocks Phase 11.8 (UH_DEMO_18 / UH_DEMO_USDC).
     uint256 internal constant DEMO_18 = 10_000e18;
     uint256 internal constant DEMO_USDC = 10_000e6;
+    /// @dev Story 137: DeployMocks' NUDGE_DISCOUNT_MIN_PSM_USDS. Below it the first `buyAndBurn` reverts
+    ///      "MockSkyPSM: USDS reserve short".
+    uint256 public constant NUDGE_DISCOUNT_MIN_PSM_USDS = 100_000e18;
 
     function _progressFile() internal view virtual returns (string memory) {
         return PROGRESS_FILE;
@@ -82,6 +99,13 @@ contract DeployUniswapHelperSepolia is Script {
             antimatter: _dependency(json, "Antimatter")
         });
         address pair = _dependency(json, "PhusdSusdsPair");
+        // Story 137: the minter whose buyAndBurn needs the PSM's USDS reserve. Must already sell into
+        // the recorded PSM, or seeding this PSM's reserve would protect nothing.
+        address nudgeDiscountMinter = _dependency(json, "NudgeDiscountBatchMinter");
+        require(
+            INudgeDiscountPsmLike(nudgeDiscountMinter).psm() == t.skyPSM,
+            "DeployUniswapHelperSepolia: NudgeDiscountBatchMinter does not use the recorded MockSkyPSM"
+        );
 
         uint256 key = _deployerKey();
         address deployer = vm.addr(key);
@@ -98,6 +122,11 @@ contract DeployUniswapHelperSepolia is Script {
 
         require(v.helper.pair() == pair, "DeployUniswapHelperSepolia: UniswapHelper resolves the wrong pair");
         require(MockSkyPSM(t.skyPSM).tin() == 0, "DeployUniswapHelperSepolia: MockSkyPSM tin not zero");
+        // Story 137: the buyAndBurn reserve gate, placed where the reserve now exists. Never relax it.
+        require(
+            IERC20BalanceLike(t.usds).balanceOf(t.skyPSM) >= NUDGE_DISCOUNT_MIN_PSM_USDS,
+            "DeployUniswapHelperSepolia: MockSkyPSM USDS reserve below NUDGE_DISCOUNT_MIN_PSM_USDS"
+        );
 
         if (_previewMode()) {
             console.log("PREVIEW_MODE: progress file left unchanged");

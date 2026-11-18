@@ -831,6 +831,11 @@ SYAHarvester were re-synced with DeployMocks stories 115/116 and the claim unblo
 registered with SYA, StableStakerV2 claims are open, and SYAHarvester comes from an add-on, as do
 the deepened phUSD/sUSDS pool, the Antimatter/sUSDS pool and the demo Antimatter (story 112/114/120). One
 Sepolia-only addition: MockSUSDS is priced at 1.1 USDS, with the phUSD/sUSDS pair seeded at phUSD par.
+Story 137 mirrors the post-NFT-overhaul mainnet: no old batch minting at all (`BatchNFTMinter` and
+`RatchetBatchNFTMinter` are zero placeholders), `NudgeDiscountBatchMinter` wired with the mainnet params
+in `NudgeDiscountMainnetBase.sol` (pinned by `test/DeployMocksSepoliaNudgeDiscountParams.t.sol`) but on
+1-day streams with a pot seeded via `collectNudge`, and ratchet minting disabled after the deployer
+mints and stakes 5 ratchets. The PSM USDS reserve check for `buyAndBurn` lives in the uniswap-helper add-on.
 
 **Ownership exception.** Every contract is owned by the deployer EOA. Rules 4-5 under *Required
 Behavior* gate relaxations on chainId 31337; this mock Sepolia stack is an explicit product-owner

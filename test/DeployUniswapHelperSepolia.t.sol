@@ -12,6 +12,8 @@ import {MockSUSDS} from "../src/mocks/MockSUSDS.sol";
 import {MockDola} from "../src/mocks/MockDola.sol";
 import {MockUSDe} from "../src/mocks/MockUSDe.sol";
 import {MockSkyPSM} from "../src/mocks/MockSkyPSM.sol";
+import {BatchNFTMinterNudgeDiscount} from "nft-staking/BatchNFTMinterNudgeDiscount.sol";
+import {ISkyPSM} from "nft-staking/interfaces/ISkyPSM.sol";
 import {Antimatter} from "antimatter/Antimatter.sol";
 import {UniswapHelper} from "../src/periphery/UniswapHelper.sol";
 
@@ -72,6 +74,8 @@ contract DeployUniswapHelperSepoliaTest is Test {
     IUniswapV2RouterLike internal router;
     address internal pair;
     Antimatter internal am;
+    // Story 137: the recorded minter whose buyAndBurn needs the PSM's USDS reserve.
+    BatchNFTMinterNudgeDiscount internal nudgeDiscountMinter;
 
     function setUp() public {
         vm.chainId(11155111);
@@ -90,6 +94,8 @@ contract DeployUniswapHelperSepoliaTest is Test {
         psm = new MockSkyPSM(address(usdc), address(usds));
         usdc.mint(address(psm), 1_000_000e6);
         am = new Antimatter(address(this)); // story 120: read from the progress file's "Antimatter" key
+        nudgeDiscountMinter = new BatchNFTMinterNudgeDiscount(address(this)); // story 137
+        nudgeDiscountMinter.setPSM(ISkyPSM(address(psm)));
 
         usds.mint(address(this), 2_000e18);
         usds.approve(address(susds), type(uint256).max);
@@ -139,6 +145,8 @@ contract DeployUniswapHelperSepoliaTest is Test {
             _entry("MockSkyPSM", address(psm)),
             ",",
             _entry("Antimatter", address(am)),
+            ",",
+            _entry("NudgeDiscountBatchMinter", address(nudgeDiscountMinter)),
             extra,
             "}}"
         );
@@ -260,6 +268,37 @@ contract DeployUniswapHelperSepoliaTest is Test {
         vm.deal(deployer, 0.1 ether);
         DeployUniswapHelperSepoliaHarness s = new DeployUniswapHelperSepoliaHarness(PROGRESS, deployerKey, RESERVE);
         vm.expectRevert(bytes("DeployUniswapHelperSepolia: deployer ETH below SEPOLIA_WETH_SEED"));
+        s.run();
+        _cleanup();
+    }
+
+    // ---- Story 137: the nudge-discount minter's PSM USDS reserve gate ----
+
+    function test_psmUsdsReserveCoversNudgeDiscountBuyAndBurn() public {
+        _begin("test_psmUsdsReserveCoversNudgeDiscountBuyAndBurn");
+        DeployUniswapHelperSepoliaHarness s = _run();
+        assertGe(usds.balanceOf(address(psm)), s.NUDGE_DISCOUNT_MIN_PSM_USDS(), "PSM USDS reserve");
+        _cleanup();
+    }
+
+    function test_revertsWhenPsmUsdsReserveShort() public {
+        _begin("test_revertsWhenPsmUsdsReserveShort");
+        vm.mockCall(
+            address(usds), abi.encodeWithSelector(IERC20.balanceOf.selector, address(psm)), abi.encode(uint256(1))
+        );
+        DeployUniswapHelperSepoliaHarness s = new DeployUniswapHelperSepoliaHarness(PROGRESS, deployerKey, RESERVE);
+        vm.expectRevert(bytes("DeployUniswapHelperSepolia: MockSkyPSM USDS reserve below NUDGE_DISCOUNT_MIN_PSM_USDS"));
+        s.run();
+        _cleanup();
+    }
+
+    function test_revertsWhenNudgeDiscountMinterUsesAnotherPsm() public {
+        _begin("test_revertsWhenNudgeDiscountMinterUsesAnotherPsm");
+        nudgeDiscountMinter.setPSM(ISkyPSM(address(0xBEEF)));
+        DeployUniswapHelperSepoliaHarness s = new DeployUniswapHelperSepoliaHarness(PROGRESS, deployerKey, RESERVE);
+        vm.expectRevert(
+            bytes("DeployUniswapHelperSepolia: NudgeDiscountBatchMinter does not use the recorded MockSkyPSM")
+        );
         s.run();
         _cleanup();
     }
