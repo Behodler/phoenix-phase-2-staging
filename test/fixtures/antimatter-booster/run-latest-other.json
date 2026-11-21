@@ -1,0 +1,11 @@
+{
+  "chain": 1,
+  "transactions": [
+    { "hash": "0xbb01", "transactionType": "CREATE", "contractName": "AntimatterBooster", "contractAddress": "0x2222222222222222222222222222222222222239" },
+    { "hash": "0xbb02", "transactionType": "CALL", "contractName": null, "contractAddress": "0xf3B5B661b92B75C71fA5Aba8Fd95D7514A9CD605" }
+  ],
+  "receipts": [
+    { "transactionHash": "0xbb01", "status": "0x1" },
+    { "transactionHash": "0xbb02", "status": "0x1" }
+  ]
+}
