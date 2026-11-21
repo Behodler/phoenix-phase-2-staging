@@ -93,6 +93,8 @@ import {CrossVersionMigrator} from "stable-staker/CrossVersionMigrator.sol";
 import {IStableStakerMigratable} from "stable-staker/interfaces/IStableStakerMigratable.sol";
 import {IAntimatter} from "stable-staker/interfaces/IAntimatter.sol";
 import {Antimatter} from "antimatter/Antimatter.sol";
+// Story 138: phUSD bonus on annihilations of under-represented stables (antimatter:005), Phase 11.20.
+import {AntimatterBooster} from "antimatter/AntimatterBooster.sol";
 // StableStaker's constructor takes the flax-token-v2 IFlax; alias to avoid an
 // identifier clash with phlimbo-ea's IFlax which is already in scope transitively.
 import {IFlax as IFlaxStaker} from "flax-token/IFlax.sol";
@@ -402,6 +404,10 @@ contract DeployMocks is Script {
     // holds a phUSD mint right, but only so `autoAnnihilate` can cover an annihilation shortfall.
     Antimatter public antimatter;
     StableStakerV2 public stableStakerV2;
+
+    // Story 138: AntimatterBooster (antimatter:005), deployed and wired in Phase 11.20 and tracked
+    // under the `AntimatterBooster` key. Holds a phUSD mint right (the bonus); not an AM minter.
+    AntimatterBooster public antimatterBooster;
 
     // Story 045.5 Phase 7 — index-4 donation-phase mocks
     // waUSDC mock = ERC4626 wrapper over the existing USDC `rewardToken`.
@@ -1638,6 +1644,14 @@ contract DeployMocks is Script {
         // nudge-discount minter (NudgeRatchet's batchMinter was repointed there).
         _shutdownRatchetMinting(deployer);
 
+        // ====== PHASE 11.20: AntimatterBooster (story 138) ======
+        // APPENDED after 11.19 and before the terminal sweep, so no existing CREATE address moves.
+        // Makes the minter a USDe-strategy client, seeds the minter's USDe principal to 1/7 of the
+        // tracked DOLA+USDC+USDe POC (inside the booster's 1/6 eligibility band), deploys the booster,
+        // grants it phUSD mint rights, tracks the three stables, sets a 10% boost and registers it
+        // with PauserV2. Asserts USDe is boost-eligible and DOLA/USDC are not.
+        _deployAntimatterBooster(deployer);
+
         // Mark configurations as complete (gas tracking simplified to avoid stack depth issues)
         _markConfigured("MockPhUSD", 0);
         _markConfigured("MockUSDC", 0);
@@ -1721,6 +1735,8 @@ contract DeployMocks is Script {
         _markConfigured("NFTBonfire", 0);
         // Story 118: the nudge-discount minter (deployed and wired inside _deployNudgeDiscountMinter).
         _markConfigured("NudgeDiscountBatchMinter", 0);
+        // Story 138: AntimatterBooster (deployed and wired inside _deployAntimatterBooster).
+        _markConfigured("AntimatterBooster", 0);
 
         // Track seeding completion
         _trackDeployment("Seeding", address(0), 0);
@@ -2001,9 +2017,11 @@ contract DeployMocks is Script {
         _requireLiveMinter(address(uniboostHookEYE), true, "UniboostHookEYE");
         _requireLiveMinter(address(uniboostHookSCX), true, "UniboostHookSCX");
         _requireLiveMinter(address(uniboostHookFLX), true, "UniboostHookFLX");
+        // Story 138: the booster mints the annihilation bonus itself.
+        _requireLiveMinter(address(antimatterBooster), true, "AntimatterBooster");
 
         console.log(
-            "  end-state phUSD ACL asserted: deployer + StableStakerV1 OUT, PhlimboV3 + minter + StableStakerV2 + Antimatter + 5 hooks IN"
+            "  end-state phUSD ACL asserted: deployer + StableStakerV1 OUT, PhlimboV3 + minter + StableStakerV2 + Antimatter + AntimatterBooster + 5 hooks IN"
         );
 
         _requireSyaHarvesterEndState(deployer);
@@ -2792,6 +2810,123 @@ contract DeployMocks is Script {
         (,,, bool disabled) = nftMinterV2.configs(RATCHET_INDEX);
         require(disabled, "story-135: NFTMinterV2 configs(7).disabled did not read back true");
         console.log("  NFTMinterV2.setDispatcherDisabled(7, true) - ratchet minting OFF");
+    }
+
+    // =====================================================================
+    // Story 138: AntimatterBooster on anvil (Phase 11.20)
+    // =====================================================================
+
+    /// @dev 10% bonus on boosted annihilations (antimatter:005 test fixture uses the same value).
+    uint256 internal constant ANTIMATTER_BOOST_BPS = 1_000;
+
+    /// @dev Phase 11.20. Seeds USDe POC, then deploys and wires the booster. Split from `run()` for
+    ///      the stack. Every wiring call is read back.
+    function _deployAntimatterBooster(address deployer) internal {
+        console.log("\n=== Phase 11.20: AntimatterBooster (story 138) ===");
+
+        // 1. The minter must be a USDe-strategy client, or every USDe deposit through it reverts
+        //    (`onlyAuthorizedClient`): the seed below, `Antimatter.annihilate(usde)` and therefore
+        //    `boostedAnnihilate(usde)`. Mainnet's minter already is one. Anvil only; the Sepolia
+        //    script's deliberate omission (DeployMocksSepolia.s.sol) is untouched.
+        yieldStrategyUSDe.setClient(address(minter), true);
+        require(yieldStrategyUSDe.authorizedClients(address(minter)), "story-138: minter is not a USDe-strategy client");
+
+        // 2. Seed USDe to 1/7 of the tracked total.
+        _seedUsdeBoostPoc(deployer);
+
+        // 3. Deploy + track.
+        uint256 gasBefore = gasleft();
+        antimatterBooster = new AntimatterBooster(deployer, antimatter, IFlaxStaker(address(phUSD)));
+        _trackDeployment("AntimatterBooster", address(antimatterBooster), gasBefore - gasleft());
+        AntimatterBooster b = antimatterBooster;
+        require(address(b.antimatter()) == address(antimatter), "story-138: booster antimatter mismatch");
+        require(address(b.phUSD()) == address(phUSD), "story-138: booster phUSD mismatch");
+        console.log("  AntimatterBooster:", address(b));
+
+        // 4. phUSD mint right (two-arg multi-minter setter).
+        phUSD.setMinter(address(b), true);
+        _requireLiveMinter(address(b), true, "AntimatterBooster");
+
+        // 5. Tracked stables, via their CURRENT minter registrations (DOLA on sDOLA after 9.7).
+        b.addTrackedStable(address(dola));
+        b.addTrackedStable(address(rewardToken)); // USDC
+        b.addTrackedStable(address(usde));
+        require(b.trackedStables().length == 3, "story-138: expected 3 tracked stables");
+        require(
+            b.isTracked(address(dola)) && b.isTracked(address(rewardToken)) && b.isTracked(address(usde)),
+            "story-138: tracked stable missing"
+        );
+
+        // 6. 10% boost.
+        b.setBoostBps(ANTIMATTER_BOOST_BPS);
+        require(b.boostBps() == ANTIMATTER_BOOST_BPS, "story-138: boostBps did not read back 1000");
+
+        // 7. Pause wiring: setPauser BEFORE register (register validates pauser() == PauserV2).
+        b.setPauser(address(pauserV2));
+        pauserV2.register(address(b));
+        require(b.pauser() == address(pauserV2) && pauserV2.isRegistered(address(b)), "story-138: PauserV2 wiring");
+
+        // 8. Eligibility: USDe in the band, DOLA and USDC (each ~3/7) above it.
+        _assertBoostEligibility(b);
+        console.log("  phUSD minter: granted; tracked DOLA/USDC/USDe; boost 10%; PauserV2-registered");
+    }
+
+    /// @dev Normalised minter principal of `stable` on its CURRENT registered strategy, measured
+    ///      exactly as `AntimatterBooster._poc` measures it.
+    function _minterPoc18(address stable) internal view returns (uint256) {
+        (address ys,, uint8 dec,,,,) = minter.stablecoinConfigs(stable);
+        require(ys != address(0) && dec <= 18, "story-138: stable not registered on the minter");
+        return IYieldStrategy(ys).principalOf(stable, address(minter)) * 10 ** (18 - dec);
+    }
+
+    /// @dev Tops the minter's USDe principal up so USDe is 1/7 of the DOLA+USDC+USDe total:
+    ///      P / (dola + usdc + P) = 1/7  <=>  P = (dola + usdc) / 6. Computed on-chain, grossed up for
+    ///      the strategy's slippage haircut, deposited with `noMintDeposit` (POC without minting phUSD
+    ///      to the deployer). Headroom is small by design: USDe stays eligible until its principal
+    ///      reaches (dola + usdc) / 5, i.e. roughly 333 USDe of further annihilation on a fresh chain.
+    function _seedUsdeBoostPoc(address deployer) internal {
+        uint256 dolaQ = _minterPoc18(address(dola));
+        uint256 usdcQ = _minterPoc18(address(rewardToken));
+        uint256 usdeQ = _minterPoc18(address(usde));
+        uint256 target = (dolaQ + usdcQ) / 6;
+        require(usdeQ < target, "story-138: USDe POC already at or above the 1/7 target");
+
+        uint256 need = target - usdeQ;
+        uint256 keep = 10_000 - yieldStrategyUSDe.slippageToleranceBps();
+        uint256 gross = (need * 10_000 + keep - 1) / keep; // ceil: credited = gross * keep / 10_000 >= need
+        usde.mint(deployer, gross); // MockUSDe.mint is permissionless (anvil)
+        usde.approve(address(minter), gross);
+        minter.noMintDeposit(address(yieldStrategyUSDe), address(usde), gross);
+        require(usde.allowance(deployer, address(minter)) == 0, "story-138: residual USDe allowance to minter");
+
+        usdeQ = _minterPoc18(address(usde));
+        uint256 total = dolaQ + usdcQ + usdeQ;
+        require(usdeQ * 6 <= total, "story-138: seeded USDe is not boost-eligible");
+        // usdeQ * 7 within +/-0.5% of total.
+        uint256 sevenths = usdeQ * 7;
+        uint256 diff = sevenths > total ? sevenths - total : total - sevenths;
+        require(diff * 1_000 <= total * 5, "story-138: seeded USDe is not within 0.5% of 1/7");
+
+        console.log("  USDe gross deposited (noMintDeposit):", gross);
+        console.log("  POC DOLA  (18dp):", dolaQ);
+        console.log("  POC USDC  (18dp):", usdcQ);
+        console.log("  POC USDe  (18dp):", usdeQ);
+        console.log("  POC total (18dp):", total);
+        console.log("  shares (bps of total) DOLA/USDC/USDe:", dolaQ * 10_000 / total, usdcQ * 10_000 / total);
+        console.log("  share USDe (bps of total):", usdeQ * 10_000 / total);
+    }
+
+    /// @dev `previewBoost` checks for a 1-unit (1e18 AM) annihilation of each tracked stable.
+    function _assertBoostEligibility(AntimatterBooster b) internal view {
+        (bool usdeOk, AntimatterBooster.Reason usdeWhy,,, uint256 base, uint256 bonus) = b.previewBoost(address(usde), 1e18);
+        require(usdeOk && usdeWhy == AntimatterBooster.Reason.None, "story-138: USDe must be boost-eligible");
+        require(bonus == base * ANTIMATTER_BOOST_BPS / 10_000, "story-138: USDe preview bonus is not 10% of base");
+        (bool usdcOk, AntimatterBooster.Reason usdcWhy,,,,) = b.previewBoost(address(rewardToken), 1e18);
+        require(!usdcOk && usdcWhy == AntimatterBooster.Reason.AboveThreshold, "story-138: USDC must be ineligible");
+        (bool dolaOk, AntimatterBooster.Reason dolaWhy,,,,) = b.previewBoost(address(dola), 1e18);
+        require(!dolaOk && dolaWhy == AntimatterBooster.Reason.AboveThreshold, "story-138: DOLA must be ineligible");
+        console.log("  previewBoost: USDe eligible (1 AM -> base, bonus):", base, bonus);
+        console.log("  previewBoost: USDC + DOLA ineligible (AboveThreshold)");
     }
 
     /// @dev Buys one claim NFT at index 4 (UniPoolerV2, priced in USDS) through the normal paid

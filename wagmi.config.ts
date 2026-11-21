@@ -102,6 +102,8 @@ export default defineConfig({
         // it pays instead of phUSD.
         'StableStakerV2.sol/StableStakerV2.json',
         'Antimatter.sol/Antimatter.json',
+        // Story 138: phUSD bonus on annihilations of under-represented stables (antimatter:005).
+        'AntimatterBooster.sol/AntimatterBooster.json',
 
         // Core infrastructure
         'StableYieldAccumulator.sol/StableYieldAccumulator.json',

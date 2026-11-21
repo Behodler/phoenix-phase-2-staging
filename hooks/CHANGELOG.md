@@ -5,6 +5,24 @@ All notable changes to the @behodler/phase2-wagmi-hooks package will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-11-21
+
+Story-138 (antimatter-boost). Adds the ABI of `AntimatterBooster` (antimatter:005), which
+phase-2-staging now pins (`lib/antimatter` `a5570ce` -> `70ea8f3`, purely additive) and DeployMocks
+deploys in Phase 11.20. Strictly additive: no existing export changes or disappears. Not published.
+
+### Added
+- `antimatterBoosterAbi`
+  - `boostedAnnihilate(stable, recipient, amount, minPhUSDOut)` returns `totalOut`. Pulls `amount`
+    Antimatter and the matching stable half from the caller (approve BOTH to the booster), annihilates
+    through `Antimatter`, then mints `floor(base * boostBps / 10_000)` phUSD on top to `recipient`.
+    `minPhUSDOut` is checked against base + bonus. Reverts if the stable is ineligible.
+  - `previewBoost(stable, amount)` (view, never reverts) returns
+    `(eligible, reason, stableQty18, totalQty18, expectedBase, expectedBonus)`. Eligible iff the
+    stable's minter principal is at most 1/6 of the tracked total (`THRESHOLD_DENOMINATOR = 6`).
+  - `boostBps()`, `trackedStables()`, `isTracked(stable)`, `paused()`, `pauser()`.
+- `ContractAddresses.AntimatterBooster` (anvil address; zero placeholder on Sepolia and mainnet).
+
 ## [0.25.0] - 2026-11-12
 
 Story-118 (nudge-discount). Adds the ABI of `BatchNFTMinterNudgeDiscount` (nft-staking:033, with the

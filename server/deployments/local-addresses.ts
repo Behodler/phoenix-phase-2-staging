@@ -1,4 +1,4 @@
-// Generated from local.json on 2026-11-17T16:46:34.164Z
+// Generated from local.json on 2026-11-21T12:11:56.006Z
 // Chain ID: 31337 (anvil)
 
 import { ContractAddresses } from './addresses';
@@ -66,6 +66,7 @@ export const anvilAddresses: ContractAddresses = {
   SYAHarvester: "0x532802f2F9E0e3EE9d5Ba70C35E1F43C0498772D",
   NFTBonfire: "0x696358bBb1a743052E0E87BeD78AAd9d18f0e1F4",
   NudgeDiscountBatchMinter: "0x49149a233de6E4cD6835971506F47EE5862289c1",
+  AntimatterBooster: "0x930b218f3e63eE452c13561057a8d5E61367d5b7",
   BalancerLPMigrator: "0x0000000000000000000000000000000000000000",
 };
 
