@@ -257,6 +257,8 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     address public constant HOOK_RATCHET = 0x09AceB96337df1316e0D2d7EEEa44d754D1f8d05;
     address public constant STABLE_YIELD_ACCUMULATOR = 0x0cD353bfda674D04823B2826ffafB83B560D21B6;
     uint256 public constant PHUSD_MINTER_BIT_V1 = 0;
+    /// @dev Story 139: OWNER is bit 1 of `_phusdMinterCandidates()`; the AntimatterBooster cutover revokes it.
+    uint256 public constant PHUSD_MINTER_BIT_OWNER = 1;
 
     // =====================================================================
     //  CONFIGURATION (every value sourced; see CLAUDE.md "Configuration Safety")
@@ -1804,7 +1806,7 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
     function _phusdMinterCandidates() internal pure returns (address[] memory set) {
         set = new address[](9);
         set[0] = STABLE_STAKER_V1; // PHUSD_MINTER_BIT_V1 - the ONLY bit this cutover may clear
-        set[1] = OWNER;
+        set[1] = OWNER; // PHUSD_MINTER_BIT_OWNER - may also be cleared (story 139 OWNER phUSD mint revoke)
         set[2] = PHUSD_STABLE_MINTER;
         set[3] = PHLIMBO_V3;
         set[4] = HOOK_EYE;
@@ -1846,7 +1848,14 @@ contract CutoverStableStakerV2Mainnet is Script, StdCheats, StableStakerCutoverC
         uint256 expected = phusdMaskAtPhase0;
         if (expectV1Revoked) expected &= ~(uint256(1) << PHUSD_MINTER_BIT_V1);
         uint256 live = _liveMinterMask();
-        require(live == expected, "minter-delta: phUSD minter candidate set changed beyond the expected V1 revoke");
+        // Story 139 (OWNER phUSD mint revoke): DeployAntimatterBoosterMainnet's last step is
+        // `phUSD.setMinter(OWNER, false)`, so OWNER's bit (PHUSD_MINTER_BIT_OWNER) may ALSO be cleared. Only that bit
+        // is tolerated; any other change from the baseline still reverts. The persisted baseline (511) is unchanged.
+        uint256 expectedOwnerRevoked = expected & ~(uint256(1) << PHUSD_MINTER_BIT_OWNER);
+        require(
+            live == expected || live == expectedOwnerRevoked,
+            "minter-delta: phUSD minter candidate set changed beyond the expected V1 revoke"
+        );
         require(_canMintPhUSD(address(v2)), "minter-delta: V2 must hold phUSD mint");
         if (GRANT_ANTIMATTER_PHUSD_MINT) require(_canMintPhUSD(address(antimatter)), "minter-delta: Antimatter must hold phUSD mint");
         if (address(migrator) != address(0)) {
