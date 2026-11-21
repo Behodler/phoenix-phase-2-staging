@@ -1,4 +1,4 @@
-// Generated interface from local.json on 2026-11-17T16:46:34.161Z
+// Generated interface from local.json on 2026-11-21T12:11:56.003Z
 // Chain ID: 31337 (anvil)
 // This interface can be copied directly into UI projects
 
@@ -65,5 +65,6 @@ export interface ContractAddresses {
   SYAHarvester: string;
   NFTBonfire: string;
   NudgeDiscountBatchMinter: string;
+  AntimatterBooster: string;
   BalancerLPMigrator: string;
 }

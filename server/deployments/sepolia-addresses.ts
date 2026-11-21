@@ -1,4 +1,4 @@
-// Generated from sepolia.json on 2026-11-18T10:04:26.550Z
+// Generated from sepolia.json on 2026-11-21T12:13:00.884Z
 // Chain ID: 11155111 (sepolia)
 
 import { ContractAddresses } from './addresses';
@@ -66,6 +66,7 @@ export const sepoliaAddresses: ContractAddresses = {
   SYAHarvester: "0x074bc407dc79dA38d22B8b7f97D22Adafe834eF9",
   NFTBonfire: "0xE8BF2F9ed72F340238CB9F5CdD2e0BB6D7EB3fCA",
   NudgeDiscountBatchMinter: "0x3f4979F4B69CA913E6bc33111331CAd3A6983297",
+  AntimatterBooster: "0x0000000000000000000000000000000000000000",
   BalancerLPMigrator: "0x0000000000000000000000000000000000000000",
 };
 
