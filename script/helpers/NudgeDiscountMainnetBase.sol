@@ -722,9 +722,6 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats, PauserV2Registr
         require(INFTMinterV2ND(NFT_MINTER).authorizedMinters(address(m)), "post: authorizedMinters(new) is false");
     }
 
-    /// @notice The old minter has no free-mint power, is emptied and no longer a nudge sink, and is in the state the
-    ///         committed PauserV2Registry says it is in (frozen by 119, or revived - story 140); the donors point at
-    ///         the new minter; PauserV2 is healthy.
     /// @notice True while the old minter is a committed `PauserV2Registry.postMigrationReadditions()` entry, i.e. the
     ///         owner's 2026-11-19 revival is the expected mainnet state (story 140).
     function _oldMinterRevived() internal view returns (bool) {
@@ -757,6 +754,9 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats, PauserV2Registr
         }
     }
 
+    /// @notice The old minter has no free-mint power, is emptied and no longer a nudge sink, and is in the state the
+    ///         committed PauserV2Registry says it is in (frozen by 119, or revived - story 140); the donors point at
+    ///         the new minter; PauserV2 is healthy.
     function _requireCutoverState(BatchNFTMinterNudgeDiscount m) internal view {
         _requireNewMinterConfigured(m);
         _requireRatchetMintingDisabled();
