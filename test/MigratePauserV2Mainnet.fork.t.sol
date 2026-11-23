@@ -67,6 +67,7 @@ contract VerifyPauserV2Harness is VerifyPauserV2Migration {
     address internal immutable injected;
     address[] internal additions;
     address[] internal removals;
+    address[] internal readditions;
 
     constructor(address v2) {
         injected = v2;
@@ -80,12 +81,20 @@ contract VerifyPauserV2Harness is VerifyPauserV2Migration {
         removals.push(a);
     }
 
+    function addReaddition(address a) external {
+        readditions.push(a);
+    }
+
     function postMigrationAdditions() public view override returns (address[] memory) {
         return additions;
     }
 
     function postMigrationRemovals() public view override returns (address[] memory) {
         return removals;
+    }
+
+    function postMigrationReadditions() public view override returns (address[] memory) {
+        return readditions;
     }
 
     function _progressPauserV2() internal view override returns (address) {
@@ -179,8 +188,11 @@ contract MigratePauserV2MainnetForkTest is Test {
 
     /// @dev No fork needed: the verifier's address-book parser reads the real, unpatched book (V1 until the human
     ///      runs scripts/patch-mainnet-addresses-pauser-v2.js after the broadcasts).
-    function test_BookParser_ReadsUnpatchedV1Pauser() public {
-        assertEq(new BookPauserReader().bookPauser(), PAUSER_V1);
+    /// @dev The book was patched to PauserV2 by the story-128 broadcast (2026-11-05); it no longer holds V1.
+    function test_BookParser_ReadsPatchedPauserV2() public {
+        address booked = new BookPauserReader().bookPauser();
+        assertTrue(booked != PAUSER_V1, "book Pauser is still V1");
+        assertEq(booked, 0x669Ebfa5309db66683c199Cfe22516DECBe1a154, "book Pauser == live PauserV2");
     }
 
     function test_DeployAndMigrate_EndState() public {
@@ -406,6 +418,91 @@ contract MigratePauserV2MainnetForkTest is Test {
         verifier.run();
 
         verifier.addRemoval(oldMinter);
+        verifier.run();
+    }
+
+    // ---------------- story 140: retire, then deliberately re-add ----------------
+
+    /// @dev The 0x0683 shape: retired (committed removal), then revived and re-registered on V2. Without a
+    ///      re-addition entry step 2 names it; with one the verifier passes.
+    function test_Verify_RemovedThenReRegistered_FailsWithoutReaddition_PassesWithIt() public {
+        if (!_fork()) return;
+        _migrate();
+        address m = 0x068395556b8c43eDf257DC54D109EA5910aE15c7; // BatchNFTMinterMultiToken
+        vm.startPrank(OWNER);
+        v2.unregister(m);
+        IPauserV2Pausable(m).setPauser(OWNER);
+        vm.stopPrank();
+
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        verifier.addRemoval(m);
+        verifier.run(); // retired: green
+
+        vm.startPrank(OWNER);
+        IPauserV2Pausable(m).setPauser(address(v2));
+        v2.register(m);
+        vm.stopPrank();
+        vm.expectRevert(
+            bytes("verify: PauserV2 holds an address that is neither live nor a committed addition - see the log above")
+        );
+        verifier.run();
+
+        verifier.addReaddition(m);
+        verifier.run();
+    }
+
+    function test_Verify_ReadditionNotInRemovals_Reverts() public {
+        if (!_fork()) return;
+        _migrate();
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        verifier.addReaddition(0x068395556b8c43eDf257DC54D109EA5910aE15c7);
+        vm.expectRevert(
+            bytes(
+                "verify: a postMigrationReadditions() entry is not in postMigrationRemovals() - use postMigrationAdditions()"
+            )
+        );
+        verifier.run();
+    }
+
+    function test_Verify_ReadditionOfRetiredRegistrant_Reverts() public {
+        if (!_fork()) return;
+        _migrate();
+        address retired0 = 0x5cBAd8c3a18F37BC829e319533927a57d2BC99a4; // retiredRegistrants()[0]
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        verifier.addRemoval(retired0);
+        verifier.addReaddition(retired0);
+        vm.expectRevert(
+            bytes(
+                "verify: a postMigrationReadditions() entry is a RETIRED registrant - impossible, fix PauserV2Registry"
+            )
+        );
+        verifier.run();
+    }
+
+    /// @dev A committed re-addition that is NOT back on V2 fails step 1: the removal does not hide it.
+    function test_Verify_ReadditionNotRegistered_FailsStep1() public {
+        if (!_fork()) return;
+        _migrate();
+        address m = 0x068395556b8c43eDf257DC54D109EA5910aE15c7;
+        vm.startPrank(OWNER);
+        v2.unregister(m);
+        IPauserV2Pausable(m).setPauser(OWNER);
+        vm.stopPrank();
+
+        VerifyPauserV2Harness verifier = new VerifyPauserV2Harness(address(v2));
+        verifier.addRemoval(m);
+        verifier.addReaddition(m);
+        vm.expectRevert(bytes("verify: live registrant(s) not on PauserV2 - see the log above"));
+        verifier.run();
+
+        // pauser() back on V2 but still unregistered: still step 1.
+        vm.prank(OWNER);
+        IPauserV2Pausable(m).setPauser(address(v2));
+        vm.expectRevert(bytes("verify: live registrant(s) not on PauserV2 - see the log above"));
+        verifier.run();
+
+        vm.prank(OWNER);
+        v2.register(m);
         verifier.run();
     }
 }

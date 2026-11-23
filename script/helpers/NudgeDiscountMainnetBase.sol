@@ -7,6 +7,7 @@ import "@forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BatchNFTMinterNudgeDiscount} from "nft-staking/BatchNFTMinterNudgeDiscount.sol";
 import {NudgePotForwarder} from "../../src/periphery/NudgePotForwarder.sol";
+import {PauserV2Registry} from "./PauserV2Registry.sol";
 
 /// @dev The live NFTMinterV2 surface (lib/yield-claim-nft/src/NFTMinterV2.sol).
 interface INFTMinterV2ND {
@@ -33,6 +34,8 @@ interface IOldBatchMinterND {
     function pause() external;
     function rescueERC20(IERC20 token, address to, uint256 amount) external;
     function isNudgeToken(address token) external view returns (bool);
+    function nudgeSize() external view returns (uint256);
+    function nudgeStreamer() external view returns (address);
 }
 
 /// @dev The live PauserV2 surface (lib/pauser/src/PauserV2.sol).
@@ -169,8 +172,17 @@ interface IDonorNudgeND {
  *         RATCHET SHUTDOWN (story 135). The cutover also disables NEW minting at NFTMinterV2 index 7 (NudgeRatchet)
  *         with `setDispatcherDisabled(7, true)`. Existing id-7 NFTs keep staking, claiming and unstaking on
  *         RatchetNFTStaker; the NudgeRatchet mint-debt hook is untouched so its outstanding debt can still be pulled.
+ *
+ *         OLD MINTER REVIVED (story 140; the owner's ruling of 2026-11-23, audit run 61 pps61l2 option (a)). The
+ *         119 cutover FROZE the old `BatchNFTMinterMultiToken` (0x0683): paused, pauser() == OWNER, unregistered from
+ *         PauserV2. On 2026-11-19 the owner deliberately revived it, nudge off, because the phlimbo UI still sends
+ *         plain LSP batch mints through it: setNudgeSize(0), setNudgeStreamer(0), unpause(), setPauser(PauserV2),
+ *         PauserV2.register(0x0683). It is recorded in `PauserV2Registry.postMigrationReadditions()`, and that entry
+ *         is what this base keys on: while the old minter is a committed re-addition, the post-cutover assertions
+ *         require the REVIVED state (`_requireOldMinterState`), and the cutover script refuses to run at all (its
+ *         Phase 1 would re-freeze a live minter and take it out of the global emergency stop).
  */
-abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
+abstract contract NudgeDiscountMainnetBase is Script, StdCheats, PauserV2Registry {
     uint256 internal constant CHAIN_ID = 1;
     string internal constant NETWORK_NAME = "mainnet";
 
@@ -192,7 +204,8 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
     address internal constant USDS = 0xdC035D45d973E3EC169d2276DDab16f1e407384F; // USDS
     /// @dev Book `Pauser`: PauserV2, live since phStaging2:128's 2026-11-05 broadcast.
     address internal constant PAUSER_V2 = 0x669Ebfa5309db66683c199Cfe22516DECBe1a154;
-    /// @dev Book `BatchNFTMinter`: the live `BatchNFTMinterMultiToken` this cutover retires.
+    /// @dev Book `BatchNFTMinter`: the `BatchNFTMinterMultiToken` this cutover froze (story 119). Revived by the owner
+    ///      on 2026-11-19 (nudge off; UI batch mints) and kept live on PauserV2 (story 140, postMigrationReadditions).
     address internal constant OLD_MINTER = 0x068395556b8c43eDf257DC54D109EA5910aE15c7;
     /// @dev Book `NudgeRatchet`: the index-7 ratchet dispatcher whose minting story 135 disables.
     address internal constant NUDGE_RATCHET = 0x7E3fB41FD3E99312FBa8bfc71E79e635d526AA40;
@@ -709,16 +722,46 @@ abstract contract NudgeDiscountMainnetBase is Script, StdCheats {
         require(INFTMinterV2ND(NFT_MINTER).authorizedMinters(address(m)), "post: authorizedMinters(new) is false");
     }
 
-    /// @notice The old minter is frozen, off PauserV2, emptied, and no longer a nudge sink; the donors point at the
-    ///         new minter; PauserV2 is healthy.
+    /// @notice The old minter has no free-mint power, is emptied and no longer a nudge sink, and is in the state the
+    ///         committed PauserV2Registry says it is in (frozen by 119, or revived - story 140); the donors point at
+    ///         the new minter; PauserV2 is healthy.
+    /// @notice True while the old minter is a committed `PauserV2Registry.postMigrationReadditions()` entry, i.e. the
+    ///         owner's 2026-11-19 revival is the expected mainnet state (story 140).
+    function _oldMinterRevived() internal view returns (bool) {
+        address[] memory re = postMigrationReadditions();
+        for (uint256 i = 0; i < re.length; i++) {
+            if (re[i] == OLD_MINTER) return true;
+        }
+        return false;
+    }
+
+    /// @notice Old minter state. Revived (committed re-addition, story 140): unpaused, pauser() == PauserV2,
+    ///         registered with PauserV2, nudge off (nudgeSize 0, nudgeStreamer 0) - so it offers no whale discount
+    ///         and stays inside the global emergency stop. Otherwise (the 119 cutover as broadcast, before the
+    ///         revival): paused, pauser() == OWNER, not registered with PauserV2.
+    function _requireOldMinterState() internal view {
+        IOldBatchMinterND old = IOldBatchMinterND(OLD_MINTER);
+        if (_oldMinterRevived()) {
+            require(!old.paused(), "post: old minter is a committed re-addition but is paused");
+            require(old.pauser() == PAUSER_V2, "post: old minter is a committed re-addition but pauser() != PauserV2");
+            require(
+                IPauserV2ND(PAUSER_V2).isRegistered(OLD_MINTER),
+                "post: old minter is a committed re-addition but is not registered with PauserV2"
+            );
+            require(old.nudgeSize() == 0, "post: revived old minter has nudgeSize != 0 (whale discount reopened)");
+            require(old.nudgeStreamer() == address(0), "post: revived old minter has a nudgeStreamer set");
+        } else {
+            require(old.paused(), "post: old minter is not paused");
+            require(old.pauser() == OWNER, "post: old minter pauser() != OWNER");
+            require(!IPauserV2ND(PAUSER_V2).isRegistered(OLD_MINTER), "post: old minter still registered with PauserV2");
+        }
+    }
+
     function _requireCutoverState(BatchNFTMinterNudgeDiscount m) internal view {
         _requireNewMinterConfigured(m);
         _requireRatchetMintingDisabled();
-        IOldBatchMinterND old = IOldBatchMinterND(OLD_MINTER);
         require(!INFTMinterV2ND(NFT_MINTER).authorizedMinters(OLD_MINTER), "post: authorizedMinters(old) is true");
-        require(old.paused(), "post: old minter is not paused");
-        require(old.pauser() == OWNER, "post: old minter pauser() != OWNER");
-        require(!IPauserV2ND(PAUSER_V2).isRegistered(OLD_MINTER), "post: old minter still registered with PauserV2");
+        _requireOldMinterState();
         address[3] memory toks = _nudgeTokens();
         for (uint256 i = 0; i < 3; i++) {
             require(IERC20(toks[i]).balanceOf(OLD_MINTER) == 0, "post: old minter still holds a nudge token");

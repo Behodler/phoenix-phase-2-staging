@@ -207,7 +207,7 @@ export const mainnetAddresses: ContractAddresses = {
   BatchNFTMinter: "0x068395556b8c43eDf257DC54D109EA5910aE15c7",
   // Story 118/119: BatchNFTMinterNudgeDiscount (nft-staking:033-035), the index-4 nudge sink. Deployed
   // by DeployMainnetNudgeDiscount (story 119), registered with PauserV2, patched from progress.nudge-discount.1.json.
-  // BatchNFTMinter above is the OLD minter, paused by the same cutover (kept for the UI until phlimbo-ui:091).
+  // BatchNFTMinter above is the OLD minter: frozen by that cutover, revived 2026-11-19 (nudge off, no whale discount); LIVE on PauserV2, serving UI batch mints (story 140).
   NudgeDiscountBatchMinter: "0xD41235bC400BAEDD23aA416Db1F62c944981C42a",
   // Stable Staking. Story 080 RETIRED the `StableStaker` key and replaced it with
   // `StableStakerV2`, deliberately dropping the live V1 address

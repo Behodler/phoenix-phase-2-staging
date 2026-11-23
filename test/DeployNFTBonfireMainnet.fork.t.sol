@@ -105,8 +105,19 @@ contract VerifyPauserV2WithBonfire is VerifyPauserV2Migration {
         extra.push(a);
     }
 
+    /// @dev Story 140: the registry as committed BEFORE the bonfire cutover (129 was the first post-migration
+    ///      change, so every list was empty). FORK_BLOCK predates every later entry (131, 119, the 0x0683
+    ///      re-addition), whose addresses have no code there; reading the current committed lists broke this test.
+    function postMigrationRemovals() public pure override returns (address[] memory a) {
+        a = new address[](0);
+    }
+
+    function postMigrationReadditions() public pure override returns (address[] memory a) {
+        a = new address[](0);
+    }
+
     function postMigrationAdditions() public view override returns (address[] memory a) {
-        address[] memory committed = super.postMigrationAdditions();
+        address[] memory committed = new address[](0);
         a = new address[](committed.length + extra.length);
         for (uint256 i = 0; i < committed.length; i++) {
             a[i] = committed[i];

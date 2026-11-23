@@ -80,11 +80,13 @@ refused unless ≥ 2 × basefee; progress written `pending` with the CREATE nonc
 `PauserV2Registry.postMigrationAdditions()`) → `npm run pauser-v2-verify` → `npm run antimatter-booster-verify`. The
 tax-ledger recorder runs whatever the tail's outcome, and the tail's exit status is preserved.
 
-**Known pre-existing `pauser-v2-verify` failure (not this story's).** At planning/execution time (block ~26,466,600)
-`BatchNFTMinterMultiToken 0x0683…15c7` was still registered on PauserV2 although story 119 committed it to
-`postMigrationRemovals()`. While that holds, `pauser-v2-verify` fails naming `0x0683…15c7`, and the `&&` chain stops
-before `antimatter-booster-verify`. If you see that (and only that address), the booster cutover itself is fine: run
-`npm run antimatter-booster-verify` by hand, and finish the 0x0683 unregister separately.
+**`pauser-v2-verify` and BatchNFTMinterMultiToken `0x0683…15c7` (story 140).** Story 119 froze `0x0683…15c7` and
+committed it to `postMigrationRemovals()`. On 2026-11-19 the owner deliberately revived it, nudge off, for the phlimbo
+UI's plain batch mints, and re-registered it on PauserV2. Story 140 records that in
+`PauserV2Registry.postMigrationReadditions()`, so `pauser-v2-verify` passes with `0x0683…15c7` live and registered,
+and the `&&` chain runs through to `antimatter-booster-verify`. **Never unregister, re-point or pause `0x0683…15c7`:**
+it is a live, unpaused minter, and unregistering it takes it out of the global emergency stop. If `pauser-v2-verify`
+fails, read the address it names; a failure is real and is not expected.
 
 ## 3. Verify
 

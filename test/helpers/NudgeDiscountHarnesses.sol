@@ -17,6 +17,10 @@ contract DeployNudgeDiscountHarness is DeployMainnetNudgeDiscount {
     string internal progressPath;
     address internal booked;
     bool public haltAfterPhase2;
+    /// @dev Story 140: false (default) models PauserV2Registry as committed at the 119 broadcast, before the
+    ///      2026-11-19 revival of the old minter (every fork block these suites use is pre-revival). true reads the
+    ///      committed postMigrationReadditions(), under which the cutover refuses to run.
+    bool public useCommittedReadditions;
 
     constructor(bool preview_, string memory progressPath_, address booked_) {
         preview = preview_;
@@ -26,6 +30,15 @@ contract DeployNudgeDiscountHarness is DeployMainnetNudgeDiscount {
 
     function setHaltAfterPhase2(bool v) external {
         haltAfterPhase2 = v;
+    }
+
+    function setUseCommittedReadditions(bool v) external {
+        useCommittedReadditions = v;
+    }
+
+    function postMigrationReadditions() public view override returns (address[] memory a) {
+        if (useCommittedReadditions) return super.postMigrationReadditions();
+        a = new address[](0);
     }
 
     function _haltAfterPhase2() internal view override returns (bool) {
@@ -153,10 +166,21 @@ contract DeployNudgeDiscountOwnerTransitHarness is DeployNudgeDiscountHarness {
 contract VerifyNudgeDiscountHarness is VerifyNudgeDiscountMainnet {
     string internal progressPath;
     address internal booked;
+    /// @dev Story 140: see DeployNudgeDiscountHarness.useCommittedReadditions. false = the 119-frozen expectation.
+    bool public useCommittedReadditions;
 
     constructor(string memory progressPath_, address booked_) {
         progressPath = progressPath_;
         booked = booked_;
+    }
+
+    function setUseCommittedReadditions(bool v) external {
+        useCommittedReadditions = v;
+    }
+
+    function postMigrationReadditions() public view override returns (address[] memory a) {
+        if (useCommittedReadditions) return super.postMigrationReadditions();
+        a = new address[](0);
     }
 
     function _progressFile() internal view override returns (string memory) {
@@ -219,6 +243,25 @@ contract VerifyPauserV2WithNudgeDiscount is VerifyPauserV2Migration {
     address[] internal extraAdd;
     address[] internal extraRemove;
 
+    /// @dev Story 140: the registry as committed BEFORE the 119 cutover: additions [129 bonfire, 131 SYA], removals
+    ///      [131 old SYA], no re-additions. The 119 patcher's own entries (the new minter, the 0x0683 removal) are
+    ///      appended by the test from its fork deploy; the committed 0xD412 has no code at the pre-119 FORK_BLOCK,
+    ///      and the 0x0683 re-addition (2026-11-19) is later still.
+    uint256 internal constant ADDITIONS_BEFORE = 2;
+    uint256 internal constant REMOVALS_BEFORE = 1;
+
+    function postMigrationReadditions() public pure override returns (address[] memory a) {
+        a = new address[](0);
+    }
+
+    /// @dev First `n` entries of an append-only registry list: the list as committed before a later cutover.
+    function _prefix(address[] memory x, uint256 n) internal pure returns (address[] memory a) {
+        a = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            a[i] = x[i];
+        }
+    }
+
     function add(address a) external {
         extraAdd.push(a);
     }
@@ -228,11 +271,11 @@ contract VerifyPauserV2WithNudgeDiscount is VerifyPauserV2Migration {
     }
 
     function postMigrationAdditions() public view override returns (address[] memory a) {
-        a = _concat(super.postMigrationAdditions(), extraAdd);
+        a = _concat(_prefix(super.postMigrationAdditions(), ADDITIONS_BEFORE), extraAdd);
     }
 
     function postMigrationRemovals() public view override returns (address[] memory a) {
-        a = _concat(super.postMigrationRemovals(), extraRemove);
+        a = _concat(_prefix(super.postMigrationRemovals(), REMOVALS_BEFORE), extraRemove);
     }
 
     function _concat(address[] memory x, address[] memory y) internal pure returns (address[] memory z) {

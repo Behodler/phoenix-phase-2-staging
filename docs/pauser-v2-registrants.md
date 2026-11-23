@@ -76,6 +76,17 @@ for LIVE registrants: value at risk first.
   appended to `postMigrationAdditions()`. The old SYA `0x0cD3…21B6` (#14 above) is unregistered and
   appended to `postMigrationRemovals()`. The patcher `scripts/patch-mainnet-addresses-sya-gate-off.js`
   makes both entries after the human's broadcast.
+- **Story 119, nudge-discount cutover.** The old `BatchNFTMinterMultiToken` `0x0683…15c7` (#4
+  above) was frozen: unregistered from PauserV2, `pauser()` moved to OWNER, paused. It was appended
+  to `postMigrationRemovals()` and the new `BatchNFTMinterNudgeDiscount` to
+  `postMigrationAdditions()`.
+- **2026-11-19, `0x0683…15c7` revived (story 140).** The owner deliberately revived the old minter
+  because the phlimbo UI still sends plain LSP batch mints (dispatcher index 4) through the book's
+  `BatchNFTMinter` key: `setNudgeSize(0)`, `setNudgeStreamer(0)`, `unpause()`,
+  `setPauser(PauserV2)`, `PauserV2.register(0x0683…15c7)`. The nudge is off, so it offers no whale
+  discount. Its removal entry stays (append only) and it is appended to
+  `postMigrationReadditions()`, which overrides the removal. It is **LIVE** and must stay
+  registered with PauserV2. Owner ruling 2026-11-23 (audit run 61, pps61l2, option (a)).
 
 **Totals:** 18 LIVE (15 from the current book, 1 because of its funds, 2 ambiguous → LIVE) and
 9 RETIRED, for 27 in all.

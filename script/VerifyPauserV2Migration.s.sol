@@ -12,9 +12,10 @@ import {PauserV2MainnetBase, IPauserV1Registry, IPauserV2Pausable} from "./helpe
  *         address-book patcher (audit 49 L-04); re-run it any time as a health check.
  *
  *         It checks INVARIANTS, not the frozen 18-address snapshot (audit 49 L-07). The live set is
- *           (liveRegistrants() - postMigrationRemovals()) + postMigrationAdditions()   (script/helpers/PauserV2Registry.sol)
- *         so a registry change the runbook prescribes (bonfire, new minter, retirement) stays green once it is
- *         committed to PauserV2Registry, and any uncommitted change fails by name.
+ *           ((liveRegistrants() ++ postMigrationAdditions()) - postMigrationRemovals()) ++ postMigrationReadditions()
+ *         (script/helpers/PauserV2Registry.sol), so a registry change the runbook prescribes (bonfire, new minter,
+ *         retirement, a deliberate revival of a retired contract - story 140) stays green once it is committed to
+ *         PauserV2Registry, and any uncommitted change fails by name.
  *
  *         Checks:
  *           - PauserV2 (progress file; env `PAUSER_V2` must agree) has OWNER / EYE and the FINAL 1000e18 burn
@@ -22,10 +23,11 @@ import {PauserV2MainnetBase, IPauserV1Registry, IPauserV2Pausable} from "./helpe
  *           - the address book `Pauser` key is PauserV2 and agrees with the progress file;
  *           - V1's registrant list is a subset of the story-128 snapshot: any NEW contract registered with the dead
  *             V1 (which has no working stop) is named and fails;
- *           - every live-set member is on PauserV2 with `pauser() == PauserV2` - names any re-pointed at V1, e.g.
- *             by an old V1 recovery script such as `UnfreezeStableStakerV2AfterCutoverAbort.s.sol`;
+ *           - every re-addition is a committed removal and is not a RETIRED registrant (a misuse reverts loudly);
+ *           - every live-set member (re-additions included) is on PauserV2 with `pauser() == PauserV2` - names any
+ *             re-pointed at V1, e.g. by an old V1 recovery script such as `UnfreezeStableStakerV2AfterCutoverAbort.s.sol`;
  *           - every PauserV2 registrant is in the live set (names any uncommitted addition);
- *           - committed removals and every RETIRED registrant are NOT on PauserV2;
+ *           - committed removals (unless re-added) and every RETIRED registrant are NOT on PauserV2;
  *           - PauserV2.health(): notPauser / alreadyPaused / unreachable empty.
  *
  * Run: npm run pauser-v2-verify
@@ -87,12 +89,29 @@ contract VerifyPauserV2Migration is PauserV2MainnetBase {
         address[] memory live = liveRegistrants();
         address[] memory additions = postMigrationAdditions();
         address[] memory removals = postMigrationRemovals();
+        address[] memory readditions = postMigrationReadditions();
+
+        // 0. Re-additions are well-formed (story 140): each overrides a committed removal, and none is a RETIRED
+        //    registrant (those stay on the dead V1 by design, so re-adding one is impossible by construction).
+        address[] memory retired = retiredRegistrants();
+        for (uint256 i = 0; i < readditions.length; i++) {
+            require(
+                _contains(removals, readditions[i]),
+                "verify: a postMigrationReadditions() entry is not in postMigrationRemovals() - use postMigrationAdditions()"
+            );
+            require(
+                !_contains(retired, readditions[i]),
+                "verify: a postMigrationReadditions() entry is a RETIRED registrant - impossible, fix PauserV2Registry"
+            );
+        }
 
         // 1. Every live-set member is on V2. Name each one that is not, before the generic require fails.
+        //    Re-additions are checked last and are NOT skipped by `removals` (they override it).
         uint256 bad;
-        for (uint256 i = 0; i < live.length + additions.length; i++) {
-            address c = i < live.length ? live[i] : additions[i - live.length];
-            if (_contains(removals, c)) continue;
+        uint256 n = live.length + additions.length;
+        for (uint256 i = 0; i < n + readditions.length; i++) {
+            address c = i < live.length ? live[i] : i < n ? additions[i - live.length] : readditions[i - n];
+            if (i < n && _contains(removals, c)) continue;
             address cur = IPauserV2Pausable(c).pauser();
             if (cur == v2 && p.isRegistered(c)) continue;
             bad++;
@@ -106,7 +125,8 @@ contract VerifyPauserV2Migration is PauserV2MainnetBase {
         address[] memory onV2 = p.getPausableContracts();
         for (uint256 i = 0; i < onV2.length; i++) {
             address c = onV2[i];
-            bool listed = (_contains(live, c) || _contains(additions, c)) && !_contains(removals, c);
+            bool listed = ((_contains(live, c) || _contains(additions, c)) && !_contains(removals, c))
+                || _contains(readditions, c);
             if (listed) continue;
             bad++;
             console.log("  ON PauserV2 BUT NOT COMMITTED to PauserV2Registry (or listed as removed):", c);
@@ -117,7 +137,6 @@ contract VerifyPauserV2Migration is PauserV2MainnetBase {
         );
 
         // 3. Retired never on V2.
-        address[] memory retired = retiredRegistrants();
         for (uint256 i = 0; i < retired.length; i++) {
             require(!p.isRegistered(retired[i]), "verify: a RETIRED registrant is registered with PauserV2");
         }

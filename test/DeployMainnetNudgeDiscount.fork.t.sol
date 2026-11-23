@@ -28,6 +28,17 @@ interface IPauserV2Fork {
     function isRegistered(address c) external view returns (bool);
 }
 
+interface IPauserV2ReviveFork {
+    function register(address c) external;
+}
+
+interface IOldMinterReviveFork {
+    function setNudgeSize(uint256 newSize) external;
+    function setNudgeStreamer(address newStreamer) external;
+    function unpause() external;
+    function setPauser(address newPauser) external;
+}
+
 interface INFTMinterRatchetFork {
     function configs(uint256 index) external view returns (address, uint256, uint256, bool);
     function mint(uint256 index, address recipient) external returns (bool);
@@ -523,6 +534,63 @@ contract DeployMainnetNudgeDiscountForkTest is Test {
         deal(USDC, s.potForwarder(), 1);
         vm.expectRevert(bytes("post: pot forwarder still holds a nudge token"));
         v.run();
+        vm.removeFile(path);
+    }
+
+    // ---------------- story 140: the old minter revived on 2026-11-19 ----------------
+
+    /// @dev Replays the owner's 2026-11-19 revival (Temp.s.sol, ledger rows 172-176) on top of the 119 cutover.
+    function _reviveOldMinter() internal {
+        IOldMinterReviveFork old = IOldMinterReviveFork(OLD_MINTER);
+        vm.startPrank(OWNER);
+        old.setNudgeSize(0);
+        old.setNudgeStreamer(address(0));
+        old.unpause();
+        old.setPauser(PAUSER_V2);
+        IPauserV2ReviveFork(PAUSER_V2).register(OLD_MINTER);
+        vm.stopPrank();
+    }
+
+    /// @dev With the committed re-addition the verifier requires the REVIVED old minter (and fails the 119-frozen
+    ///      expectation), names a reopened nudge, and the cutover script refuses to run (it would re-freeze 0x0683).
+    function test_fork_story140_revivedOldMinter_verifierAccepts_cutoverRefuses() public {
+        if (!_fork()) return;
+        string memory path = _tmp("story140");
+        DeployNudgeDiscountHarness s = new DeployNudgeDiscountHarness(false, path, address(0));
+        s.run();
+        _markCompleted(path);
+        address m = address(s.minter());
+
+        VerifyNudgeDiscountHarness revived = new VerifyNudgeDiscountHarness(path, m);
+        revived.setUseCommittedReadditions(true);
+        vm.expectRevert(bytes("post: old minter is a committed re-addition but is paused"));
+        revived.run(); // still frozen: the re-addition demands the revival
+
+        _reviveOldMinter();
+        revived.run();
+        assertTrue(IPauserV2Fork(PAUSER_V2).isRegistered(OLD_MINTER), "0x0683 back on PauserV2");
+        assertFalse(INFTMinterOwnableFork(NFT_MINTER).authorizedMinters(OLD_MINTER), "no free-mint power");
+
+        VerifyNudgeDiscountHarness frozen = new VerifyNudgeDiscountHarness(path, m);
+        vm.expectRevert(bytes("post: old minter is not paused"));
+        frozen.run(); // without the re-addition the revived state is a violation
+
+        vm.prank(OWNER);
+        IOldMinterReviveFork(OLD_MINTER).setNudgeSize(5);
+        vm.expectRevert(bytes("post: revived old minter has nudgeSize != 0 (whale discount reopened)"));
+        revived.run();
+        vm.prank(OWNER);
+        IOldMinterReviveFork(OLD_MINTER).setNudgeSize(0);
+
+        DeployNudgeDiscountHarness again = new DeployNudgeDiscountHarness(false, path, m);
+        again.setUseCommittedReadditions(true);
+        vm.expectRevert(
+            bytes(
+                "refusing: the old minter 0x0683 is a committed PauserV2Registry re-addition (revived 2026-11-19, story 140) - this cutover is finished and its Phase 1 would re-freeze a live minter"
+            )
+        );
+        again.run();
+        assertTrue(IPauserV2Fork(PAUSER_V2).isRegistered(OLD_MINTER), "refused run left 0x0683 registered");
         vm.removeFile(path);
     }
     // ---------------- story 135: ratchet shutdown + day-1 maxBoost 0 ----------------

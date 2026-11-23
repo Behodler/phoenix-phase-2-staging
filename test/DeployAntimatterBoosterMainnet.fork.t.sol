@@ -218,7 +218,7 @@ contract DeployAntimatterBoosterMainnetForkTest is Test {
     address constant USDE = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
     address constant HOOK_EYE = 0x0F05c34d458dd8953864a56857a2bb67ecb22683;
     address constant MINTER_V1 = 0x435B0A1884bd0fb5667677C9eb0e59425b1477E5;
-    address constant BATCH_MINTER_RETIRED = 0x068395556b8c43eDf257DC54D109EA5910aE15c7;
+    address constant BATCH_MINTER_REVIVED = 0x068395556b8c43eDf257DC54D109EA5910aE15c7;
     string constant TMP_PREFIX = "server/deployments/progress.antimatter-booster.1.forktest-";
 
     function _fork() internal returns (bool) {
@@ -417,14 +417,10 @@ contract DeployAntimatterBoosterMainnetForkTest is Test {
         );
         unpatched.run();
 
-        // PRE-EXISTING mainnet state (not this story's): BatchNFTMinterMultiToken 0x0683...15c7 is committed to
-        // PauserV2Registry.postMigrationRemovals() by story 119 but is still registered on PauserV2 at the fork
-        // block, so the live `pauser-v2-verify` fails on it regardless of the booster. Model the pending retirement
-        // (PauserV2.unregister is unconditional) so this test isolates the booster's own registry entry.
-        if (IPauserV2Fork(PAUSER_V2).isRegistered(BATCH_MINTER_RETIRED)) {
-            vm.prank(OWNER);
-            IPauserV2Fork(PAUSER_V2).unregister(BATCH_MINTER_RETIRED);
-        }
+        // BatchNFTMinterMultiToken 0x0683...15c7 was frozen by story 119 and deliberately revived on 2026-11-19
+        // (before FORK_BLOCK): it is live on PauserV2 and committed in PauserV2Registry.postMigrationReadditions()
+        // (story 140), so the committed registry verifies with it registered. Never unregister it here.
+        assertTrue(IPauserV2Fork(PAUSER_V2).isRegistered(BATCH_MINTER_REVIVED), "0x0683 live on PauserV2 at FORK_BLOCK");
         VerifyPauserV2WithBooster pv = new VerifyPauserV2WithBooster();
         vm.expectRevert(
             bytes("verify: PauserV2 holds an address that is neither live nor a committed addition - see the log above")

@@ -214,6 +214,15 @@ That story points the UI's mainnet Pauser address at V2.
   register or unregister must append the address to `postMigrationAdditions()` or
   `postMigrationRemovals()` in `script/helpers/PauserV2Registry.sol` in the same change, or the
   verifier fails and names it.
+- **Re-adding a retired contract (story 140).** If the owner deliberately revives a contract that
+  is already in `postMigrationRemovals()` (`setPauser(PauserV2)`, then `PauserV2.register`), leave
+  its removal entry where it is (append only) and append the address to
+  `postMigrationReadditions()` in the same change. The re-addition overrides the removal: the
+  verifier then requires it to be registered with `pauser() == PauserV2`, and it reverts loudly
+  if a re-addition is not a committed removal (use `postMigrationAdditions()` for a new contract)
+  or is one of the RETIRED set. Example: BatchNFTMinterMultiToken `0x0683…15c7`, frozen by 119 and
+  revived on 2026-11-19. Retiring a re-added contract a second time is not supported by the
+  registry yet; design that before doing it on mainnet.
 - **Do not register anything with V1 again**, and do not unregister the retired set from V1.
   Unregistering costs transactions and changes nothing, because V1 is dead.
 - **Owner actions are now safe for the global pause**: `setPauser(x)` on one registrant, the owner

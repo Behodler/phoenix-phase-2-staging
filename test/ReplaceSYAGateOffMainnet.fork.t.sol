@@ -139,12 +139,30 @@ contract VerifyPauserV2WithEntries is VerifyPauserV2Migration {
         }
     }
 
+    /// @dev Story 140: the registry as committed BEFORE this cutover. FORK_BLOCK predates every committed entry
+    ///      (129's bonfire is appended by the test from its own fork deploy; 131, 119 and the 0x0683 re-addition
+    ///      have no code or a different state there), so the committed lists are cut to their pre-131 prefix (0).
+    uint256 internal constant ADDITIONS_BEFORE = 0;
+    uint256 internal constant REMOVALS_BEFORE = 0;
+
     function postMigrationAdditions() public view override returns (address[] memory) {
-        return _concat(super.postMigrationAdditions(), extraAdds);
+        return _concat(_prefix(super.postMigrationAdditions(), ADDITIONS_BEFORE), extraAdds);
     }
 
     function postMigrationRemovals() public view override returns (address[] memory) {
-        return _concat(super.postMigrationRemovals(), extraRemovals);
+        return _concat(_prefix(super.postMigrationRemovals(), REMOVALS_BEFORE), extraRemovals);
+    }
+
+    function postMigrationReadditions() public pure override returns (address[] memory a) {
+        a = new address[](0);
+    }
+
+    /// @dev First `n` entries of an append-only registry list: the list as committed before a later cutover.
+    function _prefix(address[] memory x, uint256 n) internal pure returns (address[] memory a) {
+        a = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            a[i] = x[i];
+        }
     }
 }
 

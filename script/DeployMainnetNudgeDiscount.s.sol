@@ -38,6 +38,12 @@ import {NudgePotForwarder} from "../src/periphery/NudgePotForwarder.sol";
  *         key `NudgeDiscountBatchMinter`). The pot no longer pays a winner-take-all USDC nudge: it sets a capped,
  *         discrete discount batch and is reserved for a deferred `buyAndBurn` (see `NudgeDiscountBuyAndBurn.s.sol`).
  *
+ *         HISTORICAL, FINISHED (story 140). This cutover was broadcast and its Phase 1 FROZE 0x0683. On 2026-11-19
+ *         the owner deliberately revived 0x0683 (nudge off, back on PauserV2) to keep serving the phlimbo UI's
+ *         plain batch mints; it is committed in `PauserV2Registry.postMigrationReadditions()`. While it is, `run()`
+ *         refuses at the top: a re-run would re-freeze a live minter and take it out of the global emergency stop.
+ *         Never unregister, re-point or pause 0x0683 from this script.
+ *
  * PHASES (every step is gated on CHAIN STATE and read back with a `require`, so a re-run after a gas stall, an RPC
  * drop or a Ledger timeout resumes where the chain stands, and a finished run sends nothing):
  *   0. Preflight, view only: book == pinned constants; NFTMinter configs(4) == UniPooler with prime token USDS;
@@ -194,6 +200,10 @@ contract DeployMainnetNudgeDiscount is NudgeDiscountMainnetBase {
         );
         if (!isPreview) require(_sender() == OWNER, "broadcast sender must be OWNER (--sender + Ledger)");
         _requireGateConstants();
+        require(
+            !_oldMinterRevived(),
+            "refusing: the old minter 0x0683 is a committed PauserV2Registry re-addition (revived 2026-11-19, story 140) - this cutover is finished and its Phase 1 would re-freeze a live minter"
+        );
 
         // ---- resolve the new minter: adopt from progress, or refuse a book entry with no progress ----
         address recorded = _progressMinter();
