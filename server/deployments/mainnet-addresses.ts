@@ -59,6 +59,7 @@
 // Updated 2026-11-18: nudge-discount minter cutover (story 119) — NudgeDiscountBatchMinter FILLED from progress.nudge-discount.1.json; BatchNFTMinter (old, paused) kept.
 // Updated 2026-11-21: AntimatterBooster added as a ZERO placeholder (story 138) so the key-set matches
 // ContractAddresses; fill it by hand after the human's mainnet AntimatterBooster broadcast.
+// Updated 2026-11-23: AntimatterBooster deployed (story 139) — AntimatterBooster FILLED from progress.antimatter-booster.1.json; OWNER phUSD mint revoked.
 import { ContractAddresses } from './addresses';
 
 
@@ -224,9 +225,10 @@ export const mainnetAddresses: ContractAddresses = {
   StableStakerV2: "0xA6d3fc83C91B8319D219cEB12B46e3dfF064B58F",
   // The Antimatter reward token StableStakerV2 pays instead of phUSD.
   Antimatter: "0x9CA92B527012DfC6Fdca7B7493C722D5901FF151",
-  // Story 138: AntimatterBooster (antimatter:005) - phUSD bonus on annihilations of under-represented
-  // stables. Not yet deployed on mainnet: zero placeholder until the human broadcasts it.
-  AntimatterBooster: "0x0000000000000000000000000000000000000000",
+  // Story 138/139: AntimatterBooster (antimatter:005) - phUSD bonus (15%) on annihilations of
+  // under-represented stables. Deployed + wired by DeployAntimatterBoosterMainnet (story 139),
+  // registered with PauserV2, and patched from progress.antimatter-booster.1.json.
+  AntimatterBooster: "0xbb8bF9C05160bB45A2ef920AfD09Bc4ab0258a2C",
   // NudgeRatchet dispatcher + its mint-debt hook — not yet deployed on mainnet (story 068).
   // Zero placeholders so this file still satisfies the ContractAddresses interface once the
   // local deploy added these fields. Patch by hand when they ship to mainnet.

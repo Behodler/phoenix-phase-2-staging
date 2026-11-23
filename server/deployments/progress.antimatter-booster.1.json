@@ -1,0 +1,12 @@
+{
+  "chainId": 1,
+  "contracts": {
+    "AntimatterBooster": {
+      "address": "0xbb8bF9C05160bB45A2ef920AfD09Bc4ab0258a2C",
+      "createNonce": 1976,
+      "deployed": true
+    }
+  },
+  "deploymentStatus": "completed",
+  "networkName": "mainnet"
+}

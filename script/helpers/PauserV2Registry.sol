@@ -32,10 +32,11 @@ pragma solidity ^0.8.26;
 abstract contract PauserV2Registry {
     /// @notice Contracts registered with PauserV2 after the migration (each with `pauser() == PauserV2`).
     function postMigrationAdditions() public view virtual returns (address[] memory a) {
-        a = new address[](3);
+        a = new address[](4);
         a[0] = 0xE5983721f009AB57d464e611C9A06B148cEC3Acc; // NFTBonfire (story 129)
         a[1] = 0x9d69c68F354575B95c1ebf7E87DB85BF3BFF2cE8; // StableYieldAccumulator, gate-free (story 131)
         a[2] = 0xD41235bC400BAEDD23aA416Db1F62c944981C42a; // BatchNFTMinterNudgeDiscount (story 119)
+        a[3] = 0xbb8bF9C05160bB45A2ef920AfD09Bc4ab0258a2C; // AntimatterBooster (story 139)
     }
 
     /// @notice Migration-set or added contracts later retired with `PauserV2.unregister`.
