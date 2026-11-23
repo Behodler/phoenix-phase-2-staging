@@ -1,0 +1,1 @@
+{"chainId":1,"networkName":"mainnet","deploymentStatus":"completed","contracts":{"StableYieldAccumulator":{"address":"0x8fA31DF58AC0C398D97F2f7d21370C67009B52a5","createNonce":0,"deployed":true},"SYAHarvester":{"address":"0x990f433803F0a5A2eac64EB204e596A5c4fB04BE","createNonce":0,"deployed":true}}}
